@@ -1,12 +1,11 @@
 const BASE_URL = "https://api.airtable.com/v0";
-const BASE_ID = process.env.AIRTABLE_BASE_ID!;
-const API_KEY = process.env.AIRTABLE_API_KEY!;
 
 export const TABLES = {
   POSTS: "tbljDi7YY46pQkQGH",
   DAILY_ACCOUNT_METRICS: "tblGnvjSCdr1zttJe",
   WEEKLY_SUMMARIES: "tblUinLyGAkmneFFZ",
   SOCIAL_ALERTS: "tbliPoyQSWCMmF5FH",
+  CONTENT_LIBRARY: "tbl5IMvmWyqGfuwSv",
 } as const;
 
 interface AirtableRecord {
@@ -20,6 +19,17 @@ interface AirtableResponse {
   offset?: string;
 }
 
+function getCredentials(): { baseId: string; apiKey: string } {
+  const baseId = process.env.AIRTABLE_BASE_ID;
+  const apiKey = process.env.AIRTABLE_API_KEY;
+  if (!baseId || !apiKey) {
+    throw new Error(
+      "Missing Airtable credentials (AIRTABLE_BASE_ID or AIRTABLE_API_KEY)",
+    );
+  }
+  return { baseId, apiKey };
+}
+
 async function fetchAllRecords(
   tableId: string,
   options: {
@@ -29,6 +39,7 @@ async function fetchAllRecords(
     maxRecords?: number;
   } = {},
 ): Promise<AirtableRecord[]> {
+  const { baseId, apiKey } = getCredentials();
   const allRecords: AirtableRecord[] = [];
   let offset: string | undefined;
 
@@ -51,9 +62,9 @@ async function fetchAllRecords(
       options.fields.forEach((f) => params.append("fields[]", f));
     }
 
-    const url = `${BASE_URL}/${BASE_ID}/${tableId}?${params.toString()}`;
+    const url = `${BASE_URL}/${baseId}/${tableId}?${params.toString()}`;
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${API_KEY}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
       next: { revalidate: 1800 },
     });
 
@@ -91,6 +102,13 @@ export async function getWeeklySummaries() {
 export async function getSocialAlerts() {
   return fetchAllRecords(TABLES.SOCIAL_ALERTS, {
     sort: [{ field: "Alert Date", direction: "desc" }],
+  });
+}
+
+export async function getContentLibrary() {
+  return fetchAllRecords(TABLES.CONTENT_LIBRARY, {
+    sort: [{ field: "Views", direction: "desc" }],
+    maxRecords: 100,
   });
 }
 

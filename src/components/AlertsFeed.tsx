@@ -1,10 +1,10 @@
 "use client";
 
 import { str } from "@/lib/utils";
-import type { Fields } from "@/lib/utils";
+import type { AirtableRecord } from "@/lib/utils";
 
 interface AlertsFeedProps {
-  alerts: Array<{ fields: Fields }>;
+  alerts: AirtableRecord[];
 }
 
 const severityColors: Record<string, string> = {
@@ -60,7 +60,7 @@ export default function AlertsFeed({ alerts }: AlertsFeedProps) {
           const icon = typeIcons[type] || "\u26A0\uFE0F";
 
           return (
-            <div key={i} className={`rounded-lg px-3 py-2 border text-xs ${colorClass}`}>
+            <div key={alert.id || i} className={`rounded-lg px-3 py-2 border text-xs ${colorClass}`}>
               <div className="flex items-center justify-between mb-1">
                 <span className="font-medium">
                   {icon} {type}

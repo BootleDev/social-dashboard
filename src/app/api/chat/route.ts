@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { getAllDashboardData } from "@/lib/airtable";
 import { num, str } from "@/lib/utils";
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  if (cookieStore.get("bootle_social_auth")?.value !== "authenticated") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Auth is enforced by middleware for all /api/* except /api/auth
+
+  let body: { message?: unknown; history?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid request body" },
+      { status: 400 },
+    );
   }
 
-  const { message } = await request.json();
+  const { message, history } = body;
 
   if (!message || typeof message !== "string") {
     return NextResponse.json({ error: "No message" }, { status: 400 });
@@ -22,23 +28,42 @@ export async function POST(request: Request) {
     );
   }
 
+  // Validate and sanitise conversation history (max 10 messages)
+  const validRoles = new Set(["user", "assistant"]);
+  const conversationHistory: Array<{ role: string; content: string }> = [];
+  if (Array.isArray(history)) {
+    for (const msg of history.slice(-10)) {
+      if (
+        msg &&
+        typeof msg === "object" &&
+        typeof msg.role === "string" &&
+        validRoles.has(msg.role) &&
+        typeof msg.content === "string" &&
+        msg.content.length <= 4000
+      ) {
+        conversationHistory.push({
+          role: msg.role,
+          content: msg.content,
+        });
+      }
+    }
+  }
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json({ error: "Chat not configured" }, { status: 500 });
+  }
+
   try {
     const data = await getAllDashboardData();
 
     // Last 14 days of daily metrics
-    const recentDaily = data.dailyMetrics
-      .map((r) => r.fields)
-      .slice(0, 28); // 14 days x 2 platforms
+    const recentDaily = data.dailyMetrics.map((r) => r.fields).slice(0, 28); // 14 days x 2 platforms
 
     // Last 50 posts with metrics
-    const recentPosts = data.posts
-      .slice(0, 50)
-      .map((r) => r.fields);
+    const recentPosts = data.posts.slice(0, 50).map((r) => r.fields);
 
     // Recent alerts
-    const recentAlerts = data.alerts
-      .slice(0, 20)
-      .map((r) => r.fields);
+    const recentAlerts = data.alerts.slice(0, 20).map((r) => r.fields);
 
     // Platform follower counts (latest)
     const latestIG = data.dailyMetrics.find(
@@ -48,8 +73,12 @@ export async function POST(request: Request) {
       (r) => str(r.fields["Platform"]).toLowerCase() === "facebook",
     );
 
-    const igFollowers = latestIG ? num(latestIG.fields["Followers"]) : "unknown";
-    const fbFollowers = latestFB ? num(latestFB.fields["Followers"]) : "unknown";
+    const igFollowers = latestIG
+      ? num(latestIG.fields["Followers"])
+      : "unknown";
+    const fbFollowers = latestFB
+      ? num(latestFB.fields["Followers"])
+      : "unknown";
 
     const context = `You are an expert social media analyst for Bootle, a Swedish modular drinkware brand.
 You have access to the latest organic social media performance data across Instagram and Facebook.
@@ -85,7 +114,7 @@ Industry benchmarks for reference: Instagram avg ER 1-3%, Facebook avg ER 0.5-1.
         model: "claude-sonnet-4-6",
         max_tokens: 1024,
         system: context,
-        messages: [{ role: "user", content: message }],
+        messages: [...conversationHistory, { role: "user", content: message }],
       }),
     });
 
@@ -99,7 +128,10 @@ Industry benchmarks for reference: Instagram avg ER 1-3%, Facebook avg ER 0.5-1.
 
     return NextResponse.json({ reply });
   } catch (err) {
-    const message_ = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message_ }, { status: 500 });
+    console.error("Chat API error:", err);
+    return NextResponse.json(
+      { error: "Failed to generate response" },
+      { status: 500 },
+    );
   }
 }

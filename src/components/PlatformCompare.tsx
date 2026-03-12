@@ -14,6 +14,8 @@ import {
   avgField,
   sumField,
   splitByPlatform,
+  buildUnifiedDates,
+  alignToDateArray,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -22,18 +24,27 @@ interface PlatformCompareProps {
   dailyMetrics: AirtableRecord[];
 }
 
-export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompareProps) {
+export default function PlatformCompare({
+  posts,
+  dailyMetrics,
+}: PlatformCompareProps) {
   const { instagram: igMetrics, facebook: fbMetrics } = useMemo(
     () => splitByPlatform(dailyMetrics),
     [dailyMetrics],
   );
 
   const igPosts = useMemo(
-    () => posts.filter((p) => str(p.fields["Platform"]).toLowerCase() === "instagram"),
+    () =>
+      posts.filter(
+        (p) => str(p.fields["Platform"]).toLowerCase() === "instagram",
+      ),
     [posts],
   );
   const fbPosts = useMemo(
-    () => posts.filter((p) => str(p.fields["Platform"]).toLowerCase() === "facebook"),
+    () =>
+      posts.filter(
+        (p) => str(p.fields["Platform"]).toLowerCase() === "facebook",
+      ),
     [posts],
   );
 
@@ -49,8 +60,10 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
         totalReach: sumField(igMetrics, "Reach"),
         totalImpressions: sumField(igMetrics, "Impressions"),
         posts: igPosts.length,
-        avgSaves: igPosts.length > 0 ? sumField(igPosts, "Saves") / igPosts.length : 0,
-        avgShares: igPosts.length > 0 ? sumField(igPosts, "Shares") / igPosts.length : 0,
+        avgSaves:
+          igPosts.length > 0 ? sumField(igPosts, "Saves") / igPosts.length : 0,
+        avgShares:
+          igPosts.length > 0 ? sumField(igPosts, "Shares") / igPosts.length : 0,
         profileViews: sumField(igMetrics, "Profile Views"),
         webClicks: sumField(igMetrics, "Website Clicks"),
       },
@@ -60,8 +73,10 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
         totalReach: sumField(fbMetrics, "Reach"),
         totalImpressions: sumField(fbMetrics, "Impressions"),
         posts: fbPosts.length,
-        avgSaves: fbPosts.length > 0 ? sumField(fbPosts, "Saves") / fbPosts.length : 0,
-        avgShares: fbPosts.length > 0 ? sumField(fbPosts, "Shares") / fbPosts.length : 0,
+        avgSaves:
+          fbPosts.length > 0 ? sumField(fbPosts, "Saves") / fbPosts.length : 0,
+        avgShares:
+          fbPosts.length > 0 ? sumField(fbPosts, "Shares") / fbPosts.length : 0,
         profileViews: sumField(fbMetrics, "Profile Views"),
         webClicks: sumField(fbMetrics, "Website Clicks"),
       },
@@ -69,65 +84,74 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
   }, [igMetrics, fbMetrics, igPosts, fbPosts]);
 
   // Bar comparison chart
-  const comparisonData = useMemo(() => ({
-    labels: ["Avg ER %", "Avg Saves/Post", "Avg Shares/Post"],
-    datasets: [
-      {
-        label: "Instagram",
-        data: [kpis.ig.avgER, kpis.ig.avgSaves, kpis.ig.avgShares],
-        backgroundColor: CHART_COLORS.purple + "80",
-        borderColor: CHART_COLORS.purple,
-        borderWidth: 1,
-      },
-      {
-        label: "Facebook",
-        data: [kpis.fb.avgER, kpis.fb.avgSaves, kpis.fb.avgShares],
-        backgroundColor: CHART_COLORS.blue + "80",
-        borderColor: CHART_COLORS.blue,
-        borderWidth: 1,
-      },
-    ],
-  }), [kpis]);
+  const comparisonData = useMemo(
+    () => ({
+      labels: ["Avg ER %", "Avg Saves/Post", "Avg Shares/Post"],
+      datasets: [
+        {
+          label: "Instagram",
+          data: [kpis.ig.avgER, kpis.ig.avgSaves, kpis.ig.avgShares],
+          backgroundColor: CHART_COLORS.purple + "80",
+          borderColor: CHART_COLORS.purple,
+          borderWidth: 1,
+        },
+        {
+          label: "Facebook",
+          data: [kpis.fb.avgER, kpis.fb.avgSaves, kpis.fb.avgShares],
+          backgroundColor: CHART_COLORS.blue + "80",
+          borderColor: CHART_COLORS.blue,
+          borderWidth: 1,
+        },
+      ],
+    }),
+    [kpis],
+  );
+
+  // Unified date array
+  const allDates = useMemo(
+    () => buildUnifiedDates(igMetrics, fbMetrics),
+    [igMetrics, fbMetrics],
+  );
 
   // ER trend comparison
   const erTrendData = useMemo(() => {
-    const igSorted = [...igMetrics].reverse();
-    const fbSorted = [...fbMetrics].reverse();
-    const labels = igSorted.map((r) => str(r.fields["Date"]).split("T")[0].slice(5));
+    const labels = allDates.map((d) => d.slice(5));
 
     return {
       labels,
       datasets: [
         {
           label: "Instagram ER",
-          data: igSorted.map((r) => num(r.fields["Engagement Rate"]) * 100),
+          data: alignToDateArray(igMetrics, allDates, "Engagement Rate").map(
+            (v) => v * 100,
+          ),
           borderColor: CHART_COLORS.purple,
           tension: 0.3,
           pointRadius: 0,
         },
         {
           label: "Facebook ER",
-          data: fbSorted.map((r) => num(r.fields["Engagement Rate"]) * 100),
+          data: alignToDateArray(fbMetrics, allDates, "Engagement Rate").map(
+            (v) => v * 100,
+          ),
           borderColor: CHART_COLORS.blue,
           tension: 0.3,
           pointRadius: 0,
         },
       ],
     };
-  }, [igMetrics, fbMetrics]);
+  }, [igMetrics, fbMetrics, allDates]);
 
   // Reach comparison
   const reachTrendData = useMemo(() => {
-    const igSorted = [...igMetrics].reverse();
-    const fbSorted = [...fbMetrics].reverse();
-    const labels = igSorted.map((r) => str(r.fields["Date"]).split("T")[0].slice(5));
+    const labels = allDates.map((d) => d.slice(5));
 
     return {
       labels,
       datasets: [
         {
           label: "Instagram Reach",
-          data: igSorted.map((r) => num(r.fields["Reach"])),
+          data: alignToDateArray(igMetrics, allDates, "Reach"),
           borderColor: CHART_COLORS.purple,
           backgroundColor: "rgba(168, 85, 247, 0.1)",
           fill: true,
@@ -136,7 +160,7 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
         },
         {
           label: "Facebook Reach",
-          data: fbSorted.map((r) => num(r.fields["Reach"])),
+          data: alignToDateArray(fbMetrics, allDates, "Reach"),
           borderColor: CHART_COLORS.blue,
           backgroundColor: "rgba(59, 130, 246, 0.1)",
           fill: true,
@@ -145,7 +169,7 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
         },
       ],
     };
-  }, [igMetrics, fbMetrics]);
+  }, [igMetrics, fbMetrics, allDates]);
 
   // Post type breakdown per platform
   const postTypeComparison = useMemo(() => {
@@ -161,7 +185,9 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
       fbTypes.set(t, (fbTypes.get(t) ?? 0) + 1);
     }
 
-    const allTypes = Array.from(new Set([...igTypes.keys(), ...fbTypes.keys()]));
+    const allTypes = Array.from(
+      new Set([...igTypes.keys(), ...fbTypes.keys()]),
+    );
 
     return {
       labels: allTypes,
@@ -180,6 +206,22 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
     };
   }, [igPosts, fbPosts]);
 
+  if (dailyMetrics.length === 0 && posts.length === 0) {
+    return (
+      <div
+        className="rounded-xl p-8 text-center"
+        style={{
+          background: "var(--bg-card)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+          No platform data for this period. Try expanding the date range.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Side-by-side KPI cards */}
@@ -187,35 +229,81 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
         {/* Instagram Column */}
         <div
           className="rounded-xl p-5 space-y-3"
-          style={{ background: "var(--bg-card)", border: "1px solid rgba(168, 85, 247, 0.3)" }}
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid rgba(168, 85, 247, 0.3)",
+          }}
         >
-          <h3 className="text-sm font-semibold" style={{ color: CHART_COLORS.purple }}>
+          <h3
+            className="text-sm font-semibold"
+            style={{ color: CHART_COLORS.purple }}
+          >
             Instagram
           </h3>
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Followers</p>
-              <p className="text-lg font-bold">{formatNumber(kpis.ig.followers)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Followers
+              </p>
+              <p className="text-lg font-bold">
+                {formatNumber(kpis.ig.followers)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Avg ER</p>
-              <p className="text-lg font-bold">{formatPercent(kpis.ig.avgER)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Avg ER
+              </p>
+              <p className="text-lg font-bold">
+                {formatPercent(kpis.ig.avgER)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Total Reach</p>
-              <p className="text-lg font-bold">{formatNumber(kpis.ig.totalReach)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Total Reach
+              </p>
+              <p className="text-lg font-bold">
+                {formatNumber(kpis.ig.totalReach)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Posts</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Posts
+              </p>
               <p className="text-lg font-bold">{kpis.ig.posts}</p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Profile Views</p>
-              <p className="text-lg font-bold">{formatNumber(kpis.ig.profileViews)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Profile Views
+              </p>
+              <p className="text-lg font-bold">
+                {formatNumber(kpis.ig.profileViews)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Web Clicks</p>
-              <p className="text-lg font-bold">{formatNumber(kpis.ig.webClicks)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Web Clicks
+              </p>
+              <p className="text-lg font-bold">
+                {formatNumber(kpis.ig.webClicks)}
+              </p>
             </div>
           </div>
         </div>
@@ -223,35 +311,81 @@ export default function PlatformCompare({ posts, dailyMetrics }: PlatformCompare
         {/* Facebook Column */}
         <div
           className="rounded-xl p-5 space-y-3"
-          style={{ background: "var(--bg-card)", border: "1px solid rgba(59, 130, 246, 0.3)" }}
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid rgba(59, 130, 246, 0.3)",
+          }}
         >
-          <h3 className="text-sm font-semibold" style={{ color: CHART_COLORS.blue }}>
+          <h3
+            className="text-sm font-semibold"
+            style={{ color: CHART_COLORS.blue }}
+          >
             Facebook
           </h3>
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Followers</p>
-              <p className="text-lg font-bold">{formatNumber(kpis.fb.followers)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Followers
+              </p>
+              <p className="text-lg font-bold">
+                {formatNumber(kpis.fb.followers)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Avg ER</p>
-              <p className="text-lg font-bold">{formatPercent(kpis.fb.avgER)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Avg ER
+              </p>
+              <p className="text-lg font-bold">
+                {formatPercent(kpis.fb.avgER)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Total Reach</p>
-              <p className="text-lg font-bold">{formatNumber(kpis.fb.totalReach)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Total Reach
+              </p>
+              <p className="text-lg font-bold">
+                {formatNumber(kpis.fb.totalReach)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Posts</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Posts
+              </p>
               <p className="text-lg font-bold">{kpis.fb.posts}</p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Profile Views</p>
-              <p className="text-lg font-bold">{formatNumber(kpis.fb.profileViews)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Profile Views
+              </p>
+              <p className="text-lg font-bold">
+                {formatNumber(kpis.fb.profileViews)}
+              </p>
             </div>
             <div>
-              <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Web Clicks</p>
-              <p className="text-lg font-bold">{formatNumber(kpis.fb.webClicks)}</p>
+              <p
+                className="text-[10px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Web Clicks
+              </p>
+              <p className="text-lg font-bold">
+                {formatNumber(kpis.fb.webClicks)}
+              </p>
             </div>
           </div>
         </div>

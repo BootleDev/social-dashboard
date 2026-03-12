@@ -2,7 +2,6 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
-  LogarithmicScale,
   PointElement,
   LineElement,
   BarElement,
@@ -15,7 +14,6 @@ import {
 ChartJS.register(
   CategoryScale,
   LinearScale,
-  LogarithmicScale,
   PointElement,
   LineElement,
   BarElement,

@@ -5,13 +5,15 @@ import Overview from "@/components/Overview";
 import ContentAnalysis from "@/components/ContentAnalysis";
 import AudienceGrowth from "@/components/AudienceGrowth";
 import PlatformCompare from "@/components/PlatformCompare";
+import CompetitorInsights from "@/components/CompetitorInsights";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
 import ChatBox from "@/components/ChatBox";
-import { str } from "@/lib/utils";
+import LoadingSkeleton from "@/components/LoadingSkeleton";
+import { str, getComparisonPeriod } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
-type Tab = "overview" | "content" | "audience" | "compare";
+type Tab = "overview" | "content" | "audience" | "compare" | "competitors";
 
 interface DashboardData {
   posts: AirtableRecord[];
@@ -45,6 +47,12 @@ export default function DashboardPage() {
     end: null,
     label: "All Time",
   });
+  const [competitorRecords, setCompetitorRecords] = useState<AirtableRecord[]>(
+    [],
+  );
+  const [competitorLoading, setCompetitorLoading] = useState(false);
+  const [competitorError, setCompetitorError] = useState("");
+  const [competitorFetched, setCompetitorFetched] = useState(false);
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -63,9 +71,28 @@ export default function DashboardPage() {
     fetchData();
   }, [fetchData]);
 
+  // Lazy-fetch competitor data when tab is selected
+  useEffect(() => {
+    if (tab !== "competitors" || competitorFetched) return;
+    setCompetitorLoading(true);
+    setCompetitorError("");
+    fetch("/api/competitors")
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((d) => {
+        setCompetitorRecords(d.records);
+        setCompetitorFetched(true);
+      })
+      .catch((err) => setCompetitorError(err.message))
+      .finally(() => setCompetitorLoading(false));
+  }, [tab, competitorFetched]);
+
   // Filter data by date range
   const filteredPosts = useMemo(
-    () => (data ? filterByDateRange(data.posts, "Published At", dateRange) : []),
+    () =>
+      data ? filterByDateRange(data.posts, "Published At", dateRange) : [],
     [data, dateRange],
   );
   const filteredDaily = useMemo(
@@ -76,6 +103,38 @@ export default function DashboardPage() {
     () => (data ? filterByDateRange(data.alerts, "Alert Date", dateRange) : []),
     [data, dateRange],
   );
+
+  // Weekly summaries filtered by date range
+  const filteredSummaries = useMemo(
+    () =>
+      data
+        ? filterByDateRange(data.weeklySummaries, "Week Start", dateRange)
+        : [],
+    [data, dateRange],
+  );
+
+  // Comparison period metrics (same duration, immediately before selected range)
+  const comparisonDaily = useMemo(() => {
+    if (!data) return [];
+    const comp = getComparisonPeriod(dateRange.start, dateRange.end);
+    if (!comp) return [];
+    return filterByDateRange(data.dailyMetrics, "Date", {
+      start: comp.compStart,
+      end: comp.compEnd,
+      label: "",
+    });
+  }, [data, dateRange]);
+
+  const comparisonPosts = useMemo(() => {
+    if (!data) return [];
+    const comp = getComparisonPeriod(dateRange.start, dateRange.end);
+    if (!comp) return [];
+    return filterByDateRange(data.posts, "Published At", {
+      start: comp.compStart,
+      end: comp.compEnd,
+      label: "",
+    });
+  }, [data, dateRange]);
 
   // Latest data date
   const latestDataDate = useMemo(() => {
@@ -93,6 +152,7 @@ export default function DashboardPage() {
     { key: "content", label: "Content Analysis" },
     { key: "audience", label: "Audience & Growth" },
     { key: "compare", label: "Platform Compare" },
+    { key: "competitors", label: "Competitors" },
   ];
 
   return (
@@ -154,16 +214,21 @@ export default function DashboardPage() {
           <nav
             className="flex gap-1 rounded-lg p-1"
             style={{ background: "var(--bg-secondary)" }}
+            role="tablist"
+            aria-label="Dashboard sections"
           >
             {tabs.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setTab(t.key)}
+                role="tab"
+                aria-selected={tab === t.key}
                 className={`px-3 py-2 rounded-md text-xs font-medium transition-all ${
                   tab === t.key ? "text-white" : ""
                 }`}
                 style={{
-                  background: tab === t.key ? "var(--accent-purple)" : "transparent",
+                  background:
+                    tab === t.key ? "var(--accent-purple)" : "transparent",
                   color: tab === t.key ? "#fff" : "var(--text-secondary)",
                 }}
               >
@@ -176,16 +241,7 @@ export default function DashboardPage() {
 
       {/* Content */}
       <main className="p-6 max-w-[1400px] mx-auto">
-        {loading && (
-          <div className="flex items-center justify-center h-64">
-            <div
-              className="text-sm animate-pulse"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Loading dashboard data...
-            </div>
-          </div>
-        )}
+        {loading && <LoadingSkeleton />}
 
         {error && (
           <div className="rounded-xl p-6 border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
@@ -194,17 +250,18 @@ export default function DashboardPage() {
         )}
 
         {data && !loading && (
-          <>
+          <div role="tabpanel">
             {tab === "overview" && (
               <Overview
                 posts={filteredPosts}
                 dailyMetrics={filteredDaily}
                 alerts={filteredAlerts}
+                weeklySummaries={filteredSummaries}
+                prevPosts={comparisonPosts}
+                prevDailyMetrics={comparisonDaily}
               />
             )}
-            {tab === "content" && (
-              <ContentAnalysis posts={filteredPosts} />
-            )}
+            {tab === "content" && <ContentAnalysis posts={filteredPosts} />}
             {tab === "audience" && (
               <AudienceGrowth
                 posts={filteredPosts}
@@ -217,7 +274,14 @@ export default function DashboardPage() {
                 dailyMetrics={filteredDaily}
               />
             )}
-          </>
+            {tab === "competitors" && (
+              <CompetitorInsights
+                records={competitorRecords}
+                loading={competitorLoading}
+                error={competitorError}
+              />
+            )}
+          </div>
         )}
       </main>
 

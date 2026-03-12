@@ -58,6 +58,8 @@ export default function KPICard({
         {tooltip && (
           <span
             title={tooltip}
+            aria-label={tooltip}
+            role="img"
             className="cursor-help opacity-50 hover:opacity-100"
           >
             i

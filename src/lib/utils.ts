@@ -92,8 +92,8 @@ export function postingHeatmap(
     if (!dateStr) continue;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) continue;
-    const day = d.getDay();
-    const hour = d.getHours();
+    const day = d.getUTCDay();
+    const hour = d.getUTCHours();
     const key = `${day}-${hour}`;
     const er = num(p.fields["Engagement Rate"]);
     if (!grid.has(key)) grid.set(key, { totalER: 0, count: 0 });
@@ -108,9 +108,10 @@ export function postingHeatmap(
 }
 
 /** Split daily metrics by platform. */
-export function splitByPlatform(
-  metrics: AirtableRecord[],
-): { instagram: AirtableRecord[]; facebook: AirtableRecord[] } {
+export function splitByPlatform(metrics: AirtableRecord[]): {
+  instagram: AirtableRecord[];
+  facebook: AirtableRecord[];
+} {
   const instagram: AirtableRecord[] = [];
   const facebook: AirtableRecord[] = [];
 
@@ -143,4 +144,98 @@ export function sumField(records: AirtableRecord[], field: string): number {
 export function avgField(records: AirtableRecord[], field: string): number {
   if (records.length === 0) return 0;
   return sumField(records, field) / records.length;
+}
+
+/** Build unified date labels from multiple platform metric arrays, sorted ascending. */
+export function buildUnifiedDates(
+  ...metricArrays: AirtableRecord[][]
+): string[] {
+  const dateSet = new Set<string>();
+  for (const arr of metricArrays) {
+    for (const r of arr) {
+      const d = str(r.fields["Date"]).split("T")[0];
+      if (d) dateSet.add(d);
+    }
+  }
+  return Array.from(dateSet).sort();
+}
+
+/** Calculate the comparison period (same duration, immediately before the selected range). */
+export function getComparisonPeriod(
+  startDate: string | null,
+  endDate: string | null,
+): { compStart: string; compEnd: string } | null {
+  if (!startDate || !endDate) {
+    // "All Time" — compare last 30 days vs 30 days before
+    const now = new Date();
+    const start = new Date(now);
+    start.setUTCDate(start.getUTCDate() - 30);
+    const compEnd = new Date(start);
+    compEnd.setUTCDate(compEnd.getUTCDate() - 1);
+    const compStart = new Date(compEnd);
+    compStart.setUTCDate(compStart.getUTCDate() - 29);
+    return {
+      compStart: compStart.toISOString().split("T")[0],
+      compEnd: compEnd.toISOString().split("T")[0],
+    };
+  }
+
+  const s = new Date(startDate + "T00:00:00Z");
+  const e = new Date(endDate + "T00:00:00Z");
+  const durationMs = e.getTime() - s.getTime();
+  const compEnd = new Date(s.getTime() - 86400000); // day before start
+  const compStart = new Date(compEnd.getTime() - durationMs);
+
+  return {
+    compStart: compStart.toISOString().split("T")[0],
+    compEnd: compEnd.toISOString().split("T")[0],
+  };
+}
+
+/** Count hashtag frequency across posts. */
+export function hashtagFrequency(
+  posts: AirtableRecord[],
+): Array<{ tag: string; count: number; avgER: number }> {
+  const tagMap = new Map<string, { count: number; totalER: number }>();
+
+  for (const p of posts) {
+    const hashtags = str(p.fields["Hashtags"]);
+    if (!hashtags) continue;
+    const tags = hashtags
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => t.length > 0);
+    const er = num(p.fields["Engagement Rate"]);
+
+    for (const tag of tags) {
+      const existing = tagMap.get(tag) ?? { count: 0, totalER: 0 };
+      tagMap.set(tag, {
+        count: existing.count + 1,
+        totalER: existing.totalER + er,
+      });
+    }
+  }
+
+  return Array.from(tagMap.entries())
+    .map(([tag, { count, totalER }]) => ({
+      tag,
+      count,
+      avgER: count > 0 ? totalER / count : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Align metric values to a shared date array, filling gaps with a default. */
+export function alignToDateArray(
+  metrics: AirtableRecord[],
+  dates: string[],
+  field: string,
+  defaultVal = 0,
+): number[] {
+  const byDate = new Map<string, number>();
+  for (const r of metrics) {
+    const d = str(r.fields["Date"]).split("T")[0];
+    if (d) byDate.set(d, num(r.fields[field]));
+  }
+  return dates.map((d) => byDate.get(d) ?? defaultVal);
 }

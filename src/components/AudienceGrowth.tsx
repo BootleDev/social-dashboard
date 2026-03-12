@@ -13,6 +13,8 @@ import {
   pctChange,
   splitByPlatform,
   sumField,
+  buildUnifiedDates,
+  alignToDateArray,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -30,20 +32,22 @@ export default function AudienceGrowth({
     [dailyMetrics],
   );
 
+  // Unified date array
+  const allDates = useMemo(
+    () => buildUnifiedDates(igMetrics, fbMetrics),
+    [igMetrics, fbMetrics],
+  );
+
   // Follower growth with daily change
   const followerGrowthData = useMemo(() => {
-    const igSorted = [...igMetrics].reverse();
-    const fbSorted = [...fbMetrics].reverse();
-    const labels = igSorted.map((r) =>
-      str(r.fields["Date"]).split("T")[0].slice(5),
-    );
+    const labels = allDates.map((d) => d.slice(5));
 
     return {
       labels,
       datasets: [
         {
           label: "Instagram Followers",
-          data: igSorted.map((r) => num(r.fields["Followers"])),
+          data: alignToDateArray(igMetrics, allDates, "Followers"),
           borderColor: CHART_COLORS.purple,
           backgroundColor: "rgba(168, 85, 247, 0.1)",
           fill: true,
@@ -53,7 +57,7 @@ export default function AudienceGrowth({
         },
         {
           label: "Facebook Followers",
-          data: fbSorted.map((r) => num(r.fields["Followers"])),
+          data: alignToDateArray(fbMetrics, allDates, "Followers"),
           borderColor: CHART_COLORS.blue,
           backgroundColor: "rgba(59, 130, 246, 0.1)",
           fill: true,
@@ -63,7 +67,7 @@ export default function AudienceGrowth({
         },
         {
           label: "IG Daily Gain",
-          data: igSorted.map((r) => num(r.fields["Followers Gained"])),
+          data: alignToDateArray(igMetrics, allDates, "Followers Gained"),
           borderColor: CHART_COLORS.green,
           backgroundColor: CHART_COLORS.green + "20",
           fill: true,
@@ -74,7 +78,7 @@ export default function AudienceGrowth({
         },
       ],
     };
-  }, [igMetrics, fbMetrics]);
+  }, [igMetrics, fbMetrics, allDates]);
 
   const followerGrowthOptions = {
     ...defaultOptions,
@@ -96,61 +100,53 @@ export default function AudienceGrowth({
 
   // Reach trend
   const reachData = useMemo(() => {
-    const igSorted = [...igMetrics].reverse();
-    const fbSorted = [...fbMetrics].reverse();
-    const labels = igSorted.map((r) =>
-      str(r.fields["Date"]).split("T")[0].slice(5),
-    );
+    const labels = allDates.map((d) => d.slice(5));
 
     return {
       labels,
       datasets: [
         {
           label: "Instagram Reach",
-          data: igSorted.map((r) => num(r.fields["Reach"])),
+          data: alignToDateArray(igMetrics, allDates, "Reach"),
           borderColor: CHART_COLORS.purple,
           tension: 0.3,
           pointRadius: 0,
         },
         {
           label: "Facebook Reach",
-          data: fbSorted.map((r) => num(r.fields["Reach"])),
+          data: alignToDateArray(fbMetrics, allDates, "Reach"),
           borderColor: CHART_COLORS.blue,
           tension: 0.3,
           pointRadius: 0,
         },
       ],
     };
-  }, [igMetrics, fbMetrics]);
+  }, [igMetrics, fbMetrics, allDates]);
 
   // Profile views trend
   const profileViewsData = useMemo(() => {
-    const igSorted = [...igMetrics].reverse();
-    const fbSorted = [...fbMetrics].reverse();
-    const labels = igSorted.map((r) =>
-      str(r.fields["Date"]).split("T")[0].slice(5),
-    );
+    const labels = allDates.map((d) => d.slice(5));
 
     return {
       labels,
       datasets: [
         {
           label: "Instagram Profile Views",
-          data: igSorted.map((r) => num(r.fields["Profile Views"])),
+          data: alignToDateArray(igMetrics, allDates, "Profile Views"),
           backgroundColor: CHART_COLORS.purple + "60",
           borderColor: CHART_COLORS.purple,
           borderWidth: 1,
         },
         {
           label: "Facebook Page Views",
-          data: fbSorted.map((r) => num(r.fields["Profile Views"])),
+          data: alignToDateArray(fbMetrics, allDates, "Profile Views"),
           backgroundColor: CHART_COLORS.blue + "60",
           borderColor: CHART_COLORS.blue,
           borderWidth: 1,
         },
       ],
     };
-  }, [igMetrics, fbMetrics]);
+  }, [igMetrics, fbMetrics, allDates]);
 
   // KPIs
   const kpis = useMemo(() => {
@@ -180,6 +176,22 @@ export default function AudienceGrowth({
       followsFromPosts,
     };
   }, [igMetrics, fbMetrics, dailyMetrics, posts]);
+
+  if (dailyMetrics.length === 0) {
+    return (
+      <div
+        className="rounded-xl p-8 text-center"
+        style={{
+          background: "var(--bg-card)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+          No audience data for this period. Try expanding the date range.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

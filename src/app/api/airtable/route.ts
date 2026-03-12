@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import {
   getAllDashboardData,
   getPosts,
@@ -9,10 +8,7 @@ import {
 } from "@/lib/airtable";
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  if (cookieStore.get("bootle_social_auth")?.value !== "authenticated") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Auth is enforced by middleware for all /api/* except /api/auth
 
   const { searchParams } = new URL(request.url);
   const table = searchParams.get("table");
@@ -38,7 +34,7 @@ export async function GET(request: Request) {
     const data = await getAllDashboardData();
     return NextResponse.json(data);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("Airtable API error:", err);
+    return NextResponse.json({ error: "Failed to load data" }, { status: 500 });
   }
 }

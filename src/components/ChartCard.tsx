@@ -1,8 +1,10 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 interface ChartCardProps {
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
   height?: string;
   tooltip?: string;
 }
@@ -29,6 +31,8 @@ export default function ChartCard({
         {tooltip && (
           <span
             title={tooltip}
+            aria-label={tooltip}
+            role="img"
             className="cursor-help opacity-50 hover:opacity-100 text-xs"
           >
             i

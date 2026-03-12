@@ -14,16 +14,23 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const res = await fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    });
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
 
-    if (res.ok) {
-      router.push("/dashboard");
-    } else {
-      setError("Wrong password");
+      if (res.ok) {
+        router.push("/dashboard");
+        return;
+      }
+
+      const data = await res.json().catch(() => null);
+      setError(data?.error || "Wrong password");
+    } catch {
+      setError("Network error — check your connection");
+    } finally {
       setLoading(false);
     }
   }
@@ -32,18 +39,26 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center">
       <div
         className="w-full max-w-sm p-8 rounded-2xl"
-        style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
+        style={{
+          background: "var(--bg-card)",
+          border: "1px solid var(--border)",
+        }}
       >
         <h1 className="text-2xl font-bold mb-1">Bootle</h1>
         <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
           Social Intelligence Dashboard
         </p>
         <form onSubmit={handleSubmit}>
+          <label htmlFor="dashboard-password" className="sr-only">
+            Password
+          </label>
           <input
+            id="dashboard-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
+            aria-label="Dashboard password"
             className="w-full px-4 py-3 rounded-lg text-sm outline-none mb-4"
             style={{
               background: "var(--bg-secondary)",
@@ -53,7 +68,11 @@ export default function LoginPage() {
             autoFocus
           />
           {error && (
-            <p className="text-sm mb-3" style={{ color: "var(--accent-red)" }}>
+            <p
+              className="text-sm mb-3"
+              style={{ color: "var(--accent-red)" }}
+              aria-live="polite"
+            >
               {error}
             </p>
           )}
