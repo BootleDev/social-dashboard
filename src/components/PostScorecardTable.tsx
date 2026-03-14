@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { num, str, formatNumber, formatPercent } from "@/lib/utils";
+import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 import { exportToCSV } from "@/lib/csv";
 
@@ -19,9 +20,7 @@ interface PostScorecardTableProps {
   posts: AirtableRecord[];
 }
 
-export default function PostScorecardTable({
-  posts,
-}: PostScorecardTableProps) {
+export default function PostScorecardTable({ posts }: PostScorecardTableProps) {
   const [sortBy, setSortBy] = useState<SortField>("Engagement Rate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -150,6 +149,9 @@ export default function PostScorecardTable({
             <th scope="col" className="text-right py-2 px-2">
               Comments
             </th>
+            <th scope="col" className="text-center py-2 px-2">
+              Link
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -177,15 +179,11 @@ export default function PostScorecardTable({
               <td className="py-2 px-2 text-right text-green-400 font-medium">
                 {formatPercent(num(p.fields["Engagement Rate"]) * 100)}
               </td>
-              <td className="py-2 px-2 text-right">
-                {num(p.fields["Saves"])}
-              </td>
+              <td className="py-2 px-2 text-right">{num(p.fields["Saves"])}</td>
               <td className="py-2 px-2 text-right">
                 {num(p.fields["Shares"])}
               </td>
-              <td className="py-2 px-2 text-right">
-                {num(p.fields["Likes"])}
-              </td>
+              <td className="py-2 px-2 text-right">{num(p.fields["Likes"])}</td>
               <td className="py-2 px-2 text-right">
                 {num(p.fields["Video Views"]) > 0
                   ? formatNumber(num(p.fields["Video Views"]))
@@ -199,15 +197,42 @@ export default function PostScorecardTable({
               <td className="py-2 px-2 text-right">
                 {num(p.fields["Comments"])}
               </td>
+              <td className="py-2 px-2 text-center">
+                {str(p.fields["Media URL"]) ? (
+                  <a
+                    href={str(p.fields["Media URL"])}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center transition-opacity hover:opacity-80"
+                    style={{
+                      color: getPlatformConfig(str(p.fields["Platform"])).color,
+                    }}
+                    title={`View on ${getPlatformConfig(str(p.fields["Platform"])).label}`}
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden="true"
+                    >
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                  </a>
+                ) : (
+                  "—"
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
       {posts.length > 30 && (
-        <p
-          className="text-xs mt-2"
-          style={{ color: "var(--text-secondary)" }}
-        >
+        <p className="text-xs mt-2" style={{ color: "var(--text-secondary)" }}>
           Showing 30 of {posts.length} posts
         </p>
       )}

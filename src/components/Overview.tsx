@@ -122,9 +122,7 @@ export default function Overview({
   // Unified date array from all platforms
   const allDates = useMemo(
     () =>
-      buildUnifiedDates(
-        ...platformKeys.map((k) => platformMap.get(k) ?? []),
-      ),
+      buildUnifiedDates(...platformKeys.map((k) => platformMap.get(k) ?? [])),
     [platformKeys, platformMap],
   );
 
@@ -305,21 +303,25 @@ export default function Overview({
         >
           Top 5 Posts by Engagement Rate
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {top5.map((post, i) => {
-            const caption = str(post.fields["Caption"]).slice(0, 80);
+            const caption = str(post.fields["Caption"]).slice(0, 120);
             const platform = str(post.fields["Platform"]);
             const postType = str(post.fields["Post Type"]);
             const er = num(post.fields["Engagement Rate"]) * 100;
             const reach = num(post.fields["Reach"]);
             const likes = num(post.fields["Likes"]);
             const saves = num(post.fields["Saves"]);
+            const shares = num(post.fields["Shares"]);
+            const comments = num(post.fields["Comments"]);
+            const mediaUrl = str(post.fields["Media URL"]);
+            const publishedAt = str(post.fields["Published At"]).split("T")[0];
             const config = getPlatformConfig(platform);
 
             return (
               <div
                 key={post.id || i}
-                className="rounded-lg p-3 space-y-2"
+                className="rounded-lg p-4 space-y-3 flex flex-col"
                 style={{
                   background: "var(--bg-secondary)",
                   border: "1px solid var(--border)",
@@ -327,7 +329,7 @@ export default function Overview({
               >
                 <div className="flex items-center justify-between">
                   <span
-                    className="text-[9px] px-1.5 py-0.5 rounded font-semibold capitalize"
+                    className="text-[10px] px-2 py-0.5 rounded font-semibold capitalize"
                     style={{
                       background: config.colorBg,
                       color: config.color,
@@ -343,14 +345,20 @@ export default function Overview({
                   </span>
                 </div>
                 <p
-                  className="text-xs leading-relaxed"
+                  className="text-xs leading-relaxed flex-1"
                   style={{ color: "var(--text-primary)" }}
                 >
                   {caption}
-                  {caption.length >= 80 ? "..." : ""}
+                  {caption.length >= 120 ? "..." : ""}
                 </p>
                 <div
-                  className="grid grid-cols-2 gap-1 text-[10px]"
+                  className="text-[10px]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {publishedAt}
+                </div>
+                <div
+                  className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]"
                   style={{ color: "var(--text-secondary)" }}
                 >
                   <span>
@@ -360,7 +368,33 @@ export default function Overview({
                   <span>Reach: {formatNumber(reach)}</span>
                   <span>Likes: {formatNumber(likes)}</span>
                   <span>Saves: {formatNumber(saves)}</span>
+                  <span>Shares: {formatNumber(shares)}</span>
+                  <span>Comments: {formatNumber(comments)}</span>
                 </div>
+                {mediaUrl && (
+                  <a
+                    href={mediaUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium mt-auto pt-1 transition-opacity hover:opacity-80"
+                    style={{ color: config.color }}
+                  >
+                    View on {config.label}
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden="true"
+                    >
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                  </a>
+                )}
               </div>
             );
           })}
