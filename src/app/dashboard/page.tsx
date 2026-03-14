@@ -10,7 +10,9 @@ import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
 import ChatBox from "@/components/ChatBox";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
-import { str, getComparisonPeriod } from "@/lib/utils";
+import ErrorBoundary from "@/components/ErrorBoundary";
+import { str, getComparisonPeriod, getPlatformKeys } from "@/lib/utils";
+import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 
 type Tab = "overview" | "content" | "audience" | "compare" | "competitors";
@@ -147,6 +149,12 @@ export default function DashboardPage() {
     return dates[0] || null;
   }, [data]);
 
+  // Active platforms from all daily metrics (not filtered)
+  const activePlatforms = useMemo(
+    () => (data ? getPlatformKeys(data.dailyMetrics) : []),
+    [data],
+  );
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "content", label: "Content Analysis" },
@@ -175,16 +183,17 @@ export default function DashboardPage() {
             >
               {latestDataDate ? (
                 <>
-                  <span
-                    className="inline-block w-1.5 h-1.5 rounded-full"
-                    style={{ background: "#a855f7" }}
-                    title={`Instagram`}
-                  />
-                  <span
-                    className="inline-block w-1.5 h-1.5 rounded-full"
-                    style={{ background: "#3b82f6" }}
-                    title={`Facebook`}
-                  />
+                  {activePlatforms.map((key) => {
+                    const config = getPlatformConfig(key);
+                    return (
+                      <span
+                        key={key}
+                        className="inline-block w-1.5 h-1.5 rounded-full"
+                        style={{ background: config.color }}
+                        title={config.label}
+                      />
+                    );
+                  })}
                   Last data: {latestDataDate}
                 </>
               ) : loading ? (
@@ -250,38 +259,40 @@ export default function DashboardPage() {
         )}
 
         {data && !loading && (
-          <div role="tabpanel">
-            {tab === "overview" && (
-              <Overview
-                posts={filteredPosts}
-                dailyMetrics={filteredDaily}
-                alerts={filteredAlerts}
-                weeklySummaries={filteredSummaries}
-                prevPosts={comparisonPosts}
-                prevDailyMetrics={comparisonDaily}
-              />
-            )}
-            {tab === "content" && <ContentAnalysis posts={filteredPosts} />}
-            {tab === "audience" && (
-              <AudienceGrowth
-                posts={filteredPosts}
-                dailyMetrics={filteredDaily}
-              />
-            )}
-            {tab === "compare" && (
-              <PlatformCompare
-                posts={filteredPosts}
-                dailyMetrics={filteredDaily}
-              />
-            )}
-            {tab === "competitors" && (
-              <CompetitorInsights
-                records={competitorRecords}
-                loading={competitorLoading}
-                error={competitorError}
-              />
-            )}
-          </div>
+          <ErrorBoundary>
+            <div role="tabpanel">
+              {tab === "overview" && (
+                <Overview
+                  posts={filteredPosts}
+                  dailyMetrics={filteredDaily}
+                  alerts={filteredAlerts}
+                  weeklySummaries={filteredSummaries}
+                  prevPosts={comparisonPosts}
+                  prevDailyMetrics={comparisonDaily}
+                />
+              )}
+              {tab === "content" && <ContentAnalysis posts={filteredPosts} />}
+              {tab === "audience" && (
+                <AudienceGrowth
+                  posts={filteredPosts}
+                  dailyMetrics={filteredDaily}
+                />
+              )}
+              {tab === "compare" && (
+                <PlatformCompare
+                  posts={filteredPosts}
+                  dailyMetrics={filteredDaily}
+                />
+              )}
+              {tab === "competitors" && (
+                <CompetitorInsights
+                  records={competitorRecords}
+                  loading={competitorLoading}
+                  error={competitorError}
+                />
+              )}
+            </div>
+          </ErrorBoundary>
         )}
       </main>
 

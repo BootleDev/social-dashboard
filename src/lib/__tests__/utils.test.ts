@@ -9,6 +9,8 @@ import {
   avgERByTheme,
   postingHeatmap,
   splitByPlatform,
+  groupByPlatform,
+  getPlatformKeys,
   topPosts,
   sumField,
   avgField,
@@ -223,6 +225,73 @@ describe("splitByPlatform", () => {
     const { instagram, facebook } = splitByPlatform(metrics);
     expect(instagram).toHaveLength(0);
     expect(facebook).toHaveLength(0);
+  });
+});
+
+// --- groupByPlatform ---
+describe("groupByPlatform", () => {
+  it("groups records by lowercase platform", () => {
+    const records = [
+      makeRecord({ Platform: "Instagram", Followers: 100 }),
+      makeRecord({ Platform: "Facebook", Followers: 50 }),
+      makeRecord({ Platform: "Instagram", Followers: 110 }),
+      makeRecord({ Platform: "Pinterest", Saves: 20 }),
+    ];
+    const map = groupByPlatform(records);
+    expect(map.get("instagram")).toHaveLength(2);
+    expect(map.get("facebook")).toHaveLength(1);
+    expect(map.get("pinterest")).toHaveLength(1);
+  });
+
+  it("handles case insensitivity", () => {
+    const records = [
+      makeRecord({ Platform: "INSTAGRAM" }),
+      makeRecord({ Platform: "instagram" }),
+    ];
+    const map = groupByPlatform(records);
+    expect(map.get("instagram")).toHaveLength(2);
+  });
+
+  it("skips records with empty platform", () => {
+    const records = [
+      makeRecord({ Platform: "" }),
+      makeRecord({ Platform: "Instagram" }),
+    ];
+    const map = groupByPlatform(records);
+    expect(map.size).toBe(1);
+  });
+
+  it("returns empty map for empty array", () => {
+    const map = groupByPlatform([]);
+    expect(map.size).toBe(0);
+  });
+});
+
+// --- getPlatformKeys ---
+describe("getPlatformKeys", () => {
+  it("returns sorted unique platform keys", () => {
+    const records = [
+      makeRecord({ Platform: "Facebook" }),
+      makeRecord({ Platform: "Instagram" }),
+      makeRecord({ Platform: "Instagram" }),
+      makeRecord({ Platform: "Pinterest" }),
+    ];
+    const keys = getPlatformKeys(records);
+    expect(keys).toEqual(["instagram", "facebook", "pinterest"]);
+  });
+
+  it("returns empty array for empty input", () => {
+    expect(getPlatformKeys([])).toEqual([]);
+  });
+
+  it("puts unknown platforms at the end", () => {
+    const records = [
+      makeRecord({ Platform: "mastodon" }),
+      makeRecord({ Platform: "Instagram" }),
+    ];
+    const keys = getPlatformKeys(records);
+    expect(keys[0]).toBe("instagram");
+    expect(keys[1]).toBe("mastodon");
   });
 });
 

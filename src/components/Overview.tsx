@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Line, Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { getPlatformConfig } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
 import AlertsFeed from "./AlertsFeed";
@@ -17,7 +18,8 @@ import {
   topPosts,
   sumField,
   avgField,
-  splitByPlatform,
+  groupByPlatform,
+  getPlatformKeys,
   buildUnifiedDates,
   alignToDateArray,
 } from "@/lib/utils";
@@ -40,26 +42,29 @@ export default function Overview({
   prevPosts,
   prevDailyMetrics,
 }: OverviewProps) {
-  const { instagram: igMetrics, facebook: fbMetrics } = useMemo(
-    () => splitByPlatform(dailyMetrics),
+  const platformMap = useMemo(
+    () => groupByPlatform(dailyMetrics),
+    [dailyMetrics],
+  );
+  const platformKeys = useMemo(
+    () => getPlatformKeys(dailyMetrics),
     [dailyMetrics],
   );
 
   // KPI calculations with proper period comparison
   const kpis = useMemo(() => {
-    const latestIG = igMetrics[0];
-    const latestFB = fbMetrics[0];
+    const totalFollowers = platformKeys.reduce((sum, key) => {
+      const metrics = platformMap.get(key) ?? [];
+      const latest = metrics[0];
+      return sum + (latest ? num(latest.fields["Followers"]) : 0);
+    }, 0);
 
-    const totalFollowers =
-      (latestIG ? num(latestIG.fields["Followers"]) : 0) +
-      (latestFB ? num(latestFB.fields["Followers"]) : 0);
-
-    // Previous period followers (from comparison data)
-    const { instagram: prevIG, facebook: prevFB } =
-      splitByPlatform(prevDailyMetrics);
-    const prevFollowers =
-      (prevIG[0] ? num(prevIG[0].fields["Followers"]) : 0) +
-      (prevFB[0] ? num(prevFB[0].fields["Followers"]) : 0);
+    const prevMap = groupByPlatform(prevDailyMetrics);
+    const prevFollowers = platformKeys.reduce((sum, key) => {
+      const metrics = prevMap.get(key) ?? [];
+      const latest = metrics[0];
+      return sum + (latest ? num(latest.fields["Followers"]) : 0);
+    }, 0);
 
     const avgER = avgField(posts, "Engagement Rate") * 100;
     const prevAvgER = avgField(prevPosts, "Engagement Rate") * 100;
@@ -74,7 +79,6 @@ export default function Overview({
     const avgSaves =
       posts.length > 0 ? sumField(posts, "Saves") / posts.length : 0;
 
-    // Link clicks from posts (Website Clicks from Daily Metrics is always 0)
     const totalLinkClicks = sumField(posts, "Link Clicks");
     const prevTotalLinkClicks = sumField(prevPosts, "Link Clicks");
 
@@ -106,72 +110,67 @@ export default function Overview({
           : undefined,
       totalVideoViews,
     };
-  }, [posts, dailyMetrics, igMetrics, fbMetrics, prevPosts, prevDailyMetrics]);
+  }, [
+    posts,
+    dailyMetrics,
+    platformKeys,
+    platformMap,
+    prevPosts,
+    prevDailyMetrics,
+  ]);
 
-  // Unified date array for all charts
+  // Unified date array from all platforms
   const allDates = useMemo(
-    () => buildUnifiedDates(igMetrics, fbMetrics),
-    [igMetrics, fbMetrics],
+    () =>
+      buildUnifiedDates(
+        ...platformKeys.map((k) => platformMap.get(k) ?? []),
+      ),
+    [platformKeys, platformMap],
   );
 
-  // Follower growth chart
+  // Follower growth chart — dynamic datasets per platform
   const followerChartData = useMemo(() => {
     const labels = allDates.map((d) => d.slice(5));
 
     return {
       labels,
-      datasets: [
-        {
-          label: "Instagram",
-          data: alignToDateArray(igMetrics, allDates, "Followers"),
-          borderColor: CHART_COLORS.purple,
-          backgroundColor: "rgba(168, 85, 247, 0.1)",
+      datasets: platformKeys.map((key) => {
+        const config = getPlatformConfig(key);
+        const metrics = platformMap.get(key) ?? [];
+        return {
+          label: config.label,
+          data: alignToDateArray(metrics, allDates, "Followers"),
+          borderColor: config.color,
+          backgroundColor: config.colorFill,
           fill: true,
           tension: 0.3,
           pointRadius: 0,
-        },
-        {
-          label: "Facebook",
-          data: alignToDateArray(fbMetrics, allDates, "Followers"),
-          borderColor: CHART_COLORS.blue,
-          backgroundColor: "rgba(59, 130, 246, 0.1)",
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-        },
-      ],
+        };
+      }),
     };
-  }, [igMetrics, fbMetrics, allDates]);
+  }, [platformKeys, platformMap, allDates]);
 
-  // Engagement rate trend
+  // Engagement rate trend — dynamic datasets per platform
   const erChartData = useMemo(() => {
     const labels = allDates.map((d) => d.slice(5));
 
     return {
       labels,
-      datasets: [
-        {
-          label: "Instagram ER (period avg)",
-          data: alignToDateArray(igMetrics, allDates, "Engagement Rate").map(
+      datasets: platformKeys.map((key) => {
+        const config = getPlatformConfig(key);
+        const metrics = platformMap.get(key) ?? [];
+        return {
+          label: `${config.label} ER`,
+          data: alignToDateArray(metrics, allDates, "Engagement Rate").map(
             (v) => v * 100,
           ),
-          borderColor: CHART_COLORS.purple,
-          borderDash: [5, 3],
+          borderColor: config.color,
           tension: 0.3,
           pointRadius: 0,
-        },
-        {
-          label: "Facebook ER",
-          data: alignToDateArray(fbMetrics, allDates, "Engagement Rate").map(
-            (v) => v * 100,
-          ),
-          borderColor: CHART_COLORS.blue,
-          tension: 0.3,
-          pointRadius: 0,
-        },
-      ],
+        };
+      }),
     };
-  }, [igMetrics, fbMetrics, allDates]);
+  }, [platformKeys, platformMap, allDates]);
 
   // Posts per week bar chart
   const postsPerWeekData = useMemo(() => {
@@ -207,6 +206,10 @@ export default function Overview({
   // Top 5 posts by ER
   const top5 = useMemo(() => topPosts(posts, "Engagement Rate", 5), [posts]);
 
+  const platformCountLabel = platformKeys
+    .map((k) => getPlatformConfig(k).label)
+    .join(" + ");
+
   if (posts.length === 0 && dailyMetrics.length === 0) {
     return (
       <div
@@ -232,7 +235,7 @@ export default function Overview({
           title="Total Followers"
           value={formatNumber(kpis.totalFollowers)}
           change={kpis.followersChange}
-          tooltip="Combined IG + FB followers"
+          tooltip={`Combined ${platformCountLabel} followers`}
         />
         <KPICard
           title="Avg Engagement Rate"
@@ -311,6 +314,7 @@ export default function Overview({
             const reach = num(post.fields["Reach"]);
             const likes = num(post.fields["Likes"]);
             const saves = num(post.fields["Saves"]);
+            const config = getPlatformConfig(platform);
 
             return (
               <div
@@ -325,14 +329,11 @@ export default function Overview({
                   <span
                     className="text-[9px] px-1.5 py-0.5 rounded font-semibold capitalize"
                     style={{
-                      background:
-                        platform === "instagram"
-                          ? "rgba(168, 85, 247, 0.15)"
-                          : "rgba(59, 130, 246, 0.15)",
-                      color: platform === "instagram" ? "#a855f7" : "#3b82f6",
+                      background: config.colorBg,
+                      color: config.color,
                     }}
                   >
-                    {platform}
+                    {config.label}
                   </span>
                   <span
                     className="text-[10px] capitalize"

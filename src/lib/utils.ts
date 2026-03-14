@@ -1,3 +1,5 @@
+import { platformSortOrder } from "./platforms";
+
 export type Fields = Record<string, unknown>;
 
 export type AirtableRecord = {
@@ -107,21 +109,48 @@ export function postingHeatmap(
   });
 }
 
-/** Split daily metrics by platform. */
+/** @deprecated Use groupByPlatform instead. */
 export function splitByPlatform(metrics: AirtableRecord[]): {
   instagram: AirtableRecord[];
   facebook: AirtableRecord[];
 } {
-  const instagram: AirtableRecord[] = [];
-  const facebook: AirtableRecord[] = [];
+  const grouped = groupByPlatform(metrics);
+  return {
+    instagram: grouped.get("instagram") ?? [],
+    facebook: grouped.get("facebook") ?? [],
+  };
+}
 
-  for (const m of metrics) {
-    const platform = str(m.fields["Platform"]).toLowerCase();
-    if (platform === "instagram") instagram.push(m);
-    else if (platform === "facebook") facebook.push(m);
+/** Group records by lowercase Platform field. */
+export function groupByPlatform(
+  records: AirtableRecord[],
+): Map<string, AirtableRecord[]> {
+  const groups = new Map<string, AirtableRecord[]>();
+
+  for (const r of records) {
+    const platform = str(r.fields["Platform"]).toLowerCase().trim();
+    if (!platform) continue;
+    const existing = groups.get(platform);
+    if (existing) {
+      existing.push(r);
+    } else {
+      groups.set(platform, [r]);
+    }
   }
 
-  return { instagram, facebook };
+  return groups;
+}
+
+/** Sorted unique platform keys from records. */
+export function getPlatformKeys(records: AirtableRecord[]): string[] {
+  const keys = new Set<string>();
+  for (const r of records) {
+    const p = str(r.fields["Platform"]).toLowerCase().trim();
+    if (p) keys.add(p);
+  }
+  return Array.from(keys).sort(
+    (a, b) => platformSortOrder(a) - platformSortOrder(b),
+  );
 }
 
 /** Get top N posts by a numeric field (descending). */

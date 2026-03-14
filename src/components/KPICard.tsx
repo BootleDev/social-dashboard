@@ -1,5 +1,7 @@
 "use client";
 
+import { getPlatformConfig } from "@/lib/platforms";
+
 interface KPICardProps {
   title: string;
   value: string;
@@ -7,13 +9,8 @@ interface KPICardProps {
   subtitle?: string;
   tooltip?: string;
   invertChange?: boolean;
-  platformLabel?: "Instagram" | "Facebook";
+  platformLabel?: string;
 }
-
-const PLATFORM_COLORS = {
-  Instagram: { bg: "rgba(168, 85, 247, 0.15)", text: "rgb(168, 85, 247)" },
-  Facebook: { bg: "rgba(59, 130, 246, 0.15)", text: "rgb(59, 130, 246)" },
-} as const;
 
 export default function KPICard({
   title,
@@ -31,6 +28,10 @@ export default function KPICard({
   const changeColor = isGood ? "text-green-400" : isBad ? "text-red-400" : "";
   const arrow = isPositive ? "\u2191" : isNegative ? "\u2193" : "";
 
+  const platformConfig = platformLabel
+    ? getPlatformConfig(platformLabel)
+    : null;
+
   return (
     <div
       className="rounded-xl p-4 flex flex-col gap-1"
@@ -44,15 +45,15 @@ export default function KPICard({
         style={{ color: "var(--text-secondary)" }}
       >
         {title}
-        {platformLabel && (
+        {platformConfig && (
           <span
             className="px-1.5 py-0.5 rounded text-[9px] font-semibold"
             style={{
-              background: PLATFORM_COLORS[platformLabel].bg,
-              color: PLATFORM_COLORS[platformLabel].text,
+              background: platformConfig.colorBg,
+              color: platformConfig.color,
             }}
           >
-            {platformLabel}
+            {platformConfig.label}
           </span>
         )}
         {tooltip && (
