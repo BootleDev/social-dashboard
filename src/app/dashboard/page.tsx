@@ -8,6 +8,7 @@ import PlatformCompare from "@/components/PlatformCompare";
 import CompetitorInsights from "@/components/CompetitorInsights";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
+import PlatformFilter from "@/components/PlatformFilter";
 import ChatBox from "@/components/ChatBox";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -22,6 +23,17 @@ interface DashboardData {
   dailyMetrics: AirtableRecord[];
   weeklySummaries: AirtableRecord[];
   alerts: AirtableRecord[];
+}
+
+function filterByPlatform(
+  records: AirtableRecord[],
+  selected: Set<string>,
+): AirtableRecord[] {
+  if (selected.size === 0) return records;
+  return records.filter((r) => {
+    const platform = str(r.fields["Platform"]).toLowerCase().trim();
+    return selected.has(platform);
+  });
 }
 
 function filterByDateRange(
@@ -49,6 +61,9 @@ export default function DashboardPage() {
     end: null,
     label: "All Time",
   });
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(
+    new Set(),
+  );
   const [competitorRecords, setCompetitorRecords] = useState<AirtableRecord[]>(
     [],
   );
@@ -94,25 +109,45 @@ export default function DashboardPage() {
   // Filter data by date range
   const filteredPosts = useMemo(
     () =>
-      data ? filterByDateRange(data.posts, "Published At", dateRange) : [],
-    [data, dateRange],
+      data
+        ? filterByPlatform(
+            filterByDateRange(data.posts, "Published At", dateRange),
+            selectedPlatforms,
+          )
+        : [],
+    [data, dateRange, selectedPlatforms],
   );
   const filteredDaily = useMemo(
-    () => (data ? filterByDateRange(data.dailyMetrics, "Date", dateRange) : []),
-    [data, dateRange],
+    () =>
+      data
+        ? filterByPlatform(
+            filterByDateRange(data.dailyMetrics, "Date", dateRange),
+            selectedPlatforms,
+          )
+        : [],
+    [data, dateRange, selectedPlatforms],
   );
   const filteredAlerts = useMemo(
-    () => (data ? filterByDateRange(data.alerts, "Alert Date", dateRange) : []),
-    [data, dateRange],
+    () =>
+      data
+        ? filterByPlatform(
+            filterByDateRange(data.alerts, "Alert Date", dateRange),
+            selectedPlatforms,
+          )
+        : [],
+    [data, dateRange, selectedPlatforms],
   );
 
   // Weekly summaries filtered by date range
   const filteredSummaries = useMemo(
     () =>
       data
-        ? filterByDateRange(data.weeklySummaries, "Week Start", dateRange)
+        ? filterByPlatform(
+            filterByDateRange(data.weeklySummaries, "Week Start", dateRange),
+            selectedPlatforms,
+          )
         : [],
-    [data, dateRange],
+    [data, dateRange, selectedPlatforms],
   );
 
   // Comparison period metrics (same duration, immediately before selected range)
@@ -120,23 +155,29 @@ export default function DashboardPage() {
     if (!data) return [];
     const comp = getComparisonPeriod(dateRange.start, dateRange.end);
     if (!comp) return [];
-    return filterByDateRange(data.dailyMetrics, "Date", {
-      start: comp.compStart,
-      end: comp.compEnd,
-      label: "",
-    });
-  }, [data, dateRange]);
+    return filterByPlatform(
+      filterByDateRange(data.dailyMetrics, "Date", {
+        start: comp.compStart,
+        end: comp.compEnd,
+        label: "",
+      }),
+      selectedPlatforms,
+    );
+  }, [data, dateRange, selectedPlatforms]);
 
   const comparisonPosts = useMemo(() => {
     if (!data) return [];
     const comp = getComparisonPeriod(dateRange.start, dateRange.end);
     if (!comp) return [];
-    return filterByDateRange(data.posts, "Published At", {
-      start: comp.compStart,
-      end: comp.compEnd,
-      label: "",
-    });
-  }, [data, dateRange]);
+    return filterByPlatform(
+      filterByDateRange(data.posts, "Published At", {
+        start: comp.compStart,
+        end: comp.compEnd,
+        label: "",
+      }),
+      selectedPlatforms,
+    );
+  }, [data, dateRange, selectedPlatforms]);
 
   // Latest data date
   const latestDataDate = useMemo(() => {
@@ -154,6 +195,13 @@ export default function DashboardPage() {
     () => (data ? getPlatformKeys(data.dailyMetrics) : []),
     [data],
   );
+
+  // Initialize selected platforms when data loads (all on by default)
+  useEffect(() => {
+    if (activePlatforms.length > 0 && selectedPlatforms.size === 0) {
+      setSelectedPlatforms(new Set(activePlatforms));
+    }
+  }, [activePlatforms, selectedPlatforms.size]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
@@ -218,6 +266,14 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
           {data && (
             <DateRangeFilter value={dateRange} onChange={setDateRange} />
+          )}
+
+          {activePlatforms.length > 1 && (
+            <PlatformFilter
+              platforms={activePlatforms}
+              selected={selectedPlatforms}
+              onChange={setSelectedPlatforms}
+            />
           )}
 
           <nav
