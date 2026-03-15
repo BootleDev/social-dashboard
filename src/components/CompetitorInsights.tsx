@@ -253,7 +253,7 @@ export default function CompetitorInsights({
           }}
         >
           <div
-            className="text-[10px] mb-1"
+            className="text-xs mb-1"
             style={{ color: "var(--text-secondary)" }}
           >
             Total Posts Scraped
@@ -270,16 +270,13 @@ export default function CompetitorInsights({
             }}
           >
             <div
-              className="text-[10px] mb-1 capitalize"
+              className="text-xs mb-1 capitalize"
               style={{ color: "var(--text-secondary)" }}
             >
               {p.platform}
             </div>
             <div className="text-lg font-bold">{p.count} posts</div>
-            <div
-              className="text-[10px]"
-              style={{ color: "var(--text-secondary)" }}
-            >
+            <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
               Avg {formatNumber(p.avgViews)} views
             </div>
           </div>
@@ -296,7 +293,7 @@ export default function CompetitorInsights({
       >
         <div className="flex items-center justify-between mb-4">
           <h3
-            className="text-sm font-medium"
+            className="text-base font-medium"
             style={{ color: "var(--text-secondary)" }}
           >
             Top Competitor Content by Views
@@ -327,7 +324,7 @@ export default function CompetitorInsights({
               ]);
               exportToCSV(headers, rows, "competitor-content.csv");
             }}
-            className="text-[10px] px-2 py-1 rounded transition-colors hover:bg-white/10"
+            className="text-xs px-2 py-1 rounded transition-colors hover:bg-white/10"
             style={{
               color: "var(--text-secondary)",
               border: "1px solid var(--border)",
@@ -336,7 +333,7 @@ export default function CompetitorInsights({
             Export CSV
           </button>
         </div>
-        <table className="w-full text-xs">
+        <table className="w-full text-sm">
           <thead>
             <tr style={{ color: "var(--text-secondary)" }}>
               <th scope="col" className="text-left py-2 px-2">

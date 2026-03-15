@@ -41,7 +41,7 @@ export const defaultOptions = {
   maintainAspectRatio: false,
   plugins: {
     legend: {
-      labels: { color: CHART_COLORS.muted, font: { size: 11 } },
+      labels: { color: CHART_COLORS.muted, font: { size: 12 } },
     },
     tooltip: {
       backgroundColor: "#1e2230",
@@ -53,11 +53,11 @@ export const defaultOptions = {
   },
   scales: {
     x: {
-      ticks: { color: CHART_COLORS.muted, font: { size: 10 } },
+      ticks: { color: CHART_COLORS.muted, font: { size: 12 } },
       grid: { color: "transparent" },
     },
     y: {
-      ticks: { color: CHART_COLORS.muted, font: { size: 10 } },
+      ticks: { color: CHART_COLORS.muted, font: { size: 12 } },
       grid: { color: CHART_COLORS.grid },
     },
   },

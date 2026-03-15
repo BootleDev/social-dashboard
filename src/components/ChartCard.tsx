@@ -24,7 +24,7 @@ export default function ChartCard({
       }}
     >
       <h3
-        className="text-sm font-medium mb-4 flex items-center gap-1"
+        className="text-base font-medium mb-4 flex items-center gap-1"
         style={{ color: "var(--text-secondary)" }}
       >
         {title}
