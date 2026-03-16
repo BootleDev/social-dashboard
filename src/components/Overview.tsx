@@ -248,8 +248,15 @@ export default function Overview({
         />
         <KPICard
           title="Impressions"
-          value={formatNumber(kpis.totalImpressions)}
-          change={kpis.impressionsChange}
+          value={
+            kpis.totalImpressions > 0
+              ? formatNumber(kpis.totalImpressions)
+              : "—"
+          }
+          change={
+            kpis.totalImpressions > 0 ? kpis.impressionsChange : undefined
+          }
+          tooltip="Instagram does not provide account-level impressions for accounts under ~10K followers. This is an API limitation, not a tracking issue."
         />
         <KPICard title="Posts Published" value={String(kpis.postsPublished)} />
         <KPICard
