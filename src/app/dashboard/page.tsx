@@ -253,7 +253,7 @@ export default function DashboardPage() {
             {!loading && data && (
               <button
                 onClick={fetchData}
-                className="text-[10px] px-1.5 py-0.5 rounded transition-colors hover:bg-white/10"
+                className="text-[10px] px-1.5 py-0.5 rounded transition-colors hover:bg-white/10 cursor-pointer"
                 style={{ color: "var(--text-secondary)" }}
                 title="Refresh data"
               >
@@ -288,7 +288,7 @@ export default function DashboardPage() {
                 onClick={() => setTab(t.key)}
                 role="tab"
                 aria-selected={tab === t.key}
-                className={`px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                className={`px-3 py-2 rounded-md text-xs font-medium transition-all cursor-pointer ${
                   tab === t.key ? "text-white" : ""
                 }`}
                 style={{

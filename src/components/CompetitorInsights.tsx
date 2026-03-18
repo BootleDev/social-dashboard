@@ -324,7 +324,7 @@ export default function CompetitorInsights({
               ]);
               exportToCSV(headers, rows, "competitor-content.csv");
             }}
-            className="text-xs px-2 py-1 rounded transition-colors hover:bg-white/10"
+            className="text-xs px-2 py-1 rounded transition-colors hover:bg-white/10 cursor-pointer"
             style={{
               color: "var(--text-secondary)",
               border: "1px solid var(--border)",

@@ -26,7 +26,11 @@ export default function PlatformFilter({
   }
 
   return (
-    <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Platform filter">
+    <div
+      className="flex items-center gap-1.5 flex-wrap"
+      role="group"
+      aria-label="Platform filter"
+    >
       {platforms.map((key) => {
         const config = getPlatformConfig(key);
         const active = selected.has(key);
@@ -35,7 +39,7 @@ export default function PlatformFilter({
             key={key}
             onClick={() => toggle(key)}
             aria-pressed={active}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer"
             style={{
               background: active ? config.colorBg : "transparent",
               color: active ? config.color : "var(--text-secondary)",

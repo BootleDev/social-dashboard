@@ -95,7 +95,7 @@ export default function PostScorecardTable({ posts }: PostScorecardTableProps) {
             ]);
             exportToCSV(headers, rows, "post-scorecard.csv");
           }}
-          className="text-[10px] px-2 py-1 rounded transition-colors hover:bg-white/10"
+          className="text-[10px] px-2 py-1 rounded transition-colors hover:bg-white/10 cursor-pointer"
           style={{
             color: "var(--text-secondary)",
             border: "1px solid var(--border)",
@@ -203,7 +203,7 @@ export default function PostScorecardTable({ posts }: PostScorecardTableProps) {
                     href={str(p.fields["Media URL"])}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center transition-opacity hover:opacity-80"
+                    className="inline-flex items-center justify-center transition-opacity hover:opacity-80 cursor-pointer"
                     style={{
                       color: getPlatformConfig(str(p.fields["Platform"])).color,
                     }}

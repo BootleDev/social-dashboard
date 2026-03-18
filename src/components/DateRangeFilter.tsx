@@ -73,7 +73,7 @@ export default function DateRangeFilter({ value, onChange }: Props) {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
         style={{
           background: "var(--bg-secondary)",
           color: "var(--text-secondary)",
@@ -121,7 +121,7 @@ export default function DateRangeFilter({ value, onChange }: Props) {
               <button
                 key={p.label}
                 onClick={() => selectPreset(p)}
-                className="w-full text-left px-3 py-1.5 rounded-md text-xs transition-colors hover:bg-white/10"
+                className="w-full text-left px-3 py-1.5 rounded-md text-xs transition-colors hover:bg-white/10 cursor-pointer"
                 style={{
                   color:
                     value.label === p.label
@@ -172,7 +172,7 @@ export default function DateRangeFilter({ value, onChange }: Props) {
             <button
               onClick={applyCustom}
               disabled={!customStart || !customEnd}
-              className="w-full py-1.5 rounded-md text-xs font-medium text-white disabled:opacity-40 transition-colors"
+              className="w-full py-1.5 rounded-md text-xs font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
               style={{ background: "var(--accent-blue)" }}
             >
               Apply

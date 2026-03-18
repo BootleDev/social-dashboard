@@ -383,7 +383,7 @@ export default function Overview({
                     href={mediaUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] font-medium mt-auto pt-1 transition-opacity hover:opacity-80"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium mt-auto pt-1 transition-opacity hover:opacity-80 cursor-pointer"
                     style={{ color: config.color }}
                   >
                     View on {config.label}

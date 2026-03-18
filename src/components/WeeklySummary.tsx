@@ -108,7 +108,7 @@ export default function WeeklySummary({ summaries }: WeeklySummaryProps) {
         <>
           <button
             onClick={() => setExpanded((v) => !v)}
-            className="text-xs font-medium transition-colors hover:opacity-80"
+            className="text-xs font-medium transition-colors hover:opacity-80 cursor-pointer"
             style={{ color: "var(--accent-purple)" }}
           >
             {expanded ? "Hide full report" : "View full report"}
