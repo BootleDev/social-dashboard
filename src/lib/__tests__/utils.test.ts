@@ -18,6 +18,9 @@ import {
   getComparisonPeriod,
   hashtagFrequency,
   alignToDateArray,
+  groupByDimension,
+  timeBucket,
+  dayOfWeek,
 } from "../utils";
 import type { AirtableRecord } from "../utils";
 
@@ -457,5 +460,97 @@ describe("alignToDateArray", () => {
     const dates = ["2026-01-01"];
     const result = alignToDateArray(metrics, dates, "Reach", -1);
     expect(result).toEqual([-1]);
+  });
+});
+
+// --- groupByDimension ---
+describe("groupByDimension", () => {
+  it("groups by key and averages metric", () => {
+    const records = [
+      makeRecord({ "Post Type": "Reel", "Engagement Rate": 0.1 }),
+      makeRecord({ "Post Type": "Reel", "Engagement Rate": 0.2 }),
+      makeRecord({ "Post Type": "Image", "Engagement Rate": 0.05 }),
+    ];
+    const result = groupByDimension(
+      records,
+      (r) => String(r.fields["Post Type"]),
+      (r) => num(r.fields["Engagement Rate"]),
+    );
+    const reel = result.find((g) => g.label === "Reel");
+    const image = result.find((g) => g.label === "Image");
+    expect(reel).toBeDefined();
+    expect(reel!.avg).toBeCloseTo(0.15);
+    expect(reel!.count).toBe(2);
+    expect(image!.avg).toBeCloseTo(0.05);
+  });
+
+  it("skips records where metric returns undefined", () => {
+    const records = [
+      makeRecord({ Platform: "instagram" }),
+      makeRecord({ Platform: "tiktok" }),
+    ];
+    const result = groupByDimension(
+      records,
+      (r) => String(r.fields["Platform"]),
+      () => undefined,
+    );
+    expect(result).toHaveLength(0);
+  });
+
+  it("uses untagged for empty keys", () => {
+    const records = [makeRecord({ "Content Theme": "" })];
+    const result = groupByDimension(
+      records,
+      (r) => String(r.fields["Content Theme"] ?? ""),
+      () => 0.1,
+    );
+    expect(result[0].label).toBe("untagged");
+  });
+
+  it("returns sorted descending by avg", () => {
+    const records = [
+      makeRecord({ dim: "A", val: 0.1 }),
+      makeRecord({ dim: "B", val: 0.5 }),
+      makeRecord({ dim: "C", val: 0.3 }),
+    ];
+    const result = groupByDimension(
+      records,
+      (r) => String(r.fields["dim"]),
+      (r) => num(r.fields["val"]),
+    );
+    expect(result[0].label).toBe("B");
+    expect(result[1].label).toBe("C");
+    expect(result[2].label).toBe("A");
+  });
+});
+
+// --- timeBucket ---
+describe("timeBucket", () => {
+  it("returns Morning for 08:00 UTC", () => {
+    expect(timeBucket("2026-01-15T08:00:00.000Z")).toBe("Morning");
+  });
+  it("returns Midday for 13:00 UTC", () => {
+    expect(timeBucket("2026-01-15T13:00:00.000Z")).toBe("Midday");
+  });
+  it("returns Evening for 19:00 UTC", () => {
+    expect(timeBucket("2026-01-15T19:00:00.000Z")).toBe("Evening");
+  });
+  it("returns Night for 02:00 UTC", () => {
+    expect(timeBucket("2026-01-15T02:00:00.000Z")).toBe("Night");
+  });
+  it("returns Night for invalid date", () => {
+    expect(timeBucket("not-a-date")).toBe("Night");
+  });
+});
+
+// --- dayOfWeek ---
+describe("dayOfWeek", () => {
+  it("returns correct day label", () => {
+    expect(dayOfWeek("2026-01-19T12:00:00.000Z")).toBe("Mon");
+    expect(dayOfWeek("2026-01-20T12:00:00.000Z")).toBe("Tue");
+    expect(dayOfWeek("2026-01-18T12:00:00.000Z")).toBe("Sun");
+  });
+  it("returns Unknown for invalid date", () => {
+    expect(dayOfWeek("bad")).toBe("Unknown");
   });
 });

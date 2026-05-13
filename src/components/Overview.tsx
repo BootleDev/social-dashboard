@@ -23,6 +23,13 @@ import {
   buildUnifiedDates,
   alignToDateArray,
 } from "@/lib/utils";
+import { toPost } from "@/lib/types";
+import {
+  saveRate,
+  engagementScore,
+  reachScore,
+  type ReachNormalizers,
+} from "@/lib/derivedMetrics";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface OverviewProps {
@@ -76,13 +83,53 @@ export default function Overview({
     const prevTotalImpressions = sumField(prevDailyMetrics, "Impressions");
 
     const totalProfileViews = sumField(dailyMetrics, "Profile Views");
-    const avgSaves =
-      posts.length > 0 ? sumField(posts, "Saves") / posts.length : 0;
 
     const totalLinkClicks = sumField(posts, "Link Clicks");
     const prevTotalLinkClicks = sumField(prevPosts, "Link Clicks");
 
     const totalVideoViews = sumField(posts, "Video Views");
+
+    // Save Rate: avg across posts that have reach > 0
+    const postsWithReach = posts.filter((p) => num(p.fields["Reach"]) > 0);
+    const avgSaveRate =
+      postsWithReach.length > 0
+        ? postsWithReach.reduce((sum, p) => {
+            const v = saveRate(toPost(p));
+            return sum + (v ?? 0);
+          }, 0) / postsWithReach.length
+        : undefined;
+
+    // Composite scores: median across posts that have enough data
+    const normalizers: ReachNormalizers = {
+      maxVideoViews: posts.reduce(
+        (m, p) => Math.max(m, num(p.fields["Video Views"])),
+        0,
+      ),
+      maxImpressions: posts.reduce(
+        (m, p) => Math.max(m, num(p.fields["Impressions"])),
+        0,
+      ),
+      avgFollowers:
+        totalFollowers > 0 && platformKeys.length > 0
+          ? totalFollowers / platformKeys.length
+          : 1,
+    };
+
+    const engScores = posts
+      .map((p) => engagementScore(toPost(p)))
+      .filter((v): v is number => v !== undefined);
+    const avgEngScore =
+      engScores.length > 0
+        ? engScores.reduce((a, b) => a + b, 0) / engScores.length
+        : undefined;
+
+    const reachScores = posts
+      .map((p) => reachScore(toPost(p), normalizers))
+      .filter((v): v is number => v !== undefined);
+    const avgReachScore =
+      reachScores.length > 0
+        ? reachScores.reduce((a, b) => a + b, 0) / reachScores.length
+        : undefined;
 
     return {
       totalFollowers,
@@ -101,7 +148,7 @@ export default function Overview({
           ? pctChange(totalImpressions, prevTotalImpressions)
           : undefined,
       postsPublished: posts.length,
-      avgSaves,
+      avgSaveRate,
       totalProfileViews,
       totalLinkClicks,
       linkClicksChange:
@@ -109,6 +156,8 @@ export default function Overview({
           ? pctChange(totalLinkClicks, prevTotalLinkClicks)
           : undefined,
       totalVideoViews,
+      avgEngScore,
+      avgReachScore,
     };
   }, [
     posts,
@@ -227,19 +276,13 @@ export default function Overview({
 
   return (
     <div className="space-y-6">
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+      {/* KPI Row 1 — volume */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
         <KPICard
           title="Total Followers"
           value={formatNumber(kpis.totalFollowers)}
           change={kpis.followersChange}
           tooltip={`Combined ${platformCountLabel} followers`}
-        />
-        <KPICard
-          title="Avg Engagement Rate"
-          value={formatPercent(kpis.avgER)}
-          change={kpis.erChange}
-          tooltip="Average across all posts in range"
         />
         <KPICard
           title="Total Reach"
@@ -259,20 +302,40 @@ export default function Overview({
           tooltip="Instagram does not provide account-level impressions for accounts under ~10K followers. This is an API limitation, not a tracking issue."
         />
         <KPICard title="Posts Published" value={String(kpis.postsPublished)} />
+      </div>
+
+      {/* KPI Row 2 — quality */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
         <KPICard
-          title="Avg Saves/Post"
-          value={kpis.avgSaves.toFixed(1)}
-          tooltip="Average saves per post"
+          title="Avg Engagement Rate"
+          value={formatPercent(kpis.avgER)}
+          change={kpis.erChange}
+          tooltip="Average across all posts in range"
         />
         <KPICard
-          title="Profile Views"
-          value={formatNumber(kpis.totalProfileViews)}
+          title="Avg Save Rate"
+          value={
+            kpis.avgSaveRate !== undefined
+              ? formatPercent(kpis.avgSaveRate * 100)
+              : "—"
+          }
+          tooltip="Saves / Reach — strong signal for algorithmic distribution"
         />
         <KPICard
-          title="Link Clicks"
-          value={formatNumber(kpis.totalLinkClicks)}
-          change={kpis.linkClicksChange}
-          tooltip="From post-level click data"
+          title="Engagement Score"
+          value={
+            kpis.avgEngScore !== undefined ? kpis.avgEngScore.toFixed(1) : "—"
+          }
+          tooltip="Composite 0–100: 40% save rate + 35% ER + 25% comment rate"
+        />
+        <KPICard
+          title="Reach Score"
+          value={
+            kpis.avgReachScore !== undefined
+              ? kpis.avgReachScore.toFixed(1)
+              : "—"
+          }
+          tooltip="Composite 0–100: 50% reach rate + 30% video views + 20% impressions (relative to this period)"
         />
       </div>
 
