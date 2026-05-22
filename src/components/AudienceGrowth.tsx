@@ -57,7 +57,7 @@ export default function AudienceGrowth({
         data: alignToDateArray(metrics, allDates, "Followers"),
         borderColor: config.color,
         backgroundColor: config.colorFill,
-        fill: true,
+        fill: false,
         tension: 0.3,
         pointRadius: 0,
         yAxisID: "y",
@@ -101,6 +101,7 @@ export default function AudienceGrowth({
       y: {
         ...defaultOptions.scales.y,
         position: "left" as const,
+        beginAtZero: false,
         title: { display: true, text: "Followers", color: CHART_COLORS.muted },
       },
       y1: {

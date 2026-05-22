@@ -189,7 +189,7 @@ export default function Overview({
           data: alignToDateArray(metrics, allDates, "Followers"),
           borderColor: config.color,
           backgroundColor: config.colorFill,
-          fill: true,
+          fill: false,
           tension: 0.3,
           pointRadius: 0,
         };
@@ -253,6 +253,16 @@ export default function Overview({
   // Top 5 posts by ER
   const top5 = useMemo(() => topPosts(posts, "Engagement Rate", 5), [posts]);
 
+  // Follower counts move in a narrow band (e.g. 677–694). With a 0-based axis
+  // the line looks dead flat, so zoom the y-axis to the actual range.
+  const followerChartOptions = {
+    ...defaultOptions,
+    scales: {
+      ...defaultOptions.scales,
+      y: { ...defaultOptions.scales.y, beginAtZero: false },
+    },
+  };
+
   const platformCountLabel = platformKeys
     .map((k) => getPlatformConfig(k).label)
     .join(" + ");
@@ -299,7 +309,7 @@ export default function Overview({
           change={
             kpis.totalImpressions > 0 ? kpis.impressionsChange : undefined
           }
-          tooltip="Instagram does not provide account-level impressions for accounts under ~10K followers. This is an API limitation, not a tracking issue."
+          tooltip="Instagram retired the account-level impressions metric in 2024 (now reported as 'views'). Shows — until the Social Data Refresher is migrated to the views metric. Not a tracking gap on our end."
         />
         <KPICard title="Posts Published" value={String(kpis.postsPublished)} />
       </div>
@@ -345,7 +355,7 @@ export default function Overview({
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="Follower Growth">
-          <Line data={followerChartData} options={defaultOptions} />
+          <Line data={followerChartData} options={followerChartOptions} />
         </ChartCard>
         <ChartCard title="Engagement Rate Trend (%)">
           <Line data={erChartData} options={defaultOptions} />
