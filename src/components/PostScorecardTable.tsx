@@ -4,6 +4,14 @@ import { useMemo, useState } from "react";
 import { num, str, formatNumber, formatPercent } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
+import { toPost } from "@/lib/types";
+import {
+  saveRate,
+  viewThroughRate,
+  engagementScore,
+  reachScore,
+  type ReachNormalizers,
+} from "@/lib/derivedMetrics";
 import { exportToCSV } from "@/lib/csv";
 
 type SortField =
@@ -14,30 +22,61 @@ type SortField =
   | "Shares"
   | "Likes"
   | "Video Views"
-  | "Link Clicks";
+  | "Link Clicks"
+  | "Save Rate"
+  | "VTR"
+  | "Engagement Score"
+  | "Reach Score";
 
 interface PostScorecardTableProps {
   posts: AirtableRecord[];
+  normalizers?: ReachNormalizers;
 }
 
-export default function PostScorecardTable({ posts }: PostScorecardTableProps) {
+const DEFAULT_NORMALIZERS: ReachNormalizers = {
+  maxVideoViews: 0,
+  maxImpressions: 0,
+  avgFollowers: 1,
+};
+
+export default function PostScorecardTable({
+  posts,
+  normalizers = DEFAULT_NORMALIZERS,
+}: PostScorecardTableProps) {
   const [sortBy, setSortBy] = useState<SortField>("Engagement Rate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
+  const derivedFields: Record<string, SortField[]> = {
+    computed: ["Save Rate", "VTR", "Engagement Score", "Reach Score"],
+  };
+
+  function getDerivedValue(p: AirtableRecord, field: SortField): number {
+    const post = toPost(p);
+    if (field === "Save Rate") return saveRate(post) ?? -1;
+    if (field === "VTR") return viewThroughRate(post) ?? -1;
+    if (field === "Engagement Score") return engagementScore(post) ?? -1;
+    if (field === "Reach Score") return reachScore(post, normalizers) ?? -1;
+    return -1;
+  }
+
   const sortedPosts = useMemo(() => {
+    const isDerived = derivedFields.computed.includes(sortBy);
     return [...posts].sort((a, b) => {
-      const aVal =
-        sortBy === "Published At"
+      const aVal = isDerived
+        ? getDerivedValue(a, sortBy)
+        : sortBy === "Published At"
           ? str(a.fields[sortBy])
           : num(a.fields[sortBy]);
-      const bVal =
-        sortBy === "Published At"
+      const bVal = isDerived
+        ? getDerivedValue(b, sortBy)
+        : sortBy === "Published At"
           ? str(b.fields[sortBy])
           : num(b.fields[sortBy]);
       if (sortDir === "desc") return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
       return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
     });
-  }, [posts, sortBy, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posts, sortBy, sortDir, normalizers]);
 
   function toggleSort(field: SortField) {
     if (sortBy === field) {
@@ -72,27 +111,48 @@ export default function PostScorecardTable({ posts }: PostScorecardTableProps) {
               "Date",
               "Reach",
               "ER %",
+              "Save Rate %",
+              "VTR %",
+              "Eng Score",
+              "Reach Score",
               "Saves",
               "Shares",
               "Likes",
               "Video Views",
               "Link Clicks",
               "Comments",
+              "Hook Type",
+              "VO Type",
+              "CTA Type",
+              "Visual Style",
+              "Content Pillar",
             ];
-            const rows = sortedPosts.map((p) => [
-              str(p.fields["Caption"]).replace(/\n/g, " "),
-              str(p.fields["Platform"]),
-              str(p.fields["Post Type"]),
-              str(p.fields["Published At"]).split("T")[0],
-              String(num(p.fields["Reach"])),
-              (num(p.fields["Engagement Rate"]) * 100).toFixed(2),
-              String(num(p.fields["Saves"])),
-              String(num(p.fields["Shares"])),
-              String(num(p.fields["Likes"])),
-              String(num(p.fields["Video Views"])),
-              String(num(p.fields["Link Clicks"])),
-              String(num(p.fields["Comments"])),
-            ]);
+            const rows = sortedPosts.map((p) => {
+              const post = toPost(p);
+              return [
+                str(p.fields["Caption"]).replace(/\n/g, " "),
+                str(p.fields["Platform"]),
+                str(p.fields["Post Type"]),
+                str(p.fields["Published At"]).split("T")[0],
+                String(num(p.fields["Reach"])),
+                (num(p.fields["Engagement Rate"]) * 100).toFixed(2),
+                ((saveRate(post) ?? 0) * 100).toFixed(2),
+                ((viewThroughRate(post) ?? 0) * 100).toFixed(1),
+                (engagementScore(post) ?? 0).toFixed(1),
+                (reachScore(post, normalizers) ?? 0).toFixed(1),
+                String(num(p.fields["Saves"])),
+                String(num(p.fields["Shares"])),
+                String(num(p.fields["Likes"])),
+                String(num(p.fields["Video Views"])),
+                String(num(p.fields["Link Clicks"])),
+                String(num(p.fields["Comments"])),
+                str(p.fields["Hook Type"]),
+                str(p.fields["VO Type"]),
+                str(p.fields["CTA Type"]),
+                str(p.fields["Visual Style"]),
+                str(p.fields["Content Pillar"]),
+              ];
+            });
             exportToCSV(headers, rows, "post-scorecard.csv");
           }}
           className="text-[10px] px-2 py-1 rounded transition-colors hover:bg-white/10 cursor-pointer"
@@ -121,6 +181,10 @@ export default function PostScorecardTable({ posts }: PostScorecardTableProps) {
                 "Published At",
                 "Reach",
                 "Engagement Rate",
+                "Save Rate",
+                "VTR",
+                "Engagement Score",
+                "Reach Score",
                 "Saves",
                 "Shares",
                 "Likes",
@@ -133,6 +197,10 @@ export default function PostScorecardTable({ posts }: PostScorecardTableProps) {
                 "Published At": "Date",
                 "Video Views": "Views",
                 "Link Clicks": "Clicks",
+                "Save Rate": "Save%",
+                VTR: "VTR",
+                "Engagement Score": "Eng\u2191",
+                "Reach Score": "Reach\u2191",
               };
               return (
                 <th
@@ -178,6 +246,18 @@ export default function PostScorecardTable({ posts }: PostScorecardTableProps) {
               </td>
               <td className="py-2 px-2 text-right text-green-400 font-medium">
                 {formatPercent(num(p.fields["Engagement Rate"]) * 100)}
+              </td>
+              <td className="py-2 px-2 text-right">
+                {(() => { const v = saveRate(toPost(p)); return v !== undefined ? formatPercent(v * 100, 2) : "\u2014"; })()}
+              </td>
+              <td className="py-2 px-2 text-right">
+                {(() => { const v = viewThroughRate(toPost(p)); return v !== undefined ? formatPercent(v * 100, 1) : "\u2014"; })()}
+              </td>
+              <td className="py-2 px-2 text-right">
+                {(() => { const v = engagementScore(toPost(p)); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
+              </td>
+              <td className="py-2 px-2 text-right">
+                {(() => { const v = reachScore(toPost(p), normalizers); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
               </td>
               <td className="py-2 px-2 text-right">{num(p.fields["Saves"])}</td>
               <td className="py-2 px-2 text-right">

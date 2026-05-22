@@ -37,50 +37,77 @@ export function pctChange(
   return ((current - previous) / previous) * 100;
 }
 
+/**
+ * Generic aggregator: groups records by a key extractor and averages a metric.
+ * Returns results sorted descending by avg, skipping records where getMetric
+ * returns undefined (missing data).
+ */
+export function groupByDimension<T extends AirtableRecord>(
+  records: T[],
+  getKey: (r: T) => string,
+  getMetric: (r: T) => number | undefined,
+): Array<{ label: string; avg: number; count: number }> {
+  const groups = new Map<string, { total: number; count: number }>();
+
+  for (const r of records) {
+    const key = getKey(r) || "untagged";
+    const metric = getMetric(r);
+    if (metric === undefined) continue;
+    const existing = groups.get(key) ?? { total: 0, count: 0 };
+    groups.set(key, { total: existing.total + metric, count: existing.count + 1 });
+  }
+
+  return Array.from(groups.entries())
+    .map(([label, { total, count }]) => ({
+      label,
+      avg: count > 0 ? total / count : 0,
+      count,
+    }))
+    .sort((a, b) => b.avg - a.avg);
+}
+
+export type TimeBucket = "Morning" | "Midday" | "Evening" | "Night";
+
+/** Derive time-of-day bucket from an ISO date string (UTC hours). */
+export function timeBucket(publishedAt: string): TimeBucket {
+  const d = new Date(publishedAt);
+  if (isNaN(d.getTime())) return "Night";
+  const hour = d.getUTCHours();
+  if (hour >= 6 && hour < 12) return "Morning";
+  if (hour >= 12 && hour < 17) return "Midday";
+  if (hour >= 17 && hour < 22) return "Evening";
+  return "Night";
+}
+
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+/** Derive day-of-week label from an ISO date string (UTC). */
+export function dayOfWeek(publishedAt: string): string {
+  const d = new Date(publishedAt);
+  if (isNaN(d.getTime())) return "Unknown";
+  return DOW[d.getUTCDay()];
+}
+
 /** Aggregate posts by post type, returning avg ER for each type. */
 export function avgERByPostType(
   posts: AirtableRecord[],
 ): Array<{ type: string; avgER: number; count: number }> {
-  const groups = new Map<string, { totalER: number; count: number }>();
-
-  for (const p of posts) {
-    const postType = str(p.fields["Post Type"]) || "unknown";
-    const er = num(p.fields["Engagement Rate"]);
-    if (!groups.has(postType)) groups.set(postType, { totalER: 0, count: 0 });
-    const g = groups.get(postType)!;
-    groups.set(postType, { totalER: g.totalER + er, count: g.count + 1 });
-  }
-
-  return Array.from(groups.entries())
-    .map(([type, { totalER, count }]) => ({
-      type,
-      avgER: count > 0 ? totalER / count : 0,
-      count,
-    }))
-    .sort((a, b) => b.avgER - a.avgER);
+  return groupByDimension(
+    posts,
+    (p) => str(p.fields["Post Type"]) || "unknown",
+    (p) => num(p.fields["Engagement Rate"]),
+  ).map(({ label, avg, count }) => ({ type: label, avgER: avg, count }));
 }
 
 /** Aggregate posts by content theme, returning avg ER for each theme. */
 export function avgERByTheme(
   posts: AirtableRecord[],
 ): Array<{ theme: string; avgER: number; count: number }> {
-  const groups = new Map<string, { totalER: number; count: number }>();
-
-  for (const p of posts) {
-    const theme = str(p.fields["Content Theme"]) || "untagged";
-    const er = num(p.fields["Engagement Rate"]);
-    if (!groups.has(theme)) groups.set(theme, { totalER: 0, count: 0 });
-    const g = groups.get(theme)!;
-    groups.set(theme, { totalER: g.totalER + er, count: g.count + 1 });
-  }
-
-  return Array.from(groups.entries())
-    .map(([theme, { totalER, count }]) => ({
-      theme,
-      avgER: count > 0 ? totalER / count : 0,
-      count,
-    }))
-    .sort((a, b) => b.avgER - a.avgER);
+  return groupByDimension(
+    posts,
+    (p) => str(p.fields["Content Theme"]) || "untagged",
+    (p) => num(p.fields["Engagement Rate"]),
+  ).map(({ label, avg, count }) => ({ theme: label, avgER: avg, count }));
 }
 
 /** Group posts by day-of-week x hour for a heatmap. */

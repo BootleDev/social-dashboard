@@ -6,6 +6,7 @@ import ContentAnalysis from "@/components/ContentAnalysis";
 import AudienceGrowth from "@/components/AudienceGrowth";
 import PlatformCompare from "@/components/PlatformCompare";
 import CompetitorInsights from "@/components/CompetitorInsights";
+import TaggingPage from "@/app/dashboard/tagging/page";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
 import PlatformFilter from "@/components/PlatformFilter";
@@ -16,7 +17,7 @@ import { str, getComparisonPeriod, getPlatformKeys } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 
-type Tab = "overview" | "content" | "audience" | "compare" | "competitors";
+type Tab = "overview" | "content" | "audience" | "compare" | "competitors" | "tagging";
 
 interface DashboardData {
   posts: AirtableRecord[];
@@ -138,16 +139,16 @@ export default function DashboardPage() {
     [data, dateRange, selectedPlatforms],
   );
 
-  // Weekly summaries filtered by date range
+  // Weekly summaries filtered by date range only.
+  // NOT by platform: Weekly Summary records have no "Platform" field (they hold
+  // a cross-platform "Platform Breakdown" instead), so platform-filtering would
+  // drop every record and the panel would always render its empty state.
   const filteredSummaries = useMemo(
     () =>
       data
-        ? filterByPlatform(
-            filterByDateRange(data.weeklySummaries, "Week Start", dateRange),
-            selectedPlatforms,
-          )
+        ? filterByDateRange(data.weeklySummaries, "Week Start", dateRange)
         : [],
-    [data, dateRange, selectedPlatforms],
+    [data, dateRange],
   );
 
   // Comparison period metrics (same duration, immediately before selected range)
@@ -209,6 +210,7 @@ export default function DashboardPage() {
     { key: "audience", label: "Audience & Growth" },
     { key: "compare", label: "Platform Compare" },
     { key: "competitors", label: "Competitors" },
+    { key: "tagging", label: "Tagging" },
   ];
 
   return (
@@ -347,6 +349,7 @@ export default function DashboardPage() {
                   error={competitorError}
                 />
               )}
+              {tab === "tagging" && <TaggingPage />}
             </div>
           </ErrorBoundary>
         )}

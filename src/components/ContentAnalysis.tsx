@@ -5,10 +5,11 @@ import { Bar, Scatter } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
+import DimensionSlicer from "./DimensionSlicer";
 import PostScorecardTable from "./PostScorecardTable";
 import PostingHeatmap from "./PostingHeatmap";
 import HashtagCharts from "./HashtagCharts";
-import { num, avgERByPostType, avgERByTheme } from "@/lib/utils";
+import { num, avgERByPostType, avgERByTheme, sumField } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface ContentAnalysisProps {
@@ -79,6 +80,20 @@ export default function ContentAnalysis({ posts }: ContentAnalysisProps) {
     };
   }, [posts]);
 
+  const normalizers = useMemo(() => {
+    const maxVideoViews = posts.reduce(
+      (max, p) => Math.max(max, num(p.fields["Video Views"])),
+      0,
+    );
+    const maxImpressions = posts.reduce(
+      (max, p) => Math.max(max, num(p.fields["Impressions"])),
+      0,
+    );
+    const avgFollowers =
+      posts.length > 0 ? sumField(posts, "Followers") / posts.length : 1;
+    return { maxVideoViews, maxImpressions, avgFollowers };
+  }, [posts]);
+
   const scatterOptions = {
     ...defaultOptions,
     scales: {
@@ -121,6 +136,8 @@ export default function ContentAnalysis({ posts }: ContentAnalysisProps) {
   return (
     <div className="space-y-6">
       <PostScorecardTable posts={posts} />
+
+      <DimensionSlicer posts={posts} normalizers={normalizers} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard
