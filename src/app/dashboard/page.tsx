@@ -139,16 +139,16 @@ export default function DashboardPage() {
     [data, dateRange, selectedPlatforms],
   );
 
-  // Weekly summaries filtered by date range
+  // Weekly summaries filtered by date range only.
+  // NOT by platform: Weekly Summary records have no "Platform" field (they hold
+  // a cross-platform "Platform Breakdown" instead), so platform-filtering would
+  // drop every record and the panel would always render its empty state.
   const filteredSummaries = useMemo(
     () =>
       data
-        ? filterByPlatform(
-            filterByDateRange(data.weeklySummaries, "Week Start", dateRange),
-            selectedPlatforms,
-          )
+        ? filterByDateRange(data.weeklySummaries, "Week Start", dateRange)
         : [],
-    [data, dateRange, selectedPlatforms],
+    [data, dateRange],
   );
 
   // Comparison period metrics (same duration, immediately before selected range)
