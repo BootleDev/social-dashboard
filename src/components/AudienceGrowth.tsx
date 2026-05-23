@@ -204,15 +204,26 @@ export default function AudienceGrowth({
     <div className="space-y-6">
       {/* KPI Row */}
       <div className={`grid ${gridCols} gap-3`}>
-        {platformKPIs.map(({ key, followers, growth }) => (
-          <KPICard
-            key={key}
-            title={`${getPlatformConfig(key).label} Followers`}
-            value={formatNumber(followers)}
-            subtitle={`+${growth} in period`}
-            platformLabel={key}
-          />
-        ))}
+        {platformKPIs.map(({ key, followers, growth }) => {
+          // MARKETING-19 Fix 5: Pinterest-specific caption explaining API limitations.
+          // Per-pin reach is not exposed by Pinterest's API; impressions + saves
+          // ARE available. Low absolute numbers at current 5-follower scale are
+          // expected, not a tracking failure.
+          const pinterestTip =
+            key === "pinterest"
+              ? "Pinterest's API doesn't expose per-pin reach (use Impressions instead). Low absolute numbers reflect current account scale (~5 followers), not a tracking gap."
+              : undefined;
+          return (
+            <KPICard
+              key={key}
+              title={`${getPlatformConfig(key).label} Followers`}
+              value={formatNumber(followers)}
+              subtitle={`+${growth} in period`}
+              platformLabel={key}
+              tooltip={pinterestTip}
+            />
+          );
+        })}
         <KPICard title="Total Reach" value={formatNumber(totalReach)} />
         <KPICard
           title="Website Clicks"
