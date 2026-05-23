@@ -168,6 +168,15 @@ export default function AudienceGrowth({
 
   const totalReach = sumField(dailyMetrics, "Reach");
   const totalWebClicks = sumField(dailyMetrics, "Website Clicks");
+  // Website Clicks is no longer written by Meta Graph API v22.0 (closest field
+  // bundles website + email + phone + address taps and isn't a substitute).
+  // Detect "field never populated for this date range" so we can surface "—"
+  // instead of a misleading 0. Real per-content website attribution is coming
+  // from GA4 referrer data in a separate ticket.
+  const hasWebsiteClickData = dailyMetrics.some((r) => {
+    const v = r.fields["Website Clicks"];
+    return v !== undefined && v !== null;
+  });
 
   if (dailyMetrics.length === 0) {
     return (
@@ -207,8 +216,8 @@ export default function AudienceGrowth({
         <KPICard title="Total Reach" value={formatNumber(totalReach)} />
         <KPICard
           title="Website Clicks"
-          value={formatNumber(totalWebClicks)}
-          tooltip="Bio link and post link clicks"
+          value={hasWebsiteClickData ? formatNumber(totalWebClicks) : "—"}
+          tooltip="Not tracked at the platform level in Meta Graph API v22.0. Real per-content website attribution is pending GA4 referrer integration (separate ticket)."
         />
       </div>
 
