@@ -37,6 +37,7 @@ async function fetchAllRecords(
     sort?: Array<{ field: string; direction: "asc" | "desc" }>;
     fields?: string[];
     maxRecords?: number;
+    noCache?: boolean;
   } = {},
 ): Promise<AirtableRecord[]> {
   const { baseId, apiKey } = getCredentials();
@@ -63,10 +64,19 @@ async function fetchAllRecords(
     }
 
     const url = `${BASE_URL}/${baseId}/${tableId}?${params.toString()}`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      next: { revalidate: 1800 },
-    });
+    // MARKETING-19 Fix 7: when noCache is set (Refresh button path), bypass
+    // the 30-min Next.js fetch cache by setting cache: 'no-store'. Default
+    // behaviour keeps the 30-min revalidate window for normal dashboard loads.
+    const fetchOptions: RequestInit = options.noCache
+      ? {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          cache: "no-store",
+        }
+      : {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          next: { revalidate: 1800 },
+        };
+    const res = await fetch(url, fetchOptions);
 
     if (!res.ok) {
       const err = await res.text();
@@ -81,43 +91,48 @@ async function fetchAllRecords(
   return allRecords;
 }
 
-export async function getPosts() {
+export async function getPosts(opts: { noCache?: boolean } = {}) {
   return fetchAllRecords(TABLES.POSTS, {
     sort: [{ field: "Published At", direction: "desc" }],
+    noCache: opts.noCache,
   });
 }
 
-export async function getDailyAccountMetrics() {
+export async function getDailyAccountMetrics(opts: { noCache?: boolean } = {}) {
   return fetchAllRecords(TABLES.DAILY_ACCOUNT_METRICS, {
     sort: [{ field: "Date", direction: "desc" }],
+    noCache: opts.noCache,
   });
 }
 
-export async function getWeeklySummaries() {
+export async function getWeeklySummaries(opts: { noCache?: boolean } = {}) {
   return fetchAllRecords(TABLES.WEEKLY_SUMMARIES, {
     sort: [{ field: "Week Start", direction: "desc" }],
+    noCache: opts.noCache,
   });
 }
 
-export async function getSocialAlerts() {
+export async function getSocialAlerts(opts: { noCache?: boolean } = {}) {
   return fetchAllRecords(TABLES.SOCIAL_ALERTS, {
     sort: [{ field: "Alert Date", direction: "desc" }],
+    noCache: opts.noCache,
   });
 }
 
-export async function getContentLibrary() {
+export async function getContentLibrary(opts: { noCache?: boolean } = {}) {
   return fetchAllRecords(TABLES.CONTENT_LIBRARY, {
     sort: [{ field: "Views", direction: "desc" }],
     maxRecords: 100,
+    noCache: opts.noCache,
   });
 }
 
-export async function getAllDashboardData() {
+export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
   const [posts, dailyMetrics, weeklySummaries, alerts] = await Promise.all([
-    getPosts(),
-    getDailyAccountMetrics(),
-    getWeeklySummaries(),
-    getSocialAlerts(),
+    getPosts(opts),
+    getDailyAccountMetrics(opts),
+    getWeeklySummaries(opts),
+    getSocialAlerts(opts),
   ]);
 
   return { posts, dailyMetrics, weeklySummaries, alerts };

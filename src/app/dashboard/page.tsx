@@ -72,10 +72,13 @@ export default function DashboardPage() {
   const [competitorError, setCompetitorError] = useState("");
   const [competitorFetched, setCompetitorFetched] = useState(false);
 
-  const fetchData = useCallback(() => {
+  const fetchData = useCallback((force = false) => {
+    // MARKETING-19 Fix 7: when force=true (Refresh button), bypass the 30-min
+    // server-side fetch cache by appending ?nocache=1. Initial page load
+    // (force=false) keeps caching for performance.
     setLoading(true);
     setError("");
-    fetch("/api/airtable")
+    fetch(force ? "/api/airtable?nocache=1" : "/api/airtable")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -254,10 +257,10 @@ export default function DashboardPage() {
             </div>
             {!loading && data && (
               <button
-                onClick={fetchData}
+                onClick={() => fetchData(true)}
                 className="text-[10px] px-1.5 py-0.5 rounded transition-colors hover:bg-white/10 cursor-pointer"
                 style={{ color: "var(--text-secondary)" }}
-                title="Refresh data"
+                title="Refresh data (bypasses cache)"
               >
                 Refresh
               </button>
