@@ -10,6 +10,7 @@ import {
   saveRate,
   commentRate,
   shareRate,
+  repostRate,
   viewThroughRate,
   watchTimePct,
   engagementScore,
@@ -136,6 +137,48 @@ const METRIC_OPTIONS: MetricOption[] = [
     },
     format: (v) => v.toFixed(1),
     yLabel: "Reach Score (0–100)",
+  },
+  // Added 2026-05-26: outcome variables from the new IG Reels signals + Pinterest.
+  // Skip Rate is IG Reels only; Repost Rate is IG only; Outbound Click is
+  // primarily Pinterest. Empty buckets are filtered by the chart at render time.
+  {
+    label: "Skip Rate (Reels)",
+    getMetric: (r) => {
+      const v = num(r.fields["Skip Rate"]);
+      // 0 means "no data" not "perfect retention" — return undefined so the
+      // bucket gets excluded from the average rather than dragging it to 0.
+      return v > 0 ? v : undefined;
+    },
+    format: (v) => `${v.toFixed(1)}%`,
+    yLabel: "Skip Rate %",
+  },
+  {
+    label: "Repost Rate",
+    getMetric: (r) => {
+      const p = toPost(r);
+      const v = repostRate(p);
+      return v !== undefined ? v * 100 : undefined;
+    },
+    format: (v) => `${v.toFixed(2)}%`,
+    yLabel: "Repost Rate %",
+  },
+  {
+    label: "Reposts (total)",
+    getMetric: (r) => num(r.fields["Reposts"]),
+    format: (v) => v.toFixed(1),
+    yLabel: "Avg Reposts",
+  },
+  {
+    label: "Outbound Clicks (Pinterest)",
+    getMetric: (r) => {
+      // Pinterest pin records store outbound clicks in Link Clicks (per the
+      // Pinterest Data Refresher's posts.push mapping).
+      const platform = str(r.fields["Platform"]).toLowerCase();
+      if (platform !== "pinterest") return undefined;
+      return num(r.fields["Link Clicks"]);
+    },
+    format: (v) => v.toFixed(1),
+    yLabel: "Avg Outbound Clicks",
   },
 ];
 

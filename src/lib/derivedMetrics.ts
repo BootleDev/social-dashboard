@@ -18,6 +18,15 @@ export function shareRate(post: Post): number | undefined {
   return safeRate(post.shares, post.reach);
 }
 
+/**
+ * Reposts / Reach — proxy for full re-share propagation. Distinct from
+ * shareRate, which counts share-button taps. Reposts mean the post was
+ * re-published into another account's feed, a stronger algorithmic signal.
+ */
+export function repostRate(post: Post): number | undefined {
+  return safeRate(post.reposts, post.reach);
+}
+
 export function reachRate(post: Post, followers: number): number | undefined {
   return safeRate(post.reach, followers);
 }
