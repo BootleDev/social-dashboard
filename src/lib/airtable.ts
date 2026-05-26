@@ -6,6 +6,11 @@ export const TABLES = {
   WEEKLY_SUMMARIES: "tblUinLyGAkmneFFZ",
   SOCIAL_ALERTS: "tbliPoyQSWCMmF5FH",
   CONTENT_LIBRARY: "tbl5IMvmWyqGfuwSv",
+  // Per-channel data feeds. One table per (channel, data-type) pair.
+  // Naming convention: {CHANNEL}_{DATA_TYPE}. Add new feeds here as we wire them.
+  INSTAGRAM_AUDIENCE: "tblB8T1Cy0H8OzVXG",
+  PINTEREST_TRENDS_KEYWORDS: "tblZ4f4TXc92jakq8",
+  PINTEREST_TOP_PINS: "tblEuz0kmposwh81J",
 } as const;
 
 interface AirtableRecord {
@@ -127,13 +132,64 @@ export async function getContentLibrary(opts: { noCache?: boolean } = {}) {
   });
 }
 
+export async function getInstagramAudience(opts: { noCache?: boolean } = {}) {
+  return fetchAllRecords(TABLES.INSTAGRAM_AUDIENCE, {
+    sort: [
+      { field: "Snapshot Date", direction: "desc" },
+      { field: "Value", direction: "desc" },
+    ],
+    noCache: opts.noCache,
+  });
+}
+
+export async function getPinterestTrendsKeywords(
+  opts: { noCache?: boolean } = {},
+) {
+  return fetchAllRecords(TABLES.PINTEREST_TRENDS_KEYWORDS, {
+    sort: [
+      { field: "Snapshot Date", direction: "desc" },
+      { field: "Rank", direction: "asc" },
+    ],
+    noCache: opts.noCache,
+  });
+}
+
+export async function getPinterestTopPins(opts: { noCache?: boolean } = {}) {
+  return fetchAllRecords(TABLES.PINTEREST_TOP_PINS, {
+    sort: [
+      { field: "Snapshot Date", direction: "desc" },
+      { field: "Rank", direction: "asc" },
+    ],
+    noCache: opts.noCache,
+  });
+}
+
 export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
-  const [posts, dailyMetrics, weeklySummaries, alerts] = await Promise.all([
+  const [
+    posts,
+    dailyMetrics,
+    weeklySummaries,
+    alerts,
+    instagramAudience,
+    pinterestTrends,
+    pinterestTopPins,
+  ] = await Promise.all([
     getPosts(opts),
     getDailyAccountMetrics(opts),
     getWeeklySummaries(opts),
     getSocialAlerts(opts),
+    getInstagramAudience(opts),
+    getPinterestTrendsKeywords(opts),
+    getPinterestTopPins(opts),
   ]);
 
-  return { posts, dailyMetrics, weeklySummaries, alerts };
+  return {
+    posts,
+    dailyMetrics,
+    weeklySummaries,
+    alerts,
+    instagramAudience,
+    pinterestTrends,
+    pinterestTopPins,
+  };
 }
