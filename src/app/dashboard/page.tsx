@@ -5,6 +5,7 @@ import Overview from "@/components/Overview";
 import ContentAnalysis from "@/components/ContentAnalysis";
 import AudienceGrowth from "@/components/AudienceGrowth";
 import AudienceDemographics from "@/components/AudienceDemographics";
+import PinterestInsights from "@/components/PinterestInsights";
 import PlatformCompare from "@/components/PlatformCompare";
 import CompetitorInsights from "@/components/CompetitorInsights";
 import TaggingPage from "@/app/dashboard/tagging/page";
@@ -18,7 +19,14 @@ import { str, getComparisonPeriod, getPlatformKeys } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 
-type Tab = "overview" | "content" | "audience" | "compare" | "competitors" | "tagging";
+type Tab =
+  | "overview"
+  | "content"
+  | "audience"
+  | "pinterest"
+  | "compare"
+  | "competitors"
+  | "tagging";
 
 interface DashboardData {
   posts: AirtableRecord[];
@@ -217,6 +225,7 @@ export default function DashboardPage() {
     { key: "overview", label: "Overview" },
     { key: "content", label: "Content Analysis" },
     { key: "audience", label: "Audience & Growth" },
+    { key: "pinterest", label: "Pinterest Insights" },
     { key: "compare", label: "Platform Compare" },
     { key: "competitors", label: "Competitors" },
     { key: "tagging", label: "Tagging" },
@@ -349,6 +358,12 @@ export default function DashboardPage() {
                     records={data.instagramAudience ?? []}
                   />
                 </div>
+              )}
+              {tab === "pinterest" && (
+                <PinterestInsights
+                  trends={data.pinterestTrends ?? []}
+                  topPins={data.pinterestTopPins ?? []}
+                />
               )}
               {tab === "compare" && (
                 <PlatformCompare
