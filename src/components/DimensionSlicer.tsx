@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
@@ -187,9 +187,73 @@ interface DimensionSlicerProps {
   normalizers: ReachNormalizers;
 }
 
+/** Minimum fill-rate (0-1) below which an option is considered unusable. */
+const MIN_FILL_RATE = 0.05;
+
+/**
+ * For each option, compute the fraction of posts that produce a non-empty
+ * value. Returns a parallel array of booleans (true = usable).
+ */
+function computeDimAvailability(
+  posts: AirtableRecord[],
+  options: typeof DIMENSION_OPTIONS,
+): boolean[] {
+  if (posts.length === 0) return options.map(() => false);
+  return options.map((opt) => {
+    let filled = 0;
+    for (const r of posts) {
+      const v = opt.getKey(r);
+      if (v && v !== "untagged" && v !== "No") filled++;
+    }
+    return filled / posts.length >= MIN_FILL_RATE;
+  });
+}
+
+function computeMetricAvailability(
+  posts: AirtableRecord[],
+  options: typeof METRIC_OPTIONS,
+  normalizers: ReachNormalizers,
+): boolean[] {
+  if (posts.length === 0) return options.map(() => false);
+  return options.map((opt) => {
+    let filled = 0;
+    for (const r of posts) {
+      const v = opt.getMetric(r, normalizers);
+      if (v !== undefined && Number.isFinite(v) && v !== 0) filled++;
+    }
+    return filled / posts.length >= MIN_FILL_RATE;
+  });
+}
+
 export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerProps) {
   const [dimIndex, setDimIndex] = useState(0);
   const [metricIndex, setMetricIndex] = useState(0);
+
+  // Compute which dim/metric options have enough data to be useful for the
+  // current post set. Empty options stay listed but are flagged in the UI so
+  // the writer knows why a dim is unavailable instead of selecting and
+  // getting a confusing blank chart.
+  const dimAvailable = useMemo(
+    () => computeDimAvailability(posts, DIMENSION_OPTIONS),
+    [posts],
+  );
+  const metricAvailable = useMemo(
+    () => computeMetricAvailability(posts, METRIC_OPTIONS, normalizers),
+    [posts, normalizers],
+  );
+
+  // Auto-fall-back to a populated option if the current selection became empty
+  // (e.g. due to platform filter change). Only runs when availability changes.
+  useEffect(() => {
+    if (!dimAvailable[dimIndex]) {
+      const firstAvail = dimAvailable.findIndex(Boolean);
+      if (firstAvail >= 0) setDimIndex(firstAvail);
+    }
+    if (!metricAvailable[metricIndex]) {
+      const firstAvail = metricAvailable.findIndex(Boolean);
+      if (firstAvail >= 0) setMetricIndex(firstAvail);
+    }
+  }, [dimAvailable, metricAvailable, dimIndex, metricIndex]);
 
   const dim = DIMENSION_OPTIONS[dimIndex];
   const metric = METRIC_OPTIONS[metricIndex];
@@ -257,8 +321,8 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
             aria-label="Select dimension"
           >
             {DIMENSION_OPTIONS.map((d, i) => (
-              <option key={d.label} value={i}>
-                {d.label}
+              <option key={d.label} value={i} disabled={!dimAvailable[i]}>
+                {d.label}{!dimAvailable[i] ? " (no data)" : ""}
               </option>
             ))}
           </select>
@@ -275,8 +339,8 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
             aria-label="Select metric"
           >
             {METRIC_OPTIONS.map((m, i) => (
-              <option key={m.label} value={i}>
-                {m.label}
+              <option key={m.label} value={i} disabled={!metricAvailable[i]}>
+                {m.label}{!metricAvailable[i] ? " (no data)" : ""}
               </option>
             ))}
           </select>
