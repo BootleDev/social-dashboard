@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import Overview from "@/components/Overview";
 import ContentAnalysis from "@/components/ContentAnalysis";
 import AudienceGrowth from "@/components/AudienceGrowth";
+import AudienceDemographics from "@/components/AudienceDemographics";
 import PlatformCompare from "@/components/PlatformCompare";
 import CompetitorInsights from "@/components/CompetitorInsights";
 import TaggingPage from "@/app/dashboard/tagging/page";
@@ -24,6 +25,11 @@ interface DashboardData {
   dailyMetrics: AirtableRecord[];
   weeklySummaries: AirtableRecord[];
   alerts: AirtableRecord[];
+  // Per-channel feeds (added 2026-05-26). Optional so older API responses
+  // (cached, mid-deploy) don't break the UI; components treat empty as no-data.
+  instagramAudience?: AirtableRecord[];
+  pinterestTrends?: AirtableRecord[];
+  pinterestTopPins?: AirtableRecord[];
 }
 
 function filterByPlatform(
@@ -334,10 +340,15 @@ export default function DashboardPage() {
               )}
               {tab === "content" && <ContentAnalysis posts={filteredPosts} />}
               {tab === "audience" && (
-                <AudienceGrowth
-                  posts={filteredPosts}
-                  dailyMetrics={filteredDaily}
-                />
+                <div className="space-y-6">
+                  <AudienceGrowth
+                    posts={filteredPosts}
+                    dailyMetrics={filteredDaily}
+                  />
+                  <AudienceDemographics
+                    records={data.instagramAudience ?? []}
+                  />
+                </div>
               )}
               {tab === "compare" && (
                 <PlatformCompare
