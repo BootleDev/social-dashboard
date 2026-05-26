@@ -26,7 +26,9 @@ type SortField =
   | "Save Rate"
   | "VTR"
   | "Engagement Score"
-  | "Reach Score";
+  | "Reach Score"
+  | "Skip Rate"
+  | "Reposts";
 
 interface PostScorecardTableProps {
   posts: AirtableRecord[];
@@ -115,6 +117,8 @@ export default function PostScorecardTable({
               "VTR %",
               "Eng Score",
               "Reach Score",
+              "Skip Rate %",
+              "Reposts",
               "Saves",
               "Shares",
               "Likes",
@@ -140,6 +144,8 @@ export default function PostScorecardTable({
                 ((viewThroughRate(post) ?? 0) * 100).toFixed(1),
                 (engagementScore(post) ?? 0).toFixed(1),
                 (reachScore(post, normalizers) ?? 0).toFixed(1),
+                num(p.fields["Skip Rate"]).toFixed(1),
+                String(num(p.fields["Reposts"])),
                 String(num(p.fields["Saves"])),
                 String(num(p.fields["Shares"])),
                 String(num(p.fields["Likes"])),
@@ -185,6 +191,8 @@ export default function PostScorecardTable({
                 "VTR",
                 "Engagement Score",
                 "Reach Score",
+                "Skip Rate",
+                "Reposts",
                 "Saves",
                 "Shares",
                 "Likes",
@@ -201,6 +209,8 @@ export default function PostScorecardTable({
                 VTR: "VTR",
                 "Engagement Score": "Eng\u2191",
                 "Reach Score": "Reach\u2191",
+                "Skip Rate": "Skip%",
+                Reposts: "Reposts",
               };
               return (
                 <th
@@ -258,6 +268,18 @@ export default function PostScorecardTable({
               </td>
               <td className="py-2 px-2 text-right">
                 {(() => { const v = reachScore(toPost(p), normalizers); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
+              </td>
+              <td className="py-2 px-2 text-right">
+                {(() => {
+                  const v = num(p.fields["Skip Rate"]);
+                  if (v <= 0) return "\u2014";
+                  // Skip Rate is 0-100 (percentage). Tint red when >70% (poor hook).
+                  const cls = v > 70 ? "text-red-400" : v > 50 ? "text-amber-400" : "";
+                  return <span className={cls}>{v.toFixed(1)}%</span>;
+                })()}
+              </td>
+              <td className="py-2 px-2 text-right">
+                {num(p.fields["Reposts"]) > 0 ? num(p.fields["Reposts"]) : "\u2014"}
               </td>
               <td className="py-2 px-2 text-right">{num(p.fields["Saves"])}</td>
               <td className="py-2 px-2 text-right">
