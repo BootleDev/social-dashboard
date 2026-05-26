@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
+import type { ChartEvent, ActiveElement } from "chart.js";
 import "@/lib/chartSetup";
 import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
+import PostDrilldownPanel from "./PostDrilldownPanel";
 import { groupByDimension, timeBucket, dayOfWeek, str, num } from "@/lib/utils";
 import {
   saveRate,
@@ -258,6 +260,19 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
   const dim = DIMENSION_OPTIONS[dimIndex];
   const metric = METRIC_OPTIONS[metricIndex];
 
+  // Drilldown state: which bucket was clicked (full label without count suffix).
+  const [drilldownBucket, setDrilldownBucket] = useState<string | null>(null);
+
+  // Posts that belong to the clicked bucket. Re-computes only when the click
+  // selection or input set changes — not on hover.
+  const drilldownPosts = useMemo(() => {
+    if (!drilldownBucket) return [];
+    return posts.filter((r) => {
+      const key = dim.getKey(r) || "untagged";
+      return key === drilldownBucket;
+    });
+  }, [drilldownBucket, posts, dim]);
+
   const chartData = useMemo(() => {
     const grouped = groupByDimension(
       posts,
@@ -279,10 +294,33 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
     };
   }, [posts, dim, metric, normalizers]);
 
+  // Bucket-label lookup (chart bar index → raw bucket key, since the chart
+  // labels include the count suffix like "Question (49)").
+  const bucketKeys = useMemo(() => {
+    const grouped = groupByDimension(
+      posts,
+      dim.getKey,
+      (r) => metric.getMetric(r, normalizers),
+    ).filter((g) => g.label !== "untagged" && g.label !== "");
+    return grouped.map((g) => g.label);
+  }, [posts, dim, metric, normalizers]);
+
   const chartOptions = useMemo(
     () => ({
       ...defaultOptions,
       indexAxis: "y" as const,
+      onClick: (_evt: ChartEvent, elements: ActiveElement[]) => {
+        if (elements.length === 0) return;
+        const idx = elements[0].index;
+        const bucket = bucketKeys[idx];
+        if (bucket) setDrilldownBucket(bucket);
+      },
+      onHover: (event: ChartEvent, elements: ActiveElement[]) => {
+        const target = event.native?.target as HTMLElement | undefined;
+        if (target) {
+          target.style.cursor = elements.length > 0 ? "pointer" : "default";
+        }
+      },
       scales: {
         ...defaultOptions.scales,
         x: {
@@ -291,7 +329,7 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
         },
       },
     }),
-    [metric],
+    [metric, bucketKeys],
   );
 
   const selectClass =
@@ -360,7 +398,25 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
           unlock this chart.
         </div>
       ) : (
-        <Bar data={chartData} options={chartOptions} />
+        <>
+          <Bar data={chartData} options={chartOptions} />
+          <p
+            className="text-[10px] mt-2 text-right"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            Click a bar to see contributing posts
+          </p>
+        </>
+      )}
+      {drilldownBucket && (
+        <PostDrilldownPanel
+          posts={drilldownPosts}
+          bucketLabel={`${dim.label}: ${drilldownBucket}`}
+          metricLabel={metric.label}
+          getMetricValue={(r) => metric.getMetric(r, normalizers)}
+          formatMetric={metric.format}
+          onClose={() => setDrilldownBucket(null)}
+        />
       )}
     </ChartCard>
   );
