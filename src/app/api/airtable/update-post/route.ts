@@ -15,11 +15,13 @@ const ALLOWED_FIELDS = new Set([
   "Visual Style",
   "Setting",
   "Content Pillar",
+  "Content Theme",
   "Talent Present",
   "Tagging Status",
 ]);
 
-// Simple in-memory rate limiter: max 10 requests per session token per minute.
+// Simple in-memory rate limiter: max 60 requests per session token per minute
+// (raised from 10 to accommodate bulk-approve in the review queue).
 const rateLimiter = new Map<string, { count: number; resetAt: number }>();
 
 function checkRateLimit(sessionId: string): boolean {
@@ -29,7 +31,7 @@ function checkRateLimit(sessionId: string): boolean {
     rateLimiter.set(sessionId, { count: 1, resetAt: now + 60_000 });
     return true;
   }
-  if (entry.count >= 10) return false;
+  if (entry.count >= 60) return false;
   rateLimiter.set(sessionId, { ...entry, count: entry.count + 1 });
   return true;
 }

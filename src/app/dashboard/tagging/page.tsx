@@ -1,16 +1,38 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { str, num } from "@/lib/utils";
 import { toPost } from "@/lib/types";
 import type { AirtableRecord } from "@/lib/utils";
 
-const HOOK_TYPES = ["Question", "Bold claim", "Curiosity gap", "Pain point", "Visual-only", "None"];
+const HOOK_TYPES = [
+  "Statement",
+  "Question",
+  "Story",
+  "Educational",
+  "Curiosity gap",
+  "Visual-only",
+  "Bold claim",
+  "Pain point",
+  "List",
+  "Steps",
+];
+const CONTENT_THEMES = [
+  "Recipes",
+  "Product",
+  "UGC",
+  "Lifestyle",
+  "Behind-the-Scenes",
+  "Education",
+  "Sustainability",
+];
 const VO_TYPES = ["Original voice", "AI", "Text-only", "Music only"];
 const CTA_TYPES = ["Link in bio", "Comment", "Save", "Visit website", "Direct", "None"];
 const VISUAL_STYLES = ["Lifestyle", "Product-only", "UGC", "Aesthetic flat lay", "Tutorial"];
 const SETTINGS = ["Outdoors", "Home", "Urban", "Studio"];
-const CONTENT_PILLARS = ["Sustainability", "Modularity", "Design", "Drink recipe", "Lifestyle"];
+const CONTENT_PILLARS = ["Sustainability", "Modularity", "Design", "Drink recipe"];
+
+type StatusFilter = "draft" | "untagged" | "all";
 
 interface DraftState {
   hookPresent: boolean;
@@ -22,6 +44,7 @@ interface DraftState {
   visualStyle: string;
   setting: string;
   contentPillar: string;
+  contentTheme: string;
   talentPresent: boolean;
 }
 
@@ -37,6 +60,7 @@ function initialDraft(r: AirtableRecord): DraftState {
     visualStyle: p.visualStyle || p.draftVisualStyle,
     setting: p.setting || p.draftSetting,
     contentPillar: p.contentPillar || p.draftContentPillar,
+    contentTheme: p.contentTheme,
     talentPresent: p.talentPresent,
   };
 }
@@ -112,9 +136,13 @@ function CheckField({
 function PostTagCard({
   record,
   onApproved,
+  selected,
+  onSelectChange,
 }: {
   record: AirtableRecord;
   onApproved: (id: string) => void;
+  selected: boolean;
+  onSelectChange: (id: string, selected: boolean) => void;
 }) {
   const [draft, setDraft] = useState<DraftState>(() => initialDraft(record));
   const [saving, setSaving] = useState(false);
@@ -147,6 +175,7 @@ function PostTagCard({
             "Visual Style": draft.visualStyle || null,
             Setting: draft.setting || null,
             "Content Pillar": draft.contentPillar || null,
+            "Content Theme": draft.contentTheme || null,
             "Talent Present": draft.talentPresent,
             "Tagging Status": "Approved",
           },
@@ -191,8 +220,16 @@ function PostTagCard({
     >
       {/* Post header */}
       <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(e) => onSelectChange(record.id, e.target.checked)}
+            className="mt-1 cursor-pointer"
+            aria-label="Select for bulk approve"
+          />
         <div className="space-y-1 flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span
               className="text-xs px-1.5 py-0.5 rounded capitalize"
               style={{
@@ -202,6 +239,23 @@ function PostTagCard({
             >
               {post.platform}
             </span>
+            {str(record.fields["Tagging Status"]) && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide"
+                style={{
+                  background:
+                    str(record.fields["Tagging Status"]) === "Draft"
+                      ? "rgba(234, 179, 8, 0.15)"
+                      : "var(--bg-secondary)",
+                  color:
+                    str(record.fields["Tagging Status"]) === "Draft"
+                      ? "rgb(234, 179, 8)"
+                      : "var(--text-secondary)",
+                }}
+              >
+                {str(record.fields["Tagging Status"])}
+              </span>
+            )}
             <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
               {date}
             </span>
@@ -217,6 +271,7 @@ function PostTagCard({
             )}
           </div>
           <p className="text-sm leading-snug">{caption}{post.caption.length > 120 ? "…" : ""}</p>
+        </div>
         </div>
         {post.mediaUrl && (
           <a
@@ -238,6 +293,12 @@ function PostTagCard({
           value={draft.hookType}
           options={HOOK_TYPES}
           onChange={(v) => update("hookType", v)}
+        />
+        <SelectField
+          label="Content Theme"
+          value={draft.contentTheme}
+          options={CONTENT_THEMES}
+          onChange={(v) => update("contentTheme", v)}
         />
         <SelectField
           label="VO Type"
@@ -346,6 +407,10 @@ export default function TaggingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [approved, setApproved] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("draft");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkError, setBulkError] = useState("");
 
   const fetchPosts = useCallback(() => {
     setLoading(true);
@@ -366,39 +431,191 @@ export default function TaggingPage() {
 
   function handleApproved(id: string) {
     setApproved((prev) => new Set([...prev, id]));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }
 
-  const unapproved = records.filter(
-    (r) =>
-      !approved.has(r.id) &&
-      str(r.fields["Tagging Status"]) !== "Approved",
+  function handleSelectChange(id: string, selected: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  const visibleRecords = useMemo(() => {
+    return records.filter((r) => {
+      if (approved.has(r.id)) return false;
+      const status = str(r.fields["Tagging Status"]);
+      if (status === "Approved") return false;
+      if (statusFilter === "draft") return status === "Draft";
+      if (statusFilter === "untagged") return status !== "Draft";
+      return true;
+    });
+  }, [records, approved, statusFilter]);
+
+  const approvedCount =
+    records.filter((r) => str(r.fields["Tagging Status"]) === "Approved").length +
+    approved.size;
+  const total = records.length;
+
+  const visibleSelectedCount = useMemo(
+    () => visibleRecords.filter((r) => selectedIds.has(r.id)).length,
+    [visibleRecords, selectedIds],
   );
 
-  const approvedCount = records.filter(
-    (r) => str(r.fields["Tagging Status"]) === "Approved",
-  ).length + approved.size;
+  function toggleSelectAll() {
+    if (visibleSelectedCount === visibleRecords.length) {
+      // Deselect all visible
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const r of visibleRecords) next.delete(r.id);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const r of visibleRecords) next.add(r.id);
+        return next;
+      });
+    }
+  }
 
-  const total = records.length;
+  async function bulkApprove() {
+    if (selectedIds.size === 0) return;
+    setBulkApproving(true);
+    setBulkError("");
+    const ids = Array.from(selectedIds);
+    const failures: string[] = [];
+    // Sequential to respect 10/min rate limit; bail on first failure-pattern
+    for (const id of ids) {
+      try {
+        const res = await fetch("/api/airtable/update-post", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id,
+            fields: { "Tagging Status": "Approved" },
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          failures.push(`${id}: ${data.error ?? res.status}`);
+          // If we hit rate limit, stop early — user can retry
+          if (res.status === 429) break;
+        } else {
+          handleApproved(id);
+        }
+      } catch (err) {
+        failures.push(`${id}: ${err instanceof Error ? err.message : "error"}`);
+      }
+    }
+    setBulkApproving(false);
+    if (failures.length > 0) {
+      setBulkError(
+        `${failures.length} of ${ids.length} failed. First: ${failures[0]}`,
+      );
+    }
+  }
+
+  const filterLabel: Record<StatusFilter, string> = {
+    draft: "Draft only",
+    untagged: "Untagged only",
+    all: "All not-Approved",
+  };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-base font-semibold">Tag Posts</h2>
+          <h2 className="text-base font-semibold">Review Queue</h2>
           <p className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
             {loading
               ? "Loading…"
-              : `${unapproved.length} to tag, ${approvedCount} / ${total} approved`}
+              : `${visibleRecords.length} showing (${filterLabel[statusFilter]}), ${approvedCount} / ${total} approved`}
           </p>
         </div>
-        <button
-          onClick={fetchPosts}
-          className="text-[10px] px-2 py-1 rounded transition-colors hover:bg-white/10 cursor-pointer"
-          style={{ color: "var(--text-secondary)", border: "1px solid var(--border)" }}
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            className="text-xs rounded px-2 py-1 border outline-none cursor-pointer"
+            style={{
+              background: "var(--bg-secondary)",
+              color: "var(--text-primary)",
+              borderColor: "var(--border)",
+            }}
+            aria-label="Status filter"
+          >
+            <option value="draft">Draft only</option>
+            <option value="untagged">Untagged only</option>
+            <option value="all">All not-Approved</option>
+          </select>
+          <button
+            onClick={fetchPosts}
+            className="text-[10px] px-2 py-1 rounded transition-colors hover:bg-white/10 cursor-pointer"
+            style={{
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {visibleRecords.length > 0 && (
+        <div
+          className="flex items-center justify-between gap-4 rounded-lg px-3 py-2 sticky top-0 z-10"
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <label className="flex items-center gap-2 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              checked={
+                visibleSelectedCount > 0 &&
+                visibleSelectedCount === visibleRecords.length
+              }
+              ref={(el) => {
+                if (el)
+                  el.indeterminate =
+                    visibleSelectedCount > 0 &&
+                    visibleSelectedCount < visibleRecords.length;
+              }}
+              onChange={toggleSelectAll}
+              aria-label="Select all visible"
+            />
+            <span style={{ color: "var(--text-secondary)" }}>
+              {visibleSelectedCount === 0
+                ? "Select all visible"
+                : `${visibleSelectedCount} selected`}
+            </span>
+          </label>
+          <button
+            onClick={bulkApprove}
+            disabled={visibleSelectedCount === 0 || bulkApproving}
+            className="px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-40 cursor-pointer"
+            style={{ background: "var(--accent-purple)", color: "#fff" }}
+          >
+            {bulkApproving
+              ? "Approving…"
+              : `Approve ${visibleSelectedCount} selected`}
+          </button>
+        </div>
+      )}
+
+      {bulkError && (
+        <div className="rounded-xl p-3 border border-red-500/30 bg-red-500/10 text-red-400 text-xs">
+          {bulkError}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-xl p-4 border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
@@ -406,18 +623,24 @@ export default function TaggingPage() {
         </div>
       )}
 
-      {!loading && unapproved.length === 0 && !error && (
+      {!loading && visibleRecords.length === 0 && !error && (
         <div
           className="rounded-xl p-8 text-center text-sm"
           style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
         >
-          All posts tagged.
+          No posts match the current filter.
         </div>
       )}
 
       <div className="space-y-4">
-        {unapproved.map((r) => (
-          <PostTagCard key={r.id} record={r} onApproved={handleApproved} />
+        {visibleRecords.map((r) => (
+          <PostTagCard
+            key={r.id}
+            record={r}
+            onApproved={handleApproved}
+            selected={selectedIds.has(r.id)}
+            onSelectChange={handleSelectChange}
+          />
         ))}
       </div>
     </div>
