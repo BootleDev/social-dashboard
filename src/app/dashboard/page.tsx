@@ -73,10 +73,17 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState<DateRange>({
-    start: null,
-    end: null,
-    label: "All Time",
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    // Default to Last 30 days — the prior "All Time" default included every
+    // historical record and made period-over-period comparisons meaningless.
+    const end = new Date();
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - 29);
+    return {
+      start: start.toISOString().split("T")[0],
+      end: end.toISOString().split("T")[0],
+      label: "Last 30 days",
+    };
   });
   const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(
     new Set(),

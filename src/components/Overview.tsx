@@ -9,8 +9,6 @@ import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
 import AlertsFeed from "./AlertsFeed";
 import WeeklySummary from "./WeeklySummary";
-import InsightStrip from "./InsightStrip";
-import { formatPct as formatStatPct } from "@/lib/stats";
 import {
   num,
   str,
@@ -286,87 +284,8 @@ export default function Overview({
     );
   }
 
-  // Pulse-level insight: the single most important narration for the
-  // CEO/operator opening this tab — which KPI moved most and which way,
-  // followed by a complementary signal.
-  const pulseInsight = (() => {
-    const moves: Array<{ label: string; delta: number; direction: "up" | "down" }> =
-      [];
-    if (kpis.followersChange !== undefined && Number.isFinite(kpis.followersChange))
-      moves.push({
-        label: "followers",
-        delta: kpis.followersChange,
-        direction: kpis.followersChange >= 0 ? "up" : "down",
-      });
-    if (kpis.erChange !== undefined && Number.isFinite(kpis.erChange))
-      moves.push({
-        label: "engagement rate",
-        delta: kpis.erChange,
-        direction: kpis.erChange >= 0 ? "up" : "down",
-      });
-    if (kpis.reachChange !== undefined && Number.isFinite(kpis.reachChange))
-      moves.push({
-        label: "reach",
-        delta: kpis.reachChange,
-        direction: kpis.reachChange >= 0 ? "up" : "down",
-      });
-    if (
-      kpis.linkClicksChange !== undefined &&
-      Number.isFinite(kpis.linkClicksChange)
-    )
-      moves.push({
-        label: "link clicks",
-        delta: kpis.linkClicksChange,
-        direction: kpis.linkClicksChange >= 0 ? "up" : "down",
-      });
-    if (moves.length === 0) return null;
-    const ranked = [...moves].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-    return { top: ranked[0], second: ranked[1] };
-  })();
-
   return (
     <div className="space-y-6">
-      {pulseInsight && (
-        <InsightStrip
-          headline={
-            <>
-              Biggest mover: <strong>{pulseInsight.top.label}</strong>{" "}
-              <span
-                style={{
-                  color:
-                    pulseInsight.top.direction === "up"
-                      ? "var(--success, #2ecc71)"
-                      : "var(--danger, #e74c3c)",
-                }}
-              >
-                {formatStatPct(pulseInsight.top.delta)}
-              </span>{" "}
-              vs prior period
-              {pulseInsight.second && (
-                <>
-                  {" · "}
-                  {pulseInsight.second.label}{" "}
-                  <span
-                    style={{
-                      color:
-                        pulseInsight.second.direction === "up"
-                          ? "var(--success, #2ecc71)"
-                          : "var(--danger, #e74c3c)",
-                    }}
-                  >
-                    {formatStatPct(pulseInsight.second.delta)}
-                  </span>
-                </>
-              )}
-              {" · "}
-              <span style={{ color: "var(--text-secondary)" }}>
-                {kpis.postsPublished} post{kpis.postsPublished === 1 ? "" : "s"}{" "}
-                in period
-              </span>
-            </>
-          }
-        />
-      )}
       {/* KPI Row 1 — volume */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
         <KPICard

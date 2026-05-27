@@ -5,7 +5,7 @@ import { Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
-import InsightStrip from "./InsightStrip";
+import StatsPanel from "./StatsPanel";
 import { num, str, formatNumber } from "@/lib/utils";
 import { describe } from "@/lib/stats";
 import type { AirtableRecord } from "@/lib/utils";
@@ -243,52 +243,15 @@ export default function CompetitorInsights({
     );
   }
 
-  // Cross-cutting competitor insight: top account by avg views, best hook
-  // structure, and views-distribution context (median + headroom).
-  const competitorInsight = (() => {
-    const topBrand = brandData[0];
-    const topHook = hookData[0];
-    const viewsStats = describe(records.map((r) => num(r.fields["Views"])));
-    if (!topBrand || !viewsStats) return null;
-    return { topBrand, topHook, viewsStats };
-  })();
+  // Views distribution across all scraped competitor content — powers the
+  // Stats panels on the four competitor charts.
+  const viewsStats = useMemo(
+    () => describe(records.map((r) => num(r.fields["Views"]))),
+    [records],
+  );
 
   return (
     <div className="space-y-6">
-      {competitorInsight && (
-        <InsightStrip
-          headline={
-            <>
-              Top account:{" "}
-              <strong>@{competitorInsight.topBrand.handle}</strong>{" "}
-              ({formatNumber(competitorInsight.topBrand.avgViews)} avg views,{" "}
-              {competitorInsight.topBrand.count} posts)
-              {competitorInsight.topHook && (
-                <>
-                  {" · best hook: "}
-                  <strong>{competitorInsight.topHook.hook}</strong>{" "}
-                  ({formatNumber(competitorInsight.topHook.avgViews)} avg)
-                </>
-              )}
-            </>
-          }
-          stats={competitorInsight.viewsStats}
-          formatStat={(v) => formatNumber(v)}
-          extra={
-            <span>
-              Views distribution across {records.length} scraped posts.
-              Headroom: top post is{" "}
-              {competitorInsight.viewsStats.median > 0
-                ? (
-                    competitorInsight.viewsStats.max /
-                    competitorInsight.viewsStats.median
-                  ).toFixed(1) + "×"
-                : "—"}{" "}
-              median.
-            </span>
-          }
-        />
-      )}
       {/* Platform Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div
@@ -456,6 +419,13 @@ export default function CompetitorInsights({
         <ChartCard
           title="Avg Views by Account"
           tooltip="Average views per post for each competitor account"
+          headerAction={
+            <StatsPanel
+              stats={describe(brandData.map((b) => b.avgViews))}
+              format={(v) => formatNumber(v)}
+              context="Avg views per account distribution"
+            />
+          }
         >
           <Bar
             data={brandChartData}
@@ -465,6 +435,13 @@ export default function CompetitorInsights({
         <ChartCard
           title="Like-to-View Ratio by Account"
           tooltip="Higher ratio = more engaging content relative to reach"
+          headerAction={
+            <StatsPanel
+              stats={describe(brandData.map((b) => b.avgER))}
+              format={(v) => `${v.toFixed(2)}%`}
+              context="Like-to-view ratio across accounts"
+            />
+          }
         >
           <Bar
             data={brandERData}
@@ -477,6 +454,13 @@ export default function CompetitorInsights({
         <ChartCard
           title="Top Content Topics"
           tooltip="Most common AI-tagged topics across competitor content"
+          headerAction={
+            <StatsPanel
+              stats={describe(topicData.map((t) => t.count))}
+              format={(v) => v.toFixed(0)}
+              context="Post-count distribution across top topics"
+            />
+          }
         >
           <Bar
             data={topicChartData}
@@ -486,6 +470,13 @@ export default function CompetitorInsights({
         <ChartCard
           title="Hook Structure Performance"
           tooltip="Avg views by hook type — which openings perform best?"
+          headerAction={
+            <StatsPanel
+              stats={describe(hookData.map((h) => h.avgViews))}
+              format={(v) => formatNumber(v)}
+              context="Avg views distribution across hook structures"
+            />
+          }
         >
           <Bar
             data={hookChartData}
@@ -493,6 +484,13 @@ export default function CompetitorInsights({
           />
         </ChartCard>
       </div>
+
+      {viewsStats && (
+        <div className="text-[10px] text-right" style={{ color: "var(--text-secondary)" }}>
+          Total views distribution: median {formatNumber(viewsStats.median)} · max{" "}
+          {formatNumber(viewsStats.max)} across {records.length} posts
+        </div>
+      )}
     </div>
   );
 }

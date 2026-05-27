@@ -8,7 +8,6 @@ import {
 } from "@/lib/seasonal";
 import { toTrendingKeyword } from "@/lib/types";
 import type { AirtableRecord } from "@/lib/utils";
-import InsightStrip from "./InsightStrip";
 
 interface UpcomingWindowsProps {
   seasonalOpportunities: AirtableRecord[];
@@ -83,75 +82,8 @@ export default function UpcomingWindows({
     );
   }
 
-  // Act-first heuristic: a window is "high leverage" if it's in-window OR
-  // peaks within 14 days AND has at least one matching Pinterest trend right
-  // now. Rank by daysUntilPeak ascending (closer = more urgent). This is the
-  // sentence a planner most wants to see first.
-  const actFirst = useMemo(() => {
-    const matches = filtered
-      .map((w) => {
-        const trendHits = latestTrends.filter((t) => {
-          const keyword = t.keyword.toLowerCase();
-          return w.opportunity.trendKeywords.some((kw) =>
-            keyword.includes(kw),
-          );
-        });
-        return { w, trendHits };
-      })
-      .filter(
-        ({ w, trendHits }) =>
-          (w.inWindow || (w.daysUntilPeak >= 0 && w.daysUntilPeak <= 14)) &&
-          trendHits.length > 0,
-      )
-      .sort((a, b) => a.w.daysUntilPeak - b.w.daysUntilPeak);
-    return matches[0];
-  }, [filtered, latestTrends]);
-
-  const inWindowCount = filtered.filter((w) => w.inWindow).length;
-
   return (
     <div className="space-y-3">
-      {filtered.length > 0 && (
-        <InsightStrip
-          headline={
-            actFirst ? (
-              <>
-                Act first: <strong>{actFirst.w.opportunity.name}</strong>{" "}
-                ({actFirst.w.daysUntilPeak === 0
-                  ? "peaks today"
-                  : actFirst.w.daysUntilPeak < 0
-                    ? `peaked ${Math.abs(actFirst.w.daysUntilPeak)}d ago, still in window`
-                    : `peaks in ${actFirst.w.daysUntilPeak}d`}){" — "}
-                <span style={{ color: "var(--success, #2ecc71)" }}>
-                  {actFirst.trendHits.length} matching trend
-                  {actFirst.trendHits.length === 1 ? "" : "s"} right now
-                </span>
-              </>
-            ) : (
-              <>
-                <strong>{inWindowCount}</strong> moment
-                {inWindowCount === 1 ? "" : "s"} in window ·{" "}
-                <strong>{filtered.length - inWindowCount}</strong> upcoming
-                {" — "}
-                <span style={{ color: "var(--text-secondary)" }}>
-                  none currently matched against Pinterest trend keywords
-                </span>
-              </>
-            )
-          }
-          extra={
-            actFirst && actFirst.trendHits.length > 1 ? (
-              <span>
-                Other matching trends:{" "}
-                {actFirst.trendHits
-                  .slice(0, 6)
-                  .map((t) => t.keyword)
-                  .join(" · ")}
-              </span>
-            ) : undefined
-          }
-        />
-      )}
       <div
         className="flex items-center justify-between flex-wrap gap-2 px-1"
       >
