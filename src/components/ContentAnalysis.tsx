@@ -122,10 +122,15 @@ export default function ContentAnalysis({
   const metric = METRICS[metricKey];
 
   // Drilldown shared across stacked bars, scatter, and hashtag bars. Holds
-  // the filtered post subset + the human-readable label of what was clicked.
+  // the filtered post subset, the human-readable label of what was clicked,
+  // and the metric to sort by inside the panel so posts rank by the same
+  // measure that produced the click.
   const [drilldown, setDrilldown] = useState<{
     posts: AirtableRecord[];
     label: string;
+    metricLabel: string;
+    getMetricValue: (r: AirtableRecord) => number | undefined;
+    formatMetric: (v: number) => string;
   } | null>(null);
 
   // Precompute index by (Post Type, Content Theme) for fast drilldown lookup.
@@ -148,9 +153,19 @@ export default function ContentAnalysis({
     const subset =
       postsByTypeTheme.get(`${cleanType}${cleanTheme}`) ?? [];
     if (subset.length === 0) return;
+    const get = metricGetter(metricKey);
+    const isRate = !metric.additive;
     setDrilldown({
       posts: subset,
       label: `${cleanType} × ${cleanTheme}`,
+      metricLabel: metric.label,
+      // ER stored as 0-1 in Airtable but displayed as %; multiply when the
+      // active metric is a rate so the drilldown column matches the chart.
+      getMetricValue: (r) => {
+        const v = get(r);
+        return v === undefined ? undefined : isRate ? v * 100 : v;
+      },
+      formatMetric: metric.formatter,
     });
   };
 
@@ -353,9 +368,19 @@ export default function ContentAnalysis({
       if (!elements.length) return;
       const post = scatterPosts[elements[0].index];
       if (!post) return;
+      // Scatter axes are Save Rate (x) and Share Rate (y); rank by Save Rate
+      // since that's the higher-intent signal and matches what users tend to
+      // be searching for when clicking outliers on this chart.
       setDrilldown({
         posts: [post],
         label: `Post ${str(post.fields["Post ID"]).slice(-10)} — Save vs Share`,
+        metricLabel: "Save Rate",
+        getMetricValue: (r) => {
+          const reach = num(r.fields["Reach"]);
+          if (reach <= 0) return undefined;
+          return (num(r.fields["Saves"]) / reach) * 100;
+        },
+        formatMetric: (v: number) => `${v.toFixed(2)}%`,
       });
     },
     scales: {
@@ -481,9 +506,14 @@ export default function ContentAnalysis({
         <HashtagCharts
           posts={posts}
           onSelectHashtag={(tag, subset) =>
+            // Hashtag charts plot frequency + avg ER; ER is the more useful
+            // sort for inspecting which posts under a tag actually performed.
             setDrilldown({
               posts: subset,
               label: `Hashtag #${tag}`,
+              metricLabel: "Engagement Rate",
+              getMetricValue: (r) => num(r.fields["Engagement Rate"]) * 100,
+              formatMetric: (v: number) => `${v.toFixed(2)}%`,
             })
           }
         />
@@ -493,6 +523,9 @@ export default function ContentAnalysis({
         <PostDrilldownPanel
           posts={drilldown.posts}
           bucketLabel={drilldown.label}
+          metricLabel={drilldown.metricLabel}
+          getMetricValue={drilldown.getMetricValue}
+          formatMetric={drilldown.formatMetric}
           timezone={timezone}
           onClose={() => setDrilldown(null)}
         />
