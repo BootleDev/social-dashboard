@@ -373,6 +373,8 @@ export default function DashboardPage() {
                 <PinterestInsights
                   trends={data.pinterestTrends ?? []}
                   topPins={data.pinterestTopPins ?? []}
+                  posts={data.posts ?? []}
+                  timezone={timezone}
                 />
               )}
               {tab === "compare" && (

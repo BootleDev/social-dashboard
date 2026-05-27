@@ -7,12 +7,17 @@ import {
   type TrendingKeyword,
   type TopPin,
 } from "@/lib/types";
-import { formatNumber } from "@/lib/utils";
+import { formatNumber, str } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
+import PostDrilldownPanel from "./PostDrilldownPanel";
 
 interface PinterestInsightsProps {
   trends: AirtableRecord[];
   topPins: AirtableRecord[];
+  /** Full Posts table — used to resolve a TopPin row to its full Post record. */
+  posts?: AirtableRecord[];
+  /** IANA timezone for date display in the drilldown panel. */
+  timezone?: string;
 }
 
 const REGIONS_AVAILABLE: Array<TrendingKeyword["region"]> = ["GB+IE", "US"];
@@ -197,10 +202,26 @@ function GrowthCell({ value }: { value: number }) {
 
 interface TopPinsPanelProps {
   records: AirtableRecord[];
+  posts: AirtableRecord[];
+  timezone: string;
 }
 
-function TopPinsPanel({ records }: TopPinsPanelProps) {
+function TopPinsPanel({ records, posts, timezone }: TopPinsPanelProps) {
   const [sortBy, setSortBy] = useState<TopPin["sortBy"]>("OUTBOUND_CLICK");
+  const [drilldown, setDrilldown] = useState<{
+    posts: AirtableRecord[];
+    label: string;
+  } | null>(null);
+
+  // Build a Post ID -> Post record lookup so row clicks resolve quickly.
+  const postsByPostId = useMemo(() => {
+    const m = new Map<string, AirtableRecord>();
+    for (const p of posts) {
+      const pid = str(p.fields["Post ID"]);
+      if (pid) m.set(pid, p);
+    }
+    return m;
+  }, [posts]);
 
   const pins = useMemo(() => records.map(toTopPin), [records]);
   const latestDate = useMemo(() => latestSnapshotDate(pins), [pins]);
@@ -285,36 +306,73 @@ function TopPinsPanel({ records }: TopPinsPanelProps) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((p) => (
-              <tr
-                key={p.id}
-                className="border-t hover:bg-white/5 transition-colors"
-                style={{ borderColor: "var(--border)" }}
-              >
-                <td className="py-2 px-2 opacity-50">{p.rank}</td>
-                <td className="py-2 px-2">
-                  <a
-                    href={`https://www.pinterest.com/pin/${p.pinId}/`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:underline"
-                    style={{ color: "var(--accent-purple)" }}
-                  >
-                    {p.pinId.slice(-10)}
-                  </a>
-                </td>
-                <td className="py-2 px-2 text-right">
-                  {formatNumber(p.impressions)}
-                </td>
-                <td className="py-2 px-2 text-right">{p.saves}</td>
-                <td className="py-2 px-2 text-right font-medium">
-                  {p.outboundClick > 0 ? p.outboundClick : "—"}
-                </td>
-                <td className="py-2 px-2 text-right">{p.engagement}</td>
-              </tr>
-            ))}
+            {filtered.map((p) => {
+              const matchedPost = postsByPostId.get(p.postId);
+              const hasMatch = !!matchedPost;
+              return (
+                <tr
+                  key={p.id}
+                  className={`border-t hover:bg-white/5 transition-colors ${
+                    hasMatch ? "cursor-pointer" : ""
+                  }`}
+                  style={{ borderColor: "var(--border)" }}
+                  onClick={() => {
+                    if (matchedPost) {
+                      setDrilldown({
+                        posts: [matchedPost],
+                        label: `Pin #${p.rank} by ${p.sortBy.replace("_", " ")}`,
+                      });
+                    }
+                  }}
+                  title={
+                    hasMatch
+                      ? "Click to see full post detail"
+                      : "No matching Post record (pin may be older than 30d)"
+                  }
+                >
+                  <td className="py-2 px-2 opacity-50">{p.rank}</td>
+                  <td className="py-2 px-2">
+                    <a
+                      href={`https://www.pinterest.com/pin/${p.pinId}/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                      style={{ color: "var(--accent-purple)" }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {p.pinId.slice(-10)}
+                    </a>
+                    {hasMatch && (
+                      <span
+                        className="ml-2 text-[10px]"
+                        style={{ color: "var(--text-secondary)" }}
+                      >
+                        ↗ details
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 px-2 text-right">
+                    {formatNumber(p.impressions)}
+                  </td>
+                  <td className="py-2 px-2 text-right">{p.saves}</td>
+                  <td className="py-2 px-2 text-right font-medium">
+                    {p.outboundClick > 0 ? p.outboundClick : "—"}
+                  </td>
+                  <td className="py-2 px-2 text-right">{p.engagement}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+      )}
+
+      {drilldown && (
+        <PostDrilldownPanel
+          posts={drilldown.posts}
+          bucketLabel={drilldown.label}
+          timezone={timezone}
+          onClose={() => setDrilldown(null)}
+        />
       )}
     </div>
   );
@@ -323,6 +381,8 @@ function TopPinsPanel({ records }: TopPinsPanelProps) {
 export default function PinterestInsights({
   trends,
   topPins,
+  posts = [],
+  timezone = "",
 }: PinterestInsightsProps) {
   if (trends.length === 0 && topPins.length === 0) {
     return (
@@ -350,7 +410,7 @@ export default function PinterestInsights({
   return (
     <div className="space-y-6">
       <TrendsPanel records={trends} />
-      <TopPinsPanel records={topPins} />
+      <TopPinsPanel records={topPins} posts={posts} timezone={timezone} />
     </div>
   );
 }
