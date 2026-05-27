@@ -94,12 +94,21 @@ export function dayOfWeek(publishedAt: string): string {
  * "Europe/London", "America/New_York"); pass `undefined` for browser-local.
  */
 
+/**
+ * Normalize a timezone arg: empty string or undefined becomes undefined so
+ * Intl.DateTimeFormat falls back to browser-local. Passing `""` directly to
+ * `timeZone:` throws a RangeError ("Invalid time zone specified").
+ */
+function normalizeTz(timezone?: string): string | undefined {
+  return timezone && timezone.length > 0 ? timezone : undefined;
+}
+
 /** Format an ISO timestamp as YYYY-MM-DD in the given IANA timezone. */
 export function formatLocalDate(iso: string, timezone?: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
+    timeZone: normalizeTz(timezone),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -115,7 +124,7 @@ export function formatLocalDateTime(iso: string, timezone?: string): string {
   // Two-pass to avoid locale-mixed output: build date, then time.
   const date = formatLocalDate(iso, timezone);
   const time = new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
+    timeZone: normalizeTz(timezone),
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -129,7 +138,7 @@ export function dayOfWeekLocal(iso: string, timezone?: string): string {
   if (isNaN(d.getTime())) return "Unknown";
   // Use weekday short to get e.g. "Mon", "Tue".
   return new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
+    timeZone: normalizeTz(timezone),
     weekday: "short",
   }).format(d);
 }
@@ -139,7 +148,7 @@ export function hourOfDayLocal(iso: string, timezone?: string): number {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return -1;
   const hourStr = new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
+    timeZone: normalizeTz(timezone),
     hour: "2-digit",
     hour12: false,
   }).format(d);

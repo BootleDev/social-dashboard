@@ -59,6 +59,23 @@ describe("dayOfWeekLocal", () => {
   });
 });
 
+describe("empty-string timezone (browser-local fallback)", () => {
+  it("formatLocalDate handles empty string", () => {
+    // Empty string should not throw and should produce SOME date string.
+    expect(() => formatLocalDate(ISO, "")).not.toThrow();
+    expect(formatLocalDate(ISO, "")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+  it("dayOfWeekLocal handles empty string", () => {
+    expect(() => dayOfWeekLocal(ISO, "")).not.toThrow();
+  });
+  it("hourOfDayLocal handles empty string", () => {
+    expect(() => hourOfDayLocal(ISO, "")).not.toThrow();
+    const hr = hourOfDayLocal(ISO, "");
+    expect(hr).toBeGreaterThanOrEqual(0);
+    expect(hr).toBeLessThan(24);
+  });
+});
+
 describe("hourOfDayLocal", () => {
   it("returns 20 for UTC", () => {
     expect(hourOfDayLocal(ISO, "UTC")).toBe(20);

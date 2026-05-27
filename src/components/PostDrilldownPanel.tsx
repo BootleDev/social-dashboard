@@ -115,7 +115,17 @@ export default function PostDrilldownPanel({
               const f = p.fields;
               const platform = str(f["Platform"]).toLowerCase();
               const platformConfig = getPlatformConfig(platform);
-              const url = str(f["Media URL"]);
+              // For Pinterest pins, Media URL is the destination URL (bootle.io
+              // product page), not the pin permalink. Construct the pin URL
+              // from the pinId (stored in Post ID as "pinterest_{pinId}").
+              const postIdField = str(f["Post ID"]);
+              let url = str(f["Media URL"]);
+              if (platform === "pinterest" && postIdField.startsWith("pinterest_")) {
+                const pinId = postIdField.slice("pinterest_".length);
+                if (pinId) {
+                  url = `https://www.pinterest.com/pin/${pinId}/`;
+                }
+              }
               const caption = str(f["Caption"]) || "(no caption)";
               const publishedAt = formatLocalDate(
                 str(f["Published At"]),
