@@ -39,6 +39,14 @@ export const CHART_COLORS = {
 export const defaultOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  // MARKETING-XX 2026-05-26: enable index-mode tooltips so users can mouse
+  // anywhere along the x-axis to inspect values. Default chart.js requires
+  // landing on a point exactly, which is unusable on dense line charts.
+  interaction: {
+    mode: "index" as const,
+    intersect: false,
+    axis: "x" as const,
+  },
   plugins: {
     legend: {
       labels: { color: CHART_COLORS.muted, font: { size: 12 } },
@@ -49,6 +57,9 @@ export const defaultOptions = {
       bodyColor: CHART_COLORS.muted,
       borderColor: CHART_COLORS.grid,
       borderWidth: 1,
+      // Match interaction mode so the tooltip itself shows all series at x.
+      mode: "index" as const,
+      intersect: false,
     },
   },
   scales: {

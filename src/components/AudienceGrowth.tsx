@@ -45,6 +45,12 @@ export default function AudienceGrowth({
     [platformKeys, platformMap],
   );
 
+  // Date before which IG follower values are known to be corrupted by the
+  // upsert-stomp bug fixed 2026-05-26. Pre-this-date values cannot be
+  // backfilled (Meta's API caps at 30 days), so we mask them with null so
+  // chart.js skips them rather than rendering inflated numbers.
+  const IG_CORRUPT_BEFORE = "2026-04-27";
+
   // Follower growth with daily change
   const followerGrowthData = useMemo(() => {
     const labels = allDates.map((d) => d.slice(5));
@@ -52,31 +58,45 @@ export default function AudienceGrowth({
     const followerDatasets = platformKeys.map((key) => {
       const config = getPlatformConfig(key);
       const metrics = platformMap.get(key) ?? [];
+      const raw = alignToDateArray(metrics, allDates, "Followers");
+      // Mask IG corrupted historical values.
+      const data =
+        key === "instagram"
+          ? raw.map((v, i) =>
+              allDates[i] && allDates[i] < IG_CORRUPT_BEFORE ? null : v,
+            )
+          : raw;
       return {
         label: `${config.label} Followers`,
-        data: alignToDateArray(metrics, allDates, "Followers"),
+        data,
         borderColor: config.color,
         backgroundColor: config.colorFill,
         fill: false,
         tension: 0.3,
         pointRadius: 0,
         yAxisID: "y",
+        spanGaps: false,
       };
     });
 
     // Daily gain from first platform that has data (secondary axis)
     const firstKey = platformKeys[0];
     const firstMetrics = firstKey ? (platformMap.get(firstKey) ?? []) : [];
+    const rawGain = firstKey
+      ? alignToDateArray(firstMetrics, allDates, "Followers Gained")
+      : [];
+    const maskedGain =
+      firstKey === "instagram"
+        ? rawGain.map((v, i) =>
+            allDates[i] && allDates[i] < IG_CORRUPT_BEFORE ? null : v,
+          )
+        : rawGain;
     const gainDataset =
       firstKey && firstMetrics.length > 0
         ? [
             {
               label: `${getPlatformConfig(firstKey).label} Daily Gain`,
-              data: alignToDateArray(
-                firstMetrics,
-                allDates,
-                "Followers Gained",
-              ),
+              data: maskedGain,
               borderColor: CHART_COLORS.green,
               backgroundColor: CHART_COLORS.green + "20",
               fill: true,
@@ -236,6 +256,15 @@ export default function AudienceGrowth({
       <ChartCard title="Follower Growth (Daily)" height="350px">
         <Line data={followerGrowthData} options={followerGrowthOptions} />
       </ChartCard>
+      <p
+        className="text-[10px] -mt-2"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        Note: Instagram follower history before 2026-04-27 is hidden — those
+        values were corrupted by an upsert bug and Meta&apos;s API only retains
+        30 days of daily history, so they cannot be backfilled accurately.
+        Daily values from 2026-04-27 onward are accurate.
+      </p>
 
       {/* Reach + Profile Views */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
