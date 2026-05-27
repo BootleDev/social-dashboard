@@ -9,7 +9,6 @@ import DimensionSlicer from "./DimensionSlicer";
 import PostScorecardTable from "./PostScorecardTable";
 import PostingHeatmap from "./PostingHeatmap";
 import HashtagCharts from "./HashtagCharts";
-import BestTimeToPost from "./BestTimeToPost";
 import { num, avgERByPostType, avgERByTheme, sumField } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -161,12 +160,6 @@ export default function ContentAnalysis({
           />
         </ChartCard>
       </div>
-
-      <BestTimeToPost
-        posts={posts}
-        timezone={timezone}
-        normalizers={normalizers}
-      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PostingHeatmap posts={posts} />
