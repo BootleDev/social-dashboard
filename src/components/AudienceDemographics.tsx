@@ -5,19 +5,13 @@ import { Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { CHART_COLORS } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
+import AudienceMap from "./AudienceMap";
 import { toAudienceDemographic, type AudienceDemographic } from "@/lib/types";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface AudienceDemographicsProps {
   records: AirtableRecord[];
 }
-
-const BREAKDOWN_ORDER: AudienceDemographic["breakdown"][] = [
-  "age",
-  "gender",
-  "country",
-  "city",
-];
 
 const BREAKDOWN_LABEL: Record<AudienceDemographic["breakdown"], string> = {
   age: "Age",
@@ -241,7 +235,7 @@ export default function AudienceDemographics({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {BREAKDOWN_ORDER.map((breakdown) => {
+        {(["age", "gender", "city"] as const).map((breakdown) => {
           const followerBuckets = bucketsFor(
             demographics,
             latestDate,
@@ -258,7 +252,7 @@ export default function AudienceDemographics({
             <ChartCard
               key={breakdown}
               title={BREAKDOWN_LABEL[breakdown]}
-              height="260px"
+              height="280px"
               tooltip={
                 breakdown === "city"
                   ? "Top 10 cities by follower count. API returns up to 45."
@@ -270,7 +264,150 @@ export default function AudienceDemographics({
                 followerBuckets={followerBuckets}
                 engagedBuckets={engagedBuckets}
               />
+              <InsightLine
+                breakdown={breakdown}
+                followerBuckets={followerBuckets}
+                engagedBuckets={engagedBuckets}
+              />
             </ChartCard>
+          );
+        })}
+      </div>
+
+      {/* Country view — world map instead of a bar chart so geo distribution
+          is glanceable, with the top countries also listed below. */}
+      <CountryView
+        followers={bucketsFor(demographics, latestDate, "follower", "country")}
+      />
+    </div>
+  );
+}
+
+/**
+ * One-line auto-derived insight printed under each chart. Computed
+ * directly from the data rather than against external benchmarks since
+ * we don't have those.
+ */
+function InsightLine({
+  breakdown,
+  followerBuckets,
+  engagedBuckets,
+}: {
+  breakdown: AudienceDemographic["breakdown"];
+  followerBuckets: AudienceDemographic[];
+  engagedBuckets: AudienceDemographic[];
+}) {
+  const text = useMemo(() => {
+    const followerTotal = followerBuckets.reduce((s, b) => s + b.value, 0);
+    if (followerTotal === 0) return "";
+    const top = [...followerBuckets].sort((a, b) => b.value - a.value)[0];
+    if (!top) return "";
+    const topPct = ((top.value / followerTotal) * 100).toFixed(0);
+
+    // Engaged-vs-follower skew callout when engaged data is present.
+    let skew = "";
+    if (engagedBuckets.length > 0) {
+      const engagedTotal = engagedBuckets.reduce((s, b) => s + b.value, 0);
+      if (engagedTotal > 0) {
+        const engagedTop = [...engagedBuckets].sort(
+          (a, b) => b.value - a.value,
+        )[0];
+        if (engagedTop && engagedTop.bucket !== top.bucket) {
+          const engagedTopPct = (
+            (engagedTop.value / engagedTotal) *
+            100
+          ).toFixed(0);
+          skew = ` Engaged audience skews ${engagedTop.bucket} (${engagedTopPct}%).`;
+        }
+      }
+    }
+
+    const noun =
+      breakdown === "age"
+        ? "age bracket"
+        : breakdown === "gender"
+          ? "gender"
+          : breakdown === "city"
+            ? "city"
+            : "country";
+    return `Top ${noun}: ${top.bucket} (${topPct}% of followers).${skew}`;
+  }, [breakdown, followerBuckets, engagedBuckets]);
+
+  if (!text) return null;
+  return (
+    <p
+      className="text-[11px] mt-2 leading-snug"
+      style={{ color: "var(--text-secondary)" }}
+    >
+      {text}
+    </p>
+  );
+}
+
+/** World choropleth + top-countries list, replacing the old country bar. */
+function CountryView({ followers }: { followers: AudienceDemographic[] }) {
+  const total = useMemo(
+    () => followers.reduce((s, b) => s + b.value, 0),
+    [followers],
+  );
+  const countryCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const b of followers) out[b.bucket] = b.value;
+    return out;
+  }, [followers]);
+  const top = useMemo(
+    () => [...followers].sort((a, b) => b.value - a.value).slice(0, 5),
+    [followers],
+  );
+
+  return (
+    <div
+      className="rounded-xl p-4 space-y-3"
+      style={{
+        background: "var(--bg-card)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <h4
+          className="text-sm font-medium"
+          style={{ color: "var(--text-primary)" }}
+        >
+          Country
+        </h4>
+        <span
+          className="text-[11px]"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {total.toLocaleString()} followers across {followers.length} countries
+        </span>
+      </div>
+      <AudienceMap
+        countryCounts={countryCounts}
+        total={total}
+        height={300}
+      />
+      <div className="flex flex-wrap gap-2 text-xs">
+        {top.map((b, i) => {
+          const pct = total > 0 ? ((b.value / total) * 100).toFixed(1) : "0";
+          return (
+            <span
+              key={b.bucket}
+              className="px-2 py-1 rounded"
+              style={{
+                background:
+                  i === 0
+                    ? "rgba(1, 113, 228, 0.2)"
+                    : "var(--bg-secondary)",
+                border: "1px solid var(--border)",
+                color: "var(--text-primary)",
+              }}
+            >
+              <span className="opacity-60">#{i + 1}</span> {b.bucket}{" "}
+              <span style={{ color: "var(--text-secondary)" }}>
+                {b.value.toLocaleString()} ({pct}%)
+              </span>
+            </span>
           );
         })}
       </div>
