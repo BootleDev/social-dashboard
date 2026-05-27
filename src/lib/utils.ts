@@ -42,6 +42,26 @@ export function pctChange(
  * Returns results sorted descending by avg, skipping records where getMetric
  * returns undefined (missing data).
  */
+/**
+ * Drop the trailing date from a unified-date series if every series has a
+ * zero/null value on it. Meta's daily metrics often haven't reported yet for
+ * "today" by the time our cron runs — a zero on the final day is almost
+ * always a partial-data artifact, not a real zero. Returns a new dates array
+ * (the caller is expected to align their series to the same new array).
+ */
+export function trimTrailingZeroDay(
+  dates: string[],
+  seriesValues: Array<Array<number | null>>,
+): string[] {
+  if (dates.length === 0) return dates;
+  const lastIdx = dates.length - 1;
+  const allZeroOrNull = seriesValues.every((s) => {
+    const v = s[lastIdx];
+    return v === null || v === undefined || v === 0;
+  });
+  return allZeroOrNull ? dates.slice(0, -1) : dates;
+}
+
 export function groupByDimension<T extends AirtableRecord>(
   records: T[],
   getKey: (r: T) => string,

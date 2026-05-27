@@ -15,6 +15,7 @@ import {
   sumField,
   buildUnifiedDates,
   alignToDateArray,
+  trimTrailingZeroDay,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -36,12 +37,20 @@ export default function AudienceGrowth({
     [dailyMetrics],
   );
 
-  // Unified date array
+  // Unified date array — trim trailing day if no platform reported data yet
+  // (Meta cron often hasn't filled today's values when we read).
   const allDates = useMemo(
-    () =>
-      buildUnifiedDates(
+    () => {
+      const initial = buildUnifiedDates(
         ...platformKeys.map((k) => platformMap.get(k) ?? []),
-      ),
+      );
+      // For each platform, align Followers to the initial array, then check
+      // if every platform's trailing value is 0/null.
+      const series = platformKeys.map((k) =>
+        alignToDateArray(platformMap.get(k) ?? [], initial, "Followers"),
+      );
+      return trimTrailingZeroDay(initial, series);
+    },
     [platformKeys, platformMap],
   );
 
