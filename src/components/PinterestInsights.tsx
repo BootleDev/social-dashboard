@@ -31,6 +31,66 @@ const SORT_BYS_AVAILABLE: Array<TopPin["sortBy"]> = [
   "OUTBOUND_CLICK",
 ];
 
+/**
+ * Lightweight inline SVG sparkline. Renders the 52-week series as a polyline
+ * with a faint area-fill and a tip marker on the latest point. Chosen over
+ * react-chartjs-2 here because a row table would mount 25 chart instances,
+ * each with its own canvas + animation loop — pure SVG is ~50x cheaper.
+ */
+function Sparkline({
+  values,
+  width = 100,
+  height = 28,
+  color,
+}: {
+  values: number[];
+  width?: number;
+  height?: number;
+  color: string;
+}) {
+  if (values.length < 2) {
+    return (
+      <span style={{ color: "var(--text-secondary)" }} className="text-[10px]">
+        —
+      </span>
+    );
+  }
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const stepX = width / (values.length - 1);
+  const points = values.map((v, i) => {
+    const x = i * stepX;
+    const y = height - ((v - min) / range) * height;
+    return [x, y] as const;
+  });
+  const path = points
+    .map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`))
+    .join(" ");
+  const area = `${path} L${width},${height} L0,${height} Z`;
+  const [lastX, lastY] = points[points.length - 1];
+  return (
+    <svg width={width} height={height} className="block">
+      <path d={area} fill={color} opacity={0.15} />
+      <path d={path} fill="none" stroke={color} strokeWidth={1.25} />
+      <circle cx={lastX} cy={lastY} r={1.75} fill={color} />
+    </svg>
+  );
+}
+
+/** Parse the JSON time-series field safely; return values array (chronological). */
+function parseTimeSeries(json: string): number[] {
+  if (!json) return [];
+  try {
+    const obj = JSON.parse(json) as Record<string, number>;
+    return Object.keys(obj)
+      .sort()
+      .map((k) => obj[k]);
+  } catch {
+    return [];
+  }
+}
+
 /** Returns the most recent snapshot date present, or empty string. */
 function latestSnapshotDate<T extends { snapshotDate: string }>(
   records: T[],
@@ -143,6 +203,9 @@ function TrendsPanel({ records }: TrendsPanelProps) {
               <th scope="col" className="text-left py-2 px-2">
                 Keyword
               </th>
+              <th scope="col" className="text-center py-2 px-2 w-[110px]">
+                52w trend
+              </th>
               <th scope="col" className="text-right py-2 px-2">
                 WoW %
               </th>
@@ -155,25 +218,40 @@ function TrendsPanel({ records }: TrendsPanelProps) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((k) => (
-              <tr
-                key={k.id}
-                className="border-t hover:bg-white/5 transition-colors"
-                style={{ borderColor: "var(--border)" }}
-              >
-                <td className="py-2 px-2 opacity-50">{k.rank}</td>
-                <td className="py-2 px-2">{k.keyword}</td>
-                <td className="py-2 px-2 text-right">
-                  <GrowthCell value={k.pctGrowthWoW} />
-                </td>
-                <td className="py-2 px-2 text-right">
-                  <GrowthCell value={k.pctGrowthMoM} />
-                </td>
-                <td className="py-2 px-2 text-right">
-                  <GrowthCell value={k.pctGrowthYoY} />
-                </td>
-              </tr>
-            ))}
+            {filtered.map((k) => {
+              const series = parseTimeSeries(k.timeSeriesJson);
+              // Color the sparkline by recent-direction: green if last 4w net
+              // up, red if down, neutral otherwise. Quick glanceable signal.
+              const recent = series.slice(-4);
+              const sparkColor =
+                recent.length >= 2 && recent[recent.length - 1] > recent[0]
+                  ? "#22c55e"
+                  : recent.length >= 2 && recent[recent.length - 1] < recent[0]
+                    ? "#ef4444"
+                    : "#9ca3af";
+              return (
+                <tr
+                  key={k.id}
+                  className="border-t hover:bg-white/5 transition-colors"
+                  style={{ borderColor: "var(--border)" }}
+                >
+                  <td className="py-2 px-2 opacity-50">{k.rank}</td>
+                  <td className="py-2 px-2">{k.keyword}</td>
+                  <td className="py-2 px-2 flex justify-center items-center">
+                    <Sparkline values={series} color={sparkColor} />
+                  </td>
+                  <td className="py-2 px-2 text-right">
+                    <GrowthCell value={k.pctGrowthWoW} />
+                  </td>
+                  <td className="py-2 px-2 text-right">
+                    <GrowthCell value={k.pctGrowthMoM} />
+                  </td>
+                  <td className="py-2 px-2 text-right">
+                    <GrowthCell value={k.pctGrowthYoY} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

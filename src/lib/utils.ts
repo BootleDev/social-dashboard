@@ -210,6 +210,69 @@ export function avgERByTheme(
   ).map(({ label, avg, count }) => ({ theme: label, avgER: avg, count }));
 }
 
+/**
+ * Aggregate posts by (primary, segment) returning a stacked-bar-ready shape:
+ * one row per primary category, with a per-segment breakdown of avg metric
+ * value contribution and count. Used to render stacked bars where the height
+ * of each segment is the avg of that segment's posts (not a share split).
+ *
+ * Returns rows sorted by the total of all segment values, primary segments
+ * sorted by their global frequency so the legend is stable across rows.
+ */
+export function avgERByDimensionStacked(
+  posts: AirtableRecord[],
+  getPrimary: (p: AirtableRecord) => string,
+  getSegment: (p: AirtableRecord) => string,
+  getMetric: (p: AirtableRecord) => number | undefined = (p) =>
+    num(p.fields["Engagement Rate"]),
+): {
+  primaries: Array<{ label: string; total: number; count: number }>;
+  segments: string[];
+  /** primary -> segment -> { avg, count } */
+  matrix: Record<string, Record<string, { avg: number; count: number }>>;
+} {
+  const cell = new Map<string, { total: number; count: number }>();
+  const primaryTotals = new Map<string, { total: number; count: number }>();
+  const segmentTotals = new Map<string, number>();
+
+  for (const p of posts) {
+    const primary = getPrimary(p) || "untagged";
+    const segment = getSegment(p) || "untagged";
+    const metric = getMetric(p);
+    if (metric === undefined) continue;
+
+    const key = `${primary} ${segment}`;
+    const c = cell.get(key) ?? { total: 0, count: 0 };
+    cell.set(key, { total: c.total + metric, count: c.count + 1 });
+
+    const pt = primaryTotals.get(primary) ?? { total: 0, count: 0 };
+    primaryTotals.set(primary, { total: pt.total + metric, count: pt.count + 1 });
+
+    segmentTotals.set(segment, (segmentTotals.get(segment) ?? 0) + 1);
+  }
+
+  const primaries = Array.from(primaryTotals.entries())
+    .map(([label, { total, count }]) => ({ label, total, count }))
+    .sort((a, b) => b.total - a.total);
+
+  const segments = Array.from(segmentTotals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label]) => label);
+
+  const matrix: Record<string, Record<string, { avg: number; count: number }>> = {};
+  for (const { label: primary } of primaries) {
+    matrix[primary] = {};
+    for (const segment of segments) {
+      const c = cell.get(`${primary} ${segment}`);
+      matrix[primary][segment] = c
+        ? { avg: c.count > 0 ? c.total / c.count : 0, count: c.count }
+        : { avg: 0, count: 0 };
+    }
+  }
+
+  return { primaries, segments, matrix };
+}
+
 /** Group posts by day-of-week x hour for a heatmap. */
 export function postingHeatmap(
   posts: AirtableRecord[],

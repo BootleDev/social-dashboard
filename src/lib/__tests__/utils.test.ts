@@ -21,6 +21,7 @@ import {
   groupByDimension,
   timeBucket,
   dayOfWeek,
+  avgERByDimensionStacked,
 } from "../utils";
 import type { AirtableRecord } from "../utils";
 
@@ -166,6 +167,65 @@ describe("avgERByTheme", () => {
   it("uses 'untagged' for missing theme", () => {
     const posts = [makeRecord({ "Engagement Rate": 5 })];
     expect(avgERByTheme(posts)[0].theme).toBe("untagged");
+  });
+});
+
+// --- avgERByDimensionStacked ---
+describe("avgERByDimensionStacked", () => {
+  const posts = [
+    makeRecord({ "Post Type": "reel", "Content Theme": "Lifestyle", "Engagement Rate": 4 }),
+    makeRecord({ "Post Type": "reel", "Content Theme": "Lifestyle", "Engagement Rate": 6 }),
+    makeRecord({ "Post Type": "reel", "Content Theme": "Product", "Engagement Rate": 2 }),
+    makeRecord({ "Post Type": "image", "Content Theme": "Lifestyle", "Engagement Rate": 1 }),
+    makeRecord({ "Post Type": "image", "Content Theme": "Education", "Engagement Rate": 3 }),
+  ];
+
+  const result = avgERByDimensionStacked(
+    posts,
+    (p) => str(p.fields["Post Type"]),
+    (p) => str(p.fields["Content Theme"]),
+  );
+
+  it("returns primaries sorted by total metric desc", () => {
+    expect(result.primaries.map((p) => p.label)).toEqual(["reel", "image"]);
+  });
+
+  it("returns segments sorted by global frequency desc", () => {
+    expect(result.segments[0]).toBe("Lifestyle");
+  });
+
+  it("computes avg per (primary, segment) cell", () => {
+    expect(result.matrix.reel.Lifestyle.avg).toBe(5);
+    expect(result.matrix.reel.Lifestyle.count).toBe(2);
+    expect(result.matrix.reel.Product.avg).toBe(2);
+    expect(result.matrix.image.Education.avg).toBe(3);
+  });
+
+  it("fills missing cells with zeros", () => {
+    expect(result.matrix.image.Product).toEqual({ avg: 0, count: 0 });
+  });
+
+  it("handles empty posts", () => {
+    const empty = avgERByDimensionStacked(
+      [],
+      (p) => str(p.fields["Post Type"]),
+      (p) => str(p.fields["Content Theme"]),
+    );
+    expect(empty.primaries).toEqual([]);
+    expect(empty.segments).toEqual([]);
+  });
+
+  it("uses 'untagged' for missing keys", () => {
+    const p = [
+      makeRecord({ "Engagement Rate": 5 }),
+    ];
+    const r = avgERByDimensionStacked(
+      p,
+      (x) => str(x.fields["Post Type"]),
+      (x) => str(x.fields["Content Theme"]),
+    );
+    expect(r.primaries[0].label).toBe("untagged");
+    expect(r.segments[0]).toBe("untagged");
   });
 });
 

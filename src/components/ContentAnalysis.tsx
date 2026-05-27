@@ -9,8 +9,26 @@ import DimensionSlicer from "./DimensionSlicer";
 import PostScorecardTable from "./PostScorecardTable";
 import PostingHeatmap from "./PostingHeatmap";
 import HashtagCharts from "./HashtagCharts";
-import { num, avgERByPostType, avgERByTheme, sumField } from "@/lib/utils";
+import {
+  num,
+  str,
+  avgERByDimensionStacked,
+  sumField,
+} from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
+
+// Palette used to color stacked segments. Reused across both stacked charts
+// so the same segment label gets the same color in the legend regardless of
+// which chart it appears in.
+const SEGMENT_COLORS = [
+  CHART_COLORS.purple,
+  CHART_COLORS.blue,
+  CHART_COLORS.cyan,
+  CHART_COLORS.green,
+  CHART_COLORS.amber,
+  CHART_COLORS.pink,
+  CHART_COLORS.red,
+];
 
 interface ContentAnalysisProps {
   posts: AirtableRecord[];
@@ -21,43 +39,66 @@ export default function ContentAnalysis({
   posts,
   timezone = "",
 }: ContentAnalysisProps) {
+  // Post Type bars, segmented (stacked) by Content Theme so we see which
+  // themes drive ER within each format.
   const formatData = useMemo(() => {
-    const breakdown = avgERByPostType(posts);
+    const stacked = avgERByDimensionStacked(
+      posts,
+      (p) => str(p.fields["Post Type"]) || "unknown",
+      (p) => str(p.fields["Content Theme"]) || "untagged",
+    );
     return {
-      labels: breakdown.map((b) => `${b.type} (${b.count})`),
-      datasets: [
-        {
-          label: "Avg ER %",
-          data: breakdown.map((b) => b.avgER * 100),
-          backgroundColor: [
-            CHART_COLORS.purple + "80",
-            CHART_COLORS.blue + "80",
-            CHART_COLORS.cyan + "80",
-            CHART_COLORS.green + "80",
-            CHART_COLORS.amber + "80",
-            CHART_COLORS.pink + "80",
-          ],
-          borderWidth: 0,
-        },
-      ],
+      labels: stacked.primaries.map((p) => `${p.label} (${p.count})`),
+      datasets: stacked.segments.map((segment, i) => ({
+        label: segment,
+        data: stacked.primaries.map(
+          (p) => stacked.matrix[p.label][segment].avg * 100,
+        ),
+        backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
+        borderWidth: 0,
+      })),
     };
   }, [posts]);
 
+  // Theme bars, segmented (stacked) by Post Type, capped to top 10 themes by total.
   const themeData = useMemo(() => {
-    const breakdown = avgERByTheme(posts).slice(0, 10);
+    const stacked = avgERByDimensionStacked(
+      posts,
+      (p) => str(p.fields["Content Theme"]) || "untagged",
+      (p) => str(p.fields["Post Type"]) || "unknown",
+    );
+    const topPrimaries = stacked.primaries.slice(0, 10);
     return {
-      labels: breakdown.map((b) => `${b.theme} (${b.count})`),
-      datasets: [
-        {
-          label: "Avg ER %",
-          data: breakdown.map((b) => b.avgER * 100),
-          backgroundColor: CHART_COLORS.purple + "60",
-          borderColor: CHART_COLORS.purple,
-          borderWidth: 1,
-        },
-      ],
+      labels: topPrimaries.map((p) => `${p.label} (${p.count})`),
+      datasets: stacked.segments.map((segment, i) => ({
+        label: segment,
+        data: topPrimaries.map(
+          (p) => stacked.matrix[p.label][segment].avg * 100,
+        ),
+        backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
+        borderWidth: 0,
+      })),
     };
   }, [posts]);
+
+  const stackedOptions = useMemo(
+    () => ({
+      ...defaultOptions,
+      scales: {
+        x: { ...defaultOptions.scales.x, stacked: true },
+        y: { ...defaultOptions.scales.y, stacked: true },
+      },
+    }),
+    [],
+  );
+
+  const stackedHorizontalOptions = useMemo(
+    () => ({
+      ...stackedOptions,
+      indexAxis: "y" as const,
+    }),
+    [stackedOptions],
+  );
 
   const scatterData = useMemo(() => {
     return {
@@ -145,19 +186,16 @@ export default function ContentAnalysis({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard
-          title="Avg Engagement Rate by Post Type"
-          tooltip="Higher ER = better content-market fit for that format"
+          title="Engagement Rate by Post Type × Theme"
+          tooltip="Stacked: each bar's segments show which themes drive ER within that format"
         >
-          <Bar data={formatData} options={defaultOptions} />
+          <Bar data={formatData} options={stackedOptions} />
         </ChartCard>
         <ChartCard
-          title="Content Theme Performance"
-          tooltip="Avg ER by AI-tagged content theme"
+          title="Content Theme × Post Type"
+          tooltip="Stacked: each theme's bar shows ER contribution by format"
         >
-          <Bar
-            data={themeData}
-            options={{ ...defaultOptions, indexAxis: "y" as const }}
-          />
+          <Bar data={themeData} options={stackedHorizontalOptions} />
         </ChartCard>
       </div>
 

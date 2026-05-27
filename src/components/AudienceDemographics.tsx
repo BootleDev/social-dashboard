@@ -66,35 +66,80 @@ function bucketsFor(
 
 interface BreakdownChartProps {
   breakdown: AudienceDemographic["breakdown"];
-  buckets: AudienceDemographic[];
+  followerBuckets: AudienceDemographic[];
+  engagedBuckets: AudienceDemographic[];
 }
 
-function BreakdownChart({ breakdown, buckets }: BreakdownChartProps) {
+function BreakdownChart({
+  breakdown,
+  followerBuckets,
+  engagedBuckets,
+}: BreakdownChartProps) {
+  // Build a unified bucket ordering driven by follower data (the source of
+  // truth for "who is in the audience"), then look up engaged values into
+  // the same bucket positions. Engaged data lights up automatically when
+  // Meta starts returning it (account currently below 100-engagement threshold).
+  const labels = followerBuckets.map((b) => b.bucket);
+  const followerTotal = followerBuckets.reduce((s, b) => s + b.value, 0);
+  const engagedTotal = engagedBuckets.reduce((s, b) => s + b.value, 0);
+
+  const engagedByBucket = new Map(engagedBuckets.map((b) => [b.bucket, b.value]));
+  const engagedValues = labels.map((l) => engagedByBucket.get(l) ?? 0);
+
   const data = {
-    labels: buckets.map((b) => b.bucket),
+    labels,
     datasets: [
       {
-        label: BREAKDOWN_LABEL[breakdown],
-        data: buckets.map((b) => b.value),
+        label: "Followers",
+        data: followerBuckets.map((b) => b.value),
         backgroundColor: CHART_COLORS.blue,
+        borderRadius: 4,
+      },
+      {
+        label: "Engaged (30d)",
+        data: engagedValues,
+        backgroundColor: CHART_COLORS.amber,
         borderRadius: 4,
       },
     ],
   };
 
-  // Horizontal bars for everything — easier to read category labels than vertical.
   const options = {
     indexAxis: "y" as const,
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { display: false },
+      legend: {
+        display: true,
+        position: "top" as const,
+        align: "end" as const,
+        labels: {
+          color: CHART_COLORS.muted,
+          font: { size: 10 },
+          boxWidth: 10,
+          boxHeight: 10,
+          padding: 8,
+        },
+      },
       tooltip: {
         backgroundColor: "#1e2230",
         titleColor: CHART_COLORS.white,
         bodyColor: CHART_COLORS.muted,
         borderColor: CHART_COLORS.grid,
         borderWidth: 1,
+        callbacks: {
+          // Append % of audience to each tooltip line.
+          label: (ctx: {
+            dataset: { label?: string };
+            parsed: { x: number | null };
+          }) => {
+            const total =
+              ctx.dataset.label === "Followers" ? followerTotal : engagedTotal;
+            const v = ctx.parsed.x ?? 0;
+            const pct = total > 0 ? ((v / total) * 100).toFixed(1) : "0";
+            return `${ctx.dataset.label}: ${v.toLocaleString()} (${pct}%)`;
+          },
+        },
       },
     },
     scales: {
@@ -109,7 +154,7 @@ function BreakdownChart({ breakdown, buckets }: BreakdownChartProps) {
     },
   };
 
-  if (buckets.length === 0) {
+  if (followerBuckets.length === 0) {
     return (
       <div
         className="text-xs text-center pt-12"
@@ -197,24 +242,34 @@ export default function AudienceDemographics({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {BREAKDOWN_ORDER.map((breakdown) => {
-          const buckets = bucketsFor(
+          const followerBuckets = bucketsFor(
             demographics,
             latestDate,
             "follower",
+            breakdown,
+          );
+          const engagedBuckets = bucketsFor(
+            demographics,
+            latestDate,
+            "engaged",
             breakdown,
           );
           return (
             <ChartCard
               key={breakdown}
               title={BREAKDOWN_LABEL[breakdown]}
-              height="240px"
+              height="260px"
               tooltip={
                 breakdown === "city"
                   ? "Top 10 cities by follower count. API returns up to 45."
-                  : undefined
+                  : "Followers (blue) vs Engaged audience (amber). Engaged lights up once Meta's 100-engagement threshold is met."
               }
             >
-              <BreakdownChart breakdown={breakdown} buckets={buckets} />
+              <BreakdownChart
+                breakdown={breakdown}
+                followerBuckets={followerBuckets}
+                engagedBuckets={engagedBuckets}
+              />
             </ChartCard>
           );
         })}
