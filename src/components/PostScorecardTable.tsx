@@ -251,7 +251,32 @@ export default function PostScorecardTable({
                 {str(p.fields["Post Type"])}
               </td>
               <td className="py-2 px-2 text-right">
-                {formatLocalDate(str(p.fields["Published At"]), timezone || undefined)}
+                <span>
+                  {formatLocalDate(str(p.fields["Published At"]), timezone || undefined)}
+                </span>
+                {(() => {
+                  // Show a small badge if the row hasn't been refreshed in
+                  // >7 days — its metrics are likely stale.
+                  const snap = str(p.fields["Snapshot Date"]);
+                  if (!snap) return null;
+                  const snapMs = new Date(snap + "T00:00:00Z").getTime();
+                  if (isNaN(snapMs)) return null;
+                  const ageDays = (Date.now() - snapMs) / 86400000;
+                  if (ageDays < 7) return null;
+                  return (
+                    <span
+                      className="ml-1 text-[9px] px-1 rounded align-middle"
+                      style={{
+                        background: "rgba(245, 158, 11, 0.15)",
+                        color: "rgb(245, 158, 11)",
+                        border: "1px solid rgba(245, 158, 11, 0.3)",
+                      }}
+                      title={`Metrics last refreshed ${Math.round(ageDays)}d ago (${snap}). Posts older than 60d (IG/FB) or 180d (Pinterest) aren't re-fetched.`}
+                    >
+                      {Math.round(ageDays)}d stale
+                    </span>
+                  );
+                })()}
               </td>
               <td className="py-2 px-2 text-right">
                 {formatNumber(num(p.fields["Reach"]))}
