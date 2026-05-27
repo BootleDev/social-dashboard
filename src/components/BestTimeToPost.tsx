@@ -16,7 +16,9 @@ import {
   type ReachNormalizers,
 } from "@/lib/derivedMetrics";
 import ChartCard from "./ChartCard";
+import InsightStrip from "./InsightStrip";
 import PostDrilldownPanel from "./PostDrilldownPanel";
+import { describe, formatPct } from "@/lib/stats";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface BestTimeToPostProps {
@@ -312,6 +314,63 @@ export default function BestTimeToPost({
           {totalPostsCharted} posts
         </span>
       </div>
+
+      {rankedSlots.length > 0 && (() => {
+        const top = rankedSlots[0];
+        const worst = rankedSlots[rankedSlots.length - 1];
+        const topVsAvg =
+          overallAvg > 0 ? ((top.avg - overallAvg) / overallAvg) * 100 : undefined;
+        const worstVsAvg =
+          overallAvg > 0
+            ? ((worst.avg - overallAvg) / overallAvg) * 100
+            : undefined;
+        const lowConfidence = top.n < 5;
+        const stats = describe(rankedSlots.map((s) => s.avg));
+        const formatHour = (h: number) => {
+          if (h === 0) return "12am";
+          if (h === 12) return "12pm";
+          return h < 12 ? `${h}am` : `${h - 12}pm`;
+        };
+        return (
+          <InsightStrip
+            headline={
+              <>
+                Top slot:{" "}
+                <strong>
+                  {top.day} {formatHour(top.hour)}
+                </strong>
+                {topVsAvg !== undefined && topVsAvg !== 0 && (
+                  <>
+                    {", "}
+                    <span
+                      style={{
+                        color:
+                          topVsAvg > 0
+                            ? "var(--success, #2ecc71)"
+                            : "var(--danger, #e74c3c)",
+                      }}
+                    >
+                      {formatPct(topVsAvg)} vs avg
+                    </span>
+                  </>
+                )}
+                {worst !== top && worstVsAvg !== undefined && (
+                  <>
+                    {" · worst "}
+                    <strong>
+                      {worst.day} {formatHour(worst.hour)}
+                    </strong>{" "}
+                    ({formatPct(worstVsAvg)})
+                  </>
+                )}
+              </>
+            }
+            confidence={lowConfidence ? `n=${top.n} · low confidence` : undefined}
+            stats={stats}
+            formatStat={(v) => metric.format(v)}
+          />
+        );
+      })()}
 
       {rankedSlots.length > 0 && (
         <div

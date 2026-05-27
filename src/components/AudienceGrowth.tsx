@@ -7,6 +7,7 @@ import { CHART_COLORS, defaultOptions, lineChartOptions } from "@/lib/chartSetup
 import { getPlatformConfig } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
+import InsightStrip from "./InsightStrip";
 import {
   num,
   formatNumber,
@@ -17,6 +18,7 @@ import {
   alignToDateArray,
   trimTrailingZeroDay,
 } from "@/lib/utils";
+import { describe, pctChange, formatPct, trendVerdict } from "@/lib/stats";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface AudienceGrowthProps {
@@ -182,6 +184,139 @@ export default function AudienceGrowth({
     };
   }, [platformKeys, platformMap, allDates]);
 
+  // Follower growth insight — accelerating / flat / decelerating verdict
+  // computed per platform from masked daily gain series. Uses the last 7
+  // days vs prior 7 days within the current date range; gracefully falls
+  // back to "first week of data" framing when <14 days are available.
+  const followerInsight = useMemo(() => {
+    const perPlatform = platformKeys
+      .map((key) => {
+        const config = getPlatformConfig(key);
+        const metrics = platformMap.get(key) ?? [];
+        const rawGain = alignToDateArray(metrics, allDates, "Followers Gained");
+        const gain =
+          key === "instagram"
+            ? rawGain.map((v, i) =>
+                allDates[i] && allDates[i] < IG_CORRUPT_BEFORE ? 0 : v,
+              )
+            : rawGain;
+        const validIdx = gain
+          .map((v, i) => ({ v, i }))
+          .filter(({ i }) =>
+            key === "instagram"
+              ? allDates[i] && allDates[i] >= IG_CORRUPT_BEFORE
+              : true,
+          );
+        const periodGain = validIdx.reduce((sum, { v }) => sum + v, 0);
+        const tail = validIdx.slice(-7).reduce((s, { v }) => s + v, 0);
+        const prior = validIdx
+          .slice(-14, -7)
+          .reduce((s, { v }) => s + v, 0);
+        const delta = pctChange(prior, tail);
+        const verdict = trendVerdict(delta);
+        return {
+          key,
+          label: config.label,
+          color: config.color,
+          periodGain,
+          last7: tail,
+          prior7: prior,
+          delta,
+          verdict,
+          n: validIdx.length,
+        };
+      })
+      .filter((p) => p.n >= 1);
+    return perPlatform;
+  }, [platformKeys, platformMap, allDates]);
+
+  const followerInsightHeadline = useMemo(() => {
+    if (followerInsight.length === 0) return null;
+    // Build one short clause per platform; rank by abs(delta) so the most
+    // notable mover anchors the sentence.
+    const ranked = [...followerInsight].sort((a, b) => {
+      const da = a.delta === undefined ? -1 : Math.abs(a.delta);
+      const db = b.delta === undefined ? -1 : Math.abs(b.delta);
+      return db - da;
+    });
+    return (
+      <>
+        {ranked.map((p, i) => {
+          const sign = (p.periodGain ?? 0) >= 0 ? "+" : "";
+          const color =
+            p.verdict === "accelerating"
+              ? "var(--success, #2ecc71)"
+              : p.verdict === "decelerating"
+                ? "var(--danger, #e74c3c)"
+                : "var(--text-secondary)";
+          const verdictWord =
+            p.verdict === "accelerating"
+              ? "accelerating"
+              : p.verdict === "decelerating"
+                ? "decelerating"
+                : "flat";
+          return (
+            <span key={p.key}>
+              {i > 0 && <span style={{ color: "var(--text-secondary)" }}> · </span>}
+              <strong>{p.label}</strong>{" "}
+              {sign}
+              {formatNumber(p.periodGain)} in period
+              {p.delta !== undefined && (
+                <>
+                  {", "}
+                  <span style={{ color }}>
+                    {verdictWord} ({formatPct(p.delta)} vs prior 7d)
+                  </span>
+                </>
+              )}
+            </span>
+          );
+        })}
+      </>
+    );
+  }, [followerInsight]);
+
+  // Reach insight — leader + period-over-period delta if comparison data present.
+  // Conservative: only computes pp if the same metric exists in both halves.
+  const reachInsight = useMemo(() => {
+    const perPlatform = platformKeys.map((key) => {
+      const config = getPlatformConfig(key);
+      const metrics = platformMap.get(key) ?? [];
+      const series = alignToDateArray(metrics, allDates, "Reach");
+      const total = series.reduce((s, v) => s + v, 0);
+      const half = Math.floor(series.length / 2);
+      const firstHalf = series.slice(0, half).reduce((s, v) => s + v, 0);
+      const secondHalf = series.slice(half).reduce((s, v) => s + v, 0);
+      const delta = pctChange(firstHalf, secondHalf);
+      return { key, label: config.label, total, delta };
+    });
+    const ranked = [...perPlatform].sort((a, b) => b.total - a.total);
+    const leader = ranked[0];
+    const top3Stats = describe(ranked.map((p) => p.total));
+    return { leader, ranked, stats: top3Stats };
+  }, [platformKeys, platformMap, allDates]);
+
+  // Profile views insight — total + best-day callout.
+  const profileViewsInsight = useMemo(() => {
+    let bestDate = "";
+    let bestVal = 0;
+    let total = 0;
+    const allVals: number[] = [];
+    for (const key of platformKeys) {
+      const metrics = platformMap.get(key) ?? [];
+      const series = alignToDateArray(metrics, allDates, "Profile Views");
+      series.forEach((v, i) => {
+        allVals.push(v);
+        total += v;
+        if (v > bestVal) {
+          bestVal = v;
+          bestDate = allDates[i] ?? "";
+        }
+      });
+    }
+    return { total, bestDate, bestVal, stats: describe(allVals) };
+  }, [platformKeys, platformMap, allDates]);
+
   // Per-platform KPIs
   const platformKPIs = useMemo(
     () =>
@@ -262,6 +397,9 @@ export default function AudienceGrowth({
       </div>
 
       {/* Follower Growth Chart */}
+      {followerInsightHeadline && (
+        <InsightStrip headline={followerInsightHeadline} />
+      )}
       <ChartCard title="Follower Growth (Daily)" height="350px">
         <Line data={followerGrowthData} options={followerGrowthOptions} />
       </ChartCard>
@@ -277,12 +415,63 @@ export default function AudienceGrowth({
 
       {/* Reach + Profile Views */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Daily Reach by Platform">
-          <Line data={reachData} options={lineChartOptions} />
-        </ChartCard>
-        <ChartCard title="Profile / Page Views">
-          <Bar data={profileViewsData} options={defaultOptions} />
-        </ChartCard>
+        <div>
+          {reachInsight.leader && reachInsight.leader.total > 0 && (
+            <InsightStrip
+              headline={
+                <>
+                  <strong>{reachInsight.leader.label}</strong> leads reach:{" "}
+                  {formatNumber(reachInsight.leader.total)} in period
+                  {reachInsight.leader.delta !== undefined && (
+                    <>
+                      {", "}
+                      <span
+                        style={{
+                          color:
+                            reachInsight.leader.delta > 0
+                              ? "var(--success, #2ecc71)"
+                              : "var(--danger, #e74c3c)",
+                        }}
+                      >
+                        {formatPct(reachInsight.leader.delta)} second half vs first
+                      </span>
+                    </>
+                  )}
+                </>
+              }
+              stats={reachInsight.stats}
+              statsUnit=""
+              formatStat={(v) => formatNumber(v)}
+            />
+          )}
+          <ChartCard title="Daily Reach by Platform">
+            <Line data={reachData} options={lineChartOptions} />
+          </ChartCard>
+        </div>
+        <div>
+          {profileViewsInsight.total > 0 && (
+            <InsightStrip
+              headline={
+                <>
+                  <strong>{formatNumber(profileViewsInsight.total)}</strong>{" "}
+                  profile views in period
+                  {profileViewsInsight.bestDate && profileViewsInsight.bestVal > 0 && (
+                    <>
+                      {" · best day "}
+                      <strong>{profileViewsInsight.bestDate}</strong>{" "}
+                      ({formatNumber(profileViewsInsight.bestVal)})
+                    </>
+                  )}
+                </>
+              }
+              stats={profileViewsInsight.stats}
+              formatStat={(v) => formatNumber(v)}
+            />
+          )}
+          <ChartCard title="Profile / Page Views">
+            <Bar data={profileViewsData} options={defaultOptions} />
+          </ChartCard>
+        </div>
       </div>
 
       {/* Follows from Posts */}
