@@ -39,6 +39,7 @@ interface DashboardData {
   instagramAudience?: AirtableRecord[];
   pinterestTrends?: AirtableRecord[];
   pinterestTopPins?: AirtableRecord[];
+  seasonalOpportunities?: AirtableRecord[];
 }
 
 function filterByPlatform(
@@ -370,14 +371,15 @@ export default function DashboardPage() {
                 <ContentAnalysis
                   posts={filteredPosts}
                   timezone={timezone}
+                  instagramAudience={data?.instagramAudience ?? []}
+                  pinterestTopPins={data?.pinterestTopPins ?? []}
                 />
               )}
               {tab === "planning" && (
                 <PlanningPanel
                   posts={filteredPosts}
-                  instagramAudience={data.instagramAudience ?? []}
-                  pinterestTrends={data.pinterestTrends ?? []}
-                  pinterestTopPins={data.pinterestTopPins ?? []}
+                  pinterestTrends={data?.pinterestTrends ?? []}
+                  seasonalOpportunities={data?.seasonalOpportunities ?? []}
                   competitorRecords={competitorRecords}
                   competitorLoading={competitorLoading}
                   competitorError={competitorError}

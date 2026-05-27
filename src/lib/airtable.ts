@@ -11,6 +11,7 @@ export const TABLES = {
   INSTAGRAM_AUDIENCE: "tblB8T1Cy0H8OzVXG",
   PINTEREST_TRENDS_KEYWORDS: "tblZ4f4TXc92jakq8",
   PINTEREST_TOP_PINS: "tblEuz0kmposwh81J",
+  SEASONAL_OPPORTUNITIES: "tbl5z2eAZakyz3ZZh",
 } as const;
 
 interface AirtableRecord {
@@ -164,6 +165,14 @@ export async function getPinterestTopPins(opts: { noCache?: boolean } = {}) {
   });
 }
 
+export async function getSeasonalOpportunities(
+  opts: { noCache?: boolean } = {},
+) {
+  return fetchAllRecords(TABLES.SEASONAL_OPPORTUNITIES, {
+    noCache: opts.noCache,
+  });
+}
+
 export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
   const [
     posts,
@@ -173,6 +182,7 @@ export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
     instagramAudience,
     pinterestTrends,
     pinterestTopPins,
+    seasonalOpportunities,
   ] = await Promise.all([
     getPosts(opts),
     getDailyAccountMetrics(opts),
@@ -181,6 +191,7 @@ export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
     getInstagramAudience(opts),
     getPinterestTrendsKeywords(opts),
     getPinterestTopPins(opts),
+    getSeasonalOpportunities(opts),
   ]);
 
   return {
@@ -191,5 +202,6 @@ export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
     instagramAudience,
     pinterestTrends,
     pinterestTopPins,
+    seasonalOpportunities,
   };
 }

@@ -3,20 +3,21 @@
 import { useMemo, useState } from "react";
 import {
   toTrendingKeyword,
-  toTopPin,
   type TrendingKeyword,
-  type TopPin,
 } from "@/lib/types";
-import { formatNumber, str } from "@/lib/utils";
+import { str } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
-import PostDrilldownPanel from "./PostDrilldownPanel";
+import {
+  toSeasonalOpportunity,
+  buildBootleKeywordAllowlist,
+  matchesBootleAllowlist,
+} from "@/lib/seasonal";
 
 interface PinterestInsightsProps {
   trends: AirtableRecord[];
-  topPins: AirtableRecord[];
-  /** Full Posts table — used to resolve a TopPin row to its full Post record. */
+  /** Seasonal Opportunities records — drives the Bootle-relevant allowlist. */
+  seasonalOpportunities?: AirtableRecord[];
   posts?: AirtableRecord[];
-  /** IANA timezone for date display in the drilldown panel. */
   timezone?: string;
 }
 
@@ -24,11 +25,6 @@ const REGIONS_AVAILABLE: Array<TrendingKeyword["region"]> = ["GB+IE", "US"];
 const TREND_TYPES_AVAILABLE: Array<TrendingKeyword["trendType"]> = [
   "growing",
   "monthly",
-];
-const SORT_BYS_AVAILABLE: Array<TopPin["sortBy"]> = [
-  "IMPRESSION",
-  "SAVE",
-  "OUTBOUND_CLICK",
 ];
 
 /**
@@ -104,12 +100,17 @@ function latestSnapshotDate<T extends { snapshotDate: string }>(
 
 interface TrendsPanelProps {
   records: AirtableRecord[];
+  /** Keyword allowlist used by the Bootle-relevant filter. */
+  bootleAllowlist: string[];
 }
 
-function TrendsPanel({ records }: TrendsPanelProps) {
+function TrendsPanel({ records, bootleAllowlist }: TrendsPanelProps) {
   const [region, setRegion] = useState<TrendingKeyword["region"]>("GB+IE");
   const [trendType, setTrendType] =
     useState<TrendingKeyword["trendType"]>("growing");
+  // Default ON — the global trends list is full of pop-culture noise that
+  // isn't actionable for a drinkware brand. Toggle off to see the full list.
+  const [bootleOnly, setBootleOnly] = useState(true);
 
   const keywords = useMemo(
     () => records.map(toTrendingKeyword),
@@ -117,7 +118,7 @@ function TrendsPanel({ records }: TrendsPanelProps) {
   );
   const latestDate = useMemo(() => latestSnapshotDate(keywords), [keywords]);
 
-  const filtered = useMemo(
+  const baseFiltered = useMemo(
     () =>
       keywords
         .filter(
@@ -126,9 +127,25 @@ function TrendsPanel({ records }: TrendsPanelProps) {
             k.region === region &&
             k.trendType === trendType,
         )
-        .sort((a, b) => a.rank - b.rank)
-        .slice(0, 25),
+        .sort((a, b) => a.rank - b.rank),
     [keywords, latestDate, region, trendType],
+  );
+
+  const filtered = useMemo(() => {
+    const list = bootleOnly
+      ? baseFiltered.filter((k) =>
+          matchesBootleAllowlist(k.keyword, bootleAllowlist),
+        )
+      : baseFiltered;
+    return list.slice(0, 25);
+  }, [baseFiltered, bootleOnly, bootleAllowlist]);
+
+  const bootleMatchCount = useMemo(
+    () =>
+      baseFiltered.filter((k) =>
+        matchesBootleAllowlist(k.keyword, bootleAllowlist),
+      ).length,
+    [baseFiltered, bootleAllowlist],
   );
 
   return (
@@ -149,7 +166,27 @@ function TrendsPanel({ records }: TrendsPanelProps) {
             <span className="ml-2 text-xs opacity-60">({latestDate})</span>
           )}
         </h3>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
+          <label
+            className="text-xs flex items-center gap-1.5 cursor-pointer px-2 py-1 rounded"
+            style={{
+              background: bootleOnly ? "var(--accent-purple)" : "var(--bg-secondary)",
+              color: bootleOnly ? "#fff" : "var(--text-secondary)",
+              border: "1px solid var(--border)",
+            }}
+            title="Filter to Bootle-relevant keywords (drawn from Seasonal Opportunities + content pillars)"
+          >
+            <input
+              type="checkbox"
+              checked={bootleOnly}
+              onChange={(e) => setBootleOnly(e.target.checked)}
+              className="cursor-pointer"
+            />
+            Bootle-relevant
+            <span className="opacity-70 text-[10px]">
+              ({bootleMatchCount} match{bootleMatchCount === 1 ? "" : "es"})
+            </span>
+          </label>
           <select
             value={region}
             onChange={(e) =>
@@ -278,191 +315,24 @@ function GrowthCell({ value }: { value: number }) {
   return <span className={cls}>{display}</span>;
 }
 
-interface TopPinsPanelProps {
-  records: AirtableRecord[];
-  posts: AirtableRecord[];
-  timezone: string;
-}
-
-function TopPinsPanel({ records, posts, timezone }: TopPinsPanelProps) {
-  const [sortBy, setSortBy] = useState<TopPin["sortBy"]>("OUTBOUND_CLICK");
-  const [drilldown, setDrilldown] = useState<{
-    posts: AirtableRecord[];
-    label: string;
-  } | null>(null);
-
-  // Build a Post ID -> Post record lookup so row clicks resolve quickly.
-  const postsByPostId = useMemo(() => {
-    const m = new Map<string, AirtableRecord>();
-    for (const p of posts) {
-      const pid = str(p.fields["Post ID"]);
-      if (pid) m.set(pid, p);
-    }
-    return m;
-  }, [posts]);
-
-  const pins = useMemo(() => records.map(toTopPin), [records]);
-  const latestDate = useMemo(() => latestSnapshotDate(pins), [pins]);
-
-  const filtered = useMemo(
-    () =>
-      pins
-        .filter(
-          (p) => p.snapshotDate === latestDate && p.sortBy === sortBy,
-        )
-        .sort((a, b) => a.rank - b.rank)
-        .slice(0, 25),
-    [pins, latestDate, sortBy],
-  );
-
-  return (
-    <div
-      className="rounded-xl p-5"
-      style={{
-        background: "var(--bg-card)",
-        border: "1px solid var(--border)",
-      }}
-    >
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h3
-          className="text-sm font-medium"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Pinterest Top Pins
-          {latestDate && (
-            <span className="ml-2 text-xs opacity-60">
-              (last 30 days · {latestDate})
-            </span>
-          )}
-        </h3>
-        <div className="flex gap-1">
-          {SORT_BYS_AVAILABLE.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSortBy(s)}
-              className="text-xs px-2 py-1 rounded cursor-pointer transition-colors"
-              style={{
-                background:
-                  sortBy === s ? "var(--accent-purple)" : "var(--bg-secondary)",
-                color:
-                  sortBy === s ? "#fff" : "var(--text-secondary)",
-                border: "1px solid var(--border)",
-              }}
-            >
-              {s.replace("_", " ")}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {filtered.length === 0 ? (
-        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          No top-pins data for this metric yet.
-        </p>
-      ) : (
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ color: "var(--text-secondary)" }}>
-              <th scope="col" className="text-left py-2 px-2 w-8">
-                #
-              </th>
-              <th scope="col" className="text-left py-2 px-2">
-                Pin
-              </th>
-              <th scope="col" className="text-right py-2 px-2">
-                Impressions
-              </th>
-              <th scope="col" className="text-right py-2 px-2">
-                Saves
-              </th>
-              <th scope="col" className="text-right py-2 px-2">
-                Clicks (Out)
-              </th>
-              <th scope="col" className="text-right py-2 px-2">
-                Engagement
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((p) => {
-              const matchedPost = postsByPostId.get(p.postId);
-              const hasMatch = !!matchedPost;
-              return (
-                <tr
-                  key={p.id}
-                  className={`border-t hover:bg-white/5 transition-colors ${
-                    hasMatch ? "cursor-pointer" : ""
-                  }`}
-                  style={{ borderColor: "var(--border)" }}
-                  onClick={() => {
-                    if (matchedPost) {
-                      setDrilldown({
-                        posts: [matchedPost],
-                        label: `Pin #${p.rank} by ${p.sortBy.replace("_", " ")}`,
-                      });
-                    }
-                  }}
-                  title={
-                    hasMatch
-                      ? "Click to see full post detail"
-                      : "No matching Post record (pin may be older than 30d)"
-                  }
-                >
-                  <td className="py-2 px-2 opacity-50">{p.rank}</td>
-                  <td className="py-2 px-2">
-                    <a
-                      href={`https://www.pinterest.com/pin/${p.pinId}/`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                      style={{ color: "var(--accent-purple)" }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {p.pinId.slice(-10)}
-                    </a>
-                    {hasMatch && (
-                      <span
-                        className="ml-2 text-[10px]"
-                        style={{ color: "var(--text-secondary)" }}
-                      >
-                        ↗ details
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2 px-2 text-right">
-                    {formatNumber(p.impressions)}
-                  </td>
-                  <td className="py-2 px-2 text-right">{p.saves}</td>
-                  <td className="py-2 px-2 text-right font-medium">
-                    {p.outboundClick > 0 ? p.outboundClick : "—"}
-                  </td>
-                  <td className="py-2 px-2 text-right">{p.engagement}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-
-      {drilldown && (
-        <PostDrilldownPanel
-          posts={drilldown.posts}
-          bucketLabel={drilldown.label}
-          timezone={timezone}
-          onClose={() => setDrilldown(null)}
-        />
-      )}
-    </div>
-  );
-}
-
 export default function PinterestInsights({
   trends,
-  topPins,
-  posts = [],
-  timezone = "",
+  seasonalOpportunities = [],
+  posts: _posts = [],
+  timezone: _timezone = "",
 }: PinterestInsightsProps) {
-  if (trends.length === 0 && topPins.length === 0) {
+  void _posts;
+  void _timezone;
+
+  const bootleAllowlist = useMemo(
+    () =>
+      buildBootleKeywordAllowlist(
+        seasonalOpportunities.map(toSeasonalOpportunity),
+      ),
+    [seasonalOpportunities],
+  );
+
+  if (trends.length === 0) {
     return (
       <div
         className="rounded-xl p-5"
@@ -475,11 +345,11 @@ export default function PinterestInsights({
           className="text-sm font-medium mb-3"
           style={{ color: "var(--text-secondary)" }}
         >
-          Pinterest Insights
+          Pinterest Trending Keywords
         </h3>
         <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          No Pinterest Trends or Top Pins data yet. The Pinterest Trends
-          Refresher runs daily — wait for the next scheduled run.
+          No Pinterest Trends data yet. The Pinterest Trends Refresher runs
+          daily — wait for the next scheduled run.
         </p>
       </div>
     );
@@ -487,8 +357,7 @@ export default function PinterestInsights({
 
   return (
     <div className="space-y-6">
-      <TrendsPanel records={trends} />
-      <TopPinsPanel records={topPins} posts={posts} timezone={timezone} />
+      <TrendsPanel records={trends} bootleAllowlist={bootleAllowlist} />
     </div>
   );
 }

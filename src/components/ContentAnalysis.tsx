@@ -17,6 +17,32 @@ import {
   sumField,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
+import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
+import AudienceDemographics from "./AudienceDemographics";
+import PinterestTopPins from "./PinterestTopPins";
+
+interface ContentAnalysisExtraProps {
+  /** Instagram audience demographics records. */
+  instagramAudience?: AirtableRecord[];
+  /** Pinterest top pins records (Bootle's own pins, ranked). */
+  pinterestTopPins?: AirtableRecord[];
+}
+
+type InsightsTab = "performance" | "audience" | "pinterest" | "hashtags";
+
+const SUBNAV_ITEMS: ReadonlyArray<SubNavItem<InsightsTab>> = [
+  { key: "performance", label: "Post performance" },
+  { key: "audience", label: "Audience" },
+  { key: "pinterest", label: "Pinterest pins" },
+  { key: "hashtags", label: "Hashtags" },
+];
+
+const VALID_KEYS: ReadonlyArray<InsightsTab> = [
+  "performance",
+  "audience",
+  "pinterest",
+  "hashtags",
+];
 
 // CHART METRIC RULES
 //   Additive metrics (Engagement, Impressions, Reach) -> stacked bars OK,
@@ -76,7 +102,7 @@ const SEGMENT_COLORS = [
   CHART_COLORS.red,
 ];
 
-interface ContentAnalysisProps {
+interface ContentAnalysisProps extends ContentAnalysisExtraProps {
   posts: AirtableRecord[];
   timezone?: string;
 }
@@ -84,7 +110,14 @@ interface ContentAnalysisProps {
 export default function ContentAnalysis({
   posts,
   timezone = "",
+  instagramAudience = [],
+  pinterestTopPins = [],
 }: ContentAnalysisProps) {
+  const [subTab, setSubTab] = useSubNav<InsightsTab>(
+    "insights",
+    "performance",
+    VALID_KEYS,
+  );
   const [metricKey, setMetricKey] = useState<MetricKey>("engagement");
   const metric = METRICS[metricKey];
 
@@ -270,84 +303,108 @@ export default function ContentAnalysis({
     },
   };
 
-  if (posts.length === 0) {
-    return (
-      <div
-        className="rounded-xl p-8 text-center"
-        style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border)",
-        }}
-      >
-        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          No posts found for this period. Try expanding the date range.
-        </p>
-      </div>
-    );
-  }
+  const emptyPostsBanner = (
+    <div
+      className="rounded-xl p-8 text-center"
+      style={{
+        background: "var(--bg-card)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+        No posts found for this period. Try expanding the date range.
+      </p>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
-      <PostScorecardTable posts={posts} timezone={timezone} />
+    <div className="space-y-4">
+      <SubNav
+        storageKey="insights"
+        items={SUBNAV_ITEMS}
+        value={subTab}
+        onChange={setSubTab}
+      />
 
-      <DimensionSlicer posts={posts} normalizers={normalizers} />
+      {subTab === "performance" && posts.length === 0 && emptyPostsBanner}
+      {subTab === "performance" && posts.length > 0 && (
+        <div className="space-y-6">
+          <PostScorecardTable posts={posts} timezone={timezone} />
 
-      <div className="flex items-center gap-2 text-xs">
-        <span style={{ color: "var(--text-secondary)" }}>Metric:</span>
-        {(Object.keys(METRICS) as MetricKey[]).map((k) => (
-          <button
-            key={k}
-            onClick={() => setMetricKey(k)}
-            className="px-2 py-1 rounded cursor-pointer transition-colors"
-            style={{
-              background:
-                metricKey === k ? "var(--accent-purple)" : "var(--bg-secondary)",
-              color: metricKey === k ? "#fff" : "var(--text-secondary)",
-              border: "1px solid var(--border)",
-            }}
-          >
-            {METRICS[k].label}
-          </button>
-        ))}
-        <span className="opacity-50 ml-2">
-          {metric.additive ? "stacked (additive)" : "grouped (rate)"}
-        </span>
-      </div>
+          <DimensionSlicer posts={posts} normalizers={normalizers} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard
-          title={`${metric.label} by Post Type × Theme`}
-          tooltip={
-            metric.additive
-              ? "Stacked: each segment is contribution to the format's total"
-              : "Grouped: bars sit side-by-side. Rates don't sum."
-          }
-        >
-          <Bar data={formatData} options={chartOptions} />
-        </ChartCard>
-        <ChartCard
-          title={`Content Theme × Post Type`}
-          tooltip={
-            metric.additive
-              ? "Stacked: each segment is contribution to the theme's total"
-              : "Grouped: bars sit side-by-side. Rates don't sum."
-          }
-        >
-          <Bar data={themeData} options={chartOptionsHorizontal} />
-        </ChartCard>
-      </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span style={{ color: "var(--text-secondary)" }}>Metric:</span>
+            {(Object.keys(METRICS) as MetricKey[]).map((k) => (
+              <button
+                key={k}
+                onClick={() => setMetricKey(k)}
+                className="px-2 py-1 rounded cursor-pointer transition-colors"
+                style={{
+                  background:
+                    metricKey === k
+                      ? "var(--accent-purple)"
+                      : "var(--bg-secondary)",
+                  color: metricKey === k ? "#fff" : "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {METRICS[k].label}
+              </button>
+            ))}
+            <span className="opacity-50 ml-2">
+              {metric.additive ? "stacked (additive)" : "grouped (rate)"}
+            </span>
+          </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <PostingHeatmap posts={posts} />
-        <ChartCard
-          title="Save Rate vs Share Rate"
-          tooltip="Intent signals — saves = personal value, shares = social value"
-        >
-          <Scatter data={scatterData} options={scatterOptions} />
-        </ChartCard>
-      </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ChartCard
+              title={`${metric.label} by Post Type × Theme`}
+              tooltip={
+                metric.additive
+                  ? "Stacked: each segment is contribution to the format's total"
+                  : "Grouped: bars sit side-by-side. Rates don't sum."
+              }
+            >
+              <Bar data={formatData} options={chartOptions} />
+            </ChartCard>
+            <ChartCard
+              title={`Content Theme × Post Type`}
+              tooltip={
+                metric.additive
+                  ? "Stacked: each segment is contribution to the theme's total"
+                  : "Grouped: bars sit side-by-side. Rates don't sum."
+              }
+            >
+              <Bar data={themeData} options={chartOptionsHorizontal} />
+            </ChartCard>
+          </div>
 
-      <HashtagCharts posts={posts} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <PostingHeatmap posts={posts} />
+            <ChartCard
+              title="Save Rate vs Share Rate"
+              tooltip="Intent signals — saves = personal value, shares = social value"
+            >
+              <Scatter data={scatterData} options={scatterOptions} />
+            </ChartCard>
+          </div>
+        </div>
+      )}
+
+      {subTab === "audience" && (
+        <AudienceDemographics records={instagramAudience} />
+      )}
+
+      {subTab === "pinterest" && (
+        <PinterestTopPins
+          records={pinterestTopPins}
+          posts={posts}
+          timezone={timezone}
+        />
+      )}
+
+      {subTab === "hashtags" && <HashtagCharts posts={posts} />}
     </div>
   );
 }

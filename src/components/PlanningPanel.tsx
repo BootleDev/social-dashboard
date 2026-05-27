@@ -3,41 +3,58 @@
 import { useMemo } from "react";
 import BestTimeToPost from "./BestTimeToPost";
 import PinterestInsights from "./PinterestInsights";
-import AudienceDemographics from "./AudienceDemographics";
 import CompetitorInsights from "./CompetitorInsights";
+import UpcomingWindows from "./UpcomingWindows";
+import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
 import { num, sumField } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface PlanningPanelProps {
   posts: AirtableRecord[];
-  instagramAudience: AirtableRecord[];
   pinterestTrends: AirtableRecord[];
-  pinterestTopPins: AirtableRecord[];
+  seasonalOpportunities: AirtableRecord[];
   competitorRecords: AirtableRecord[];
   competitorLoading: boolean;
   competitorError: string;
   timezone: string;
 }
 
+type PlanningTab = "when" | "trends" | "seasonal" | "competitors";
+
+const SUBNAV_ITEMS: ReadonlyArray<SubNavItem<PlanningTab>> = [
+  { key: "when", label: "When to post" },
+  { key: "trends", label: "Pinterest trends" },
+  { key: "seasonal", label: "Seasonal windows" },
+  { key: "competitors", label: "Competitor signal" },
+];
+
+const VALID_KEYS: ReadonlyArray<PlanningTab> = [
+  "when",
+  "trends",
+  "seasonal",
+  "competitors",
+];
+
 /**
- * Content production workspace. Answers: "What should I make next? When?
- * For whom?" Brings together signals from current performance, trending
- * keywords, audience demographics, and competitor inspiration.
- *
- * Components are intentionally light on filters at this level — global Date
- * Range + Platform + Timezone (from the toolbar) apply throughout.
+ * Content production workspace. Answers: "What should I make next? When?"
+ * Sub-tabs replace the long scroll the previous single-page layout produced
+ * once we added trends, seasonal, and competitor sections.
  */
 export default function PlanningPanel({
   posts,
-  instagramAudience,
   pinterestTrends,
-  pinterestTopPins,
+  seasonalOpportunities,
   competitorRecords,
   competitorLoading,
   competitorError,
   timezone,
 }: PlanningPanelProps) {
-  // Normalizers reused by Best Time to Post (matches Content Analysis).
+  const [subTab, setSubTab] = useSubNav<PlanningTab>(
+    "planning",
+    "when",
+    VALID_KEYS,
+  );
+
   const normalizers = useMemo(() => {
     const maxVideoViews = posts.reduce(
       (max, p) => Math.max(max, num(p.fields["Video Views"])),
@@ -53,67 +70,94 @@ export default function PlanningPanel({
   }, [posts]);
 
   return (
-    <div className="space-y-6">
-      <SectionHeader
-        title="When to post"
-        subtitle="Avg engagement by day-of-week × hour-of-day in your selected timezone. Click any cell for the contributing posts."
-      />
-      <BestTimeToPost
-        posts={posts}
-        timezone={timezone}
-        normalizers={normalizers}
+    <div className="space-y-4">
+      <SubNav
+        storageKey="planning"
+        items={SUBNAV_ITEMS}
+        value={subTab}
+        onChange={setSubTab}
       />
 
-      <SectionHeader
-        title="What to make"
-        subtitle="Pinterest trending keywords (search-side demand) and top-performing pins (Bootle-side conversion). Use trends + your historical best as creative anchors."
-      />
-      <PinterestInsights
-        trends={pinterestTrends}
-        topPins={pinterestTopPins}
-        posts={posts}
-        timezone={timezone}
-      />
+      {subTab === "when" && (
+        <Section
+          title="When to post"
+          subtitle="Day-of-week × hour-of-day heatmap in your selected timezone. The top-ranked slots panel above explicitly answers 'best time.' Click any cell for the contributing posts."
+        >
+          <BestTimeToPost
+            posts={posts}
+            timezone={timezone}
+            normalizers={normalizers}
+          />
+        </Section>
+      )}
 
-      <SectionHeader
-        title="Who you reach"
-        subtitle="Instagram follower demographics. Drives whether content choices map to actual audience interests."
-      />
-      <AudienceDemographics records={instagramAudience} />
+      {subTab === "trends" && (
+        <Section
+          title="Pinterest trending keywords"
+          subtitle="Search-side demand from Pinterest's Trends API. Default-filtered to Bootle-relevant terms (drinkware, wellness, seasonal gifting). Toggle to see all trends."
+        >
+          <PinterestInsights
+            trends={pinterestTrends}
+            seasonalOpportunities={seasonalOpportunities}
+            posts={posts}
+            timezone={timezone}
+          />
+        </Section>
+      )}
 
-      <SectionHeader
-        title="Competitor signal"
-        subtitle="Top-performing content from tracked drinkware brands. Inspiration and reference, not for copying."
-      />
-      <CompetitorInsights
-        records={competitorRecords}
-        loading={competitorLoading}
-        error={competitorError}
-      />
+      {subTab === "seasonal" && (
+        <Section
+          title="Upcoming seasonal windows"
+          subtitle="Recurring annual moments approaching their lead-time window, with matching Pinterest trends."
+        >
+          <UpcomingWindows
+            seasonalOpportunities={seasonalOpportunities}
+            pinterestTrends={pinterestTrends}
+          />
+        </Section>
+      )}
+
+      {subTab === "competitors" && (
+        <Section
+          title="Competitor signal"
+          subtitle="Top-performing content from tracked drinkware brands. Inspiration and reference, not for copying."
+        >
+          <CompetitorInsights
+            records={competitorRecords}
+            loading={competitorLoading}
+            error={competitorError}
+          />
+        </Section>
+      )}
     </div>
   );
 }
 
-interface SectionHeaderProps {
+interface SectionProps {
   title: string;
   subtitle: string;
+  children: React.ReactNode;
 }
 
-function SectionHeader({ title, subtitle }: SectionHeaderProps) {
+function Section({ title, subtitle, children }: SectionProps) {
   return (
-    <div className="mt-2">
-      <h2
-        className="text-base font-semibold"
-        style={{ color: "var(--text-primary)" }}
-      >
-        {title}
-      </h2>
-      <p
-        className="text-xs mt-1"
-        style={{ color: "var(--text-secondary)" }}
-      >
-        {subtitle}
-      </p>
+    <div className="space-y-4">
+      <div>
+        <h2
+          className="text-base font-semibold"
+          style={{ color: "var(--text-primary)" }}
+        >
+          {title}
+        </h2>
+        <p
+          className="text-xs mt-1"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {subtitle}
+        </p>
+      </div>
+      {children}
     </div>
   );
 }
+
