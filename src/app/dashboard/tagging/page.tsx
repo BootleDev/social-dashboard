@@ -412,10 +412,13 @@ export default function TaggingPage() {
   const [bulkApproving, setBulkApproving] = useState(false);
   const [bulkError, setBulkError] = useState("");
 
-  const fetchPosts = useCallback(() => {
+  const fetchPosts = useCallback((noCache = false) => {
     setLoading(true);
     setError("");
-    fetch("/api/airtable?table=posts")
+    const url = noCache
+      ? "/api/airtable?table=posts&nocache=1"
+      : "/api/airtable?table=posts";
+    fetch(url)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -556,7 +559,7 @@ export default function TaggingPage() {
             <option value="all">All not-Approved</option>
           </select>
           <button
-            onClick={fetchPosts}
+            onClick={() => fetchPosts(true)}
             className="text-[10px] px-2 py-1 rounded transition-colors hover:bg-white/10 cursor-pointer"
             style={{
               color: "var(--text-secondary)",
