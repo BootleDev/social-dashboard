@@ -3,12 +3,8 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Overview from "@/components/Overview";
 import ContentAnalysis from "@/components/ContentAnalysis";
-import AudienceGrowth from "@/components/AudienceGrowth";
-import AudienceDemographics from "@/components/AudienceDemographics";
-import PinterestInsights from "@/components/PinterestInsights";
-import PlatformCompare from "@/components/PlatformCompare";
-import CompetitorInsights from "@/components/CompetitorInsights";
-import TaggingPage from "@/app/dashboard/tagging/page";
+import PlanningPanel from "@/components/PlanningPanel";
+import OpsPanel from "@/components/OpsPanel";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
 import PlatformFilter from "@/components/PlatformFilter";
@@ -21,14 +17,17 @@ import { str, getComparisonPeriod, getPlatformKeys } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 
-type Tab =
-  | "overview"
-  | "content"
-  | "audience"
-  | "pinterest"
-  | "compare"
-  | "competitors"
-  | "tagging";
+/**
+ * Tab structure (2026-05-26 IA rewrite):
+ * - pulse: daily check-in. KPIs + alerts + summaries.
+ * - insights: deep EDA for "why is X behaving this way".
+ * - planning: content production tools — when, what, who.
+ * - ops: admin (tagging, platform compare, health).
+ *
+ * Old tabs (overview/content/audience/pinterest/compare/competitors/tagging)
+ * are merged into the four above; component reuse is preserved.
+ */
+type Tab = "pulse" | "insights" | "planning" | "ops";
 
 interface DashboardData {
   posts: AirtableRecord[];
@@ -69,7 +68,7 @@ function filterByDateRange(
 }
 
 export default function DashboardPage() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("pulse");
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -109,9 +108,10 @@ export default function DashboardPage() {
     fetchData();
   }, [fetchData]);
 
-  // Lazy-fetch competitor data when tab is selected
+  // Lazy-fetch competitor data when Planning tab is selected (competitors live
+  // inside Planning now, under "Competitor signal").
   useEffect(() => {
-    if (tab !== "competitors" || competitorFetched) return;
+    if (tab !== "planning" || competitorFetched) return;
     setCompetitorLoading(true);
     setCompetitorError("");
     fetch("/api/competitors")
@@ -224,14 +224,27 @@ export default function DashboardPage() {
     }
   }, [activePlatforms, selectedPlatforms.size]);
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "content", label: "Content Analysis" },
-    { key: "audience", label: "Audience & Growth" },
-    { key: "pinterest", label: "Pinterest Insights" },
-    { key: "compare", label: "Platform Compare" },
-    { key: "competitors", label: "Competitors" },
-    { key: "tagging", label: "Tagging" },
+  const tabs: { key: Tab; label: string; description: string }[] = [
+    {
+      key: "pulse",
+      label: "Pulse",
+      description: "Daily check-in: what happened, what's working, what needs attention",
+    },
+    {
+      key: "insights",
+      label: "Insights",
+      description: "Deep EDA: why is content behaving this way, what shapes drive what outcomes",
+    },
+    {
+      key: "planning",
+      label: "Planning",
+      description: "Content production: when to post, what to make, who to reach, who to learn from",
+    },
+    {
+      key: "ops",
+      label: "Ops",
+      description: "Tagging, platform comparison, pipeline health",
+    },
   ];
 
   return (
@@ -313,6 +326,7 @@ export default function DashboardPage() {
                 onClick={() => setTab(t.key)}
                 role="tab"
                 aria-selected={tab === t.key}
+                title={t.description}
                 className={`px-3 py-2 rounded-md text-xs font-medium transition-all cursor-pointer ${
                   tab === t.key ? "text-white" : ""
                 }`}
@@ -342,7 +356,7 @@ export default function DashboardPage() {
         {data && !loading && (
           <ErrorBoundary>
             <div role="tabpanel">
-              {tab === "overview" && (
+              {tab === "pulse" && (
                 <Overview
                   posts={filteredPosts}
                   dailyMetrics={filteredDaily}
@@ -352,45 +366,30 @@ export default function DashboardPage() {
                   prevDailyMetrics={comparisonDaily}
                 />
               )}
-              {tab === "content" && (
+              {tab === "insights" && (
                 <ContentAnalysis
                   posts={filteredPosts}
                   timezone={timezone}
                 />
               )}
-              {tab === "audience" && (
-                <div className="space-y-6">
-                  <AudienceGrowth
-                    posts={filteredPosts}
-                    dailyMetrics={filteredDaily}
-                  />
-                  <AudienceDemographics
-                    records={data.instagramAudience ?? []}
-                  />
-                </div>
-              )}
-              {tab === "pinterest" && (
-                <PinterestInsights
-                  trends={data.pinterestTrends ?? []}
-                  topPins={data.pinterestTopPins ?? []}
-                  posts={data.posts ?? []}
+              {tab === "planning" && (
+                <PlanningPanel
+                  posts={filteredPosts}
+                  instagramAudience={data.instagramAudience ?? []}
+                  pinterestTrends={data.pinterestTrends ?? []}
+                  pinterestTopPins={data.pinterestTopPins ?? []}
+                  competitorRecords={competitorRecords}
+                  competitorLoading={competitorLoading}
+                  competitorError={competitorError}
                   timezone={timezone}
                 />
               )}
-              {tab === "compare" && (
-                <PlatformCompare
+              {tab === "ops" && (
+                <OpsPanel
                   posts={filteredPosts}
                   dailyMetrics={filteredDaily}
                 />
               )}
-              {tab === "competitors" && (
-                <CompetitorInsights
-                  records={competitorRecords}
-                  loading={competitorLoading}
-                  error={competitorError}
-                />
-              )}
-              {tab === "tagging" && <TaggingPage />}
             </div>
           </ErrorBoundary>
         )}
