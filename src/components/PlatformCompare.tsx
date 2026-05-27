@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { defaultOptions } from "@/lib/chartSetup";
+import { defaultOptions, lineChartOptions } from "@/lib/chartSetup";
 import { getPlatformConfig } from "@/lib/platforms";
 import ChartCard from "./ChartCard";
 import {
@@ -268,10 +268,10 @@ export default function PlatformCompare({
       {/* Trend Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="Engagement Rate Comparison">
-          <Line data={erTrendData} options={defaultOptions} />
+          <Line data={erTrendData} options={lineChartOptions} />
         </ChartCard>
         <ChartCard title="Reach Comparison">
-          <Line data={reachTrendData} options={defaultOptions} />
+          <Line data={reachTrendData} options={lineChartOptions} />
         </ChartCard>
       </div>
 

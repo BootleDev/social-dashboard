@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Line, Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { CHART_COLORS, defaultOptions, lineChartOptions } from "@/lib/chartSetup";
 import { getPlatformConfig } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
@@ -256,10 +256,10 @@ export default function Overview({
   // Follower counts move in a narrow band (e.g. 677–694). With a 0-based axis
   // the line looks dead flat, so zoom the y-axis to the actual range.
   const followerChartOptions = {
-    ...defaultOptions,
+    ...lineChartOptions,
     scales: {
-      ...defaultOptions.scales,
-      y: { ...defaultOptions.scales.y, beginAtZero: false },
+      ...lineChartOptions.scales,
+      y: { ...lineChartOptions.scales.y, beginAtZero: false },
     },
   };
 
@@ -358,7 +358,7 @@ export default function Overview({
           <Line data={followerChartData} options={followerChartOptions} />
         </ChartCard>
         <ChartCard title="Engagement Rate Trend (%)">
-          <Line data={erChartData} options={defaultOptions} />
+          <Line data={erChartData} options={lineChartOptions} />
         </ChartCard>
       </div>
 

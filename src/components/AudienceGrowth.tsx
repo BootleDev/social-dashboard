@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Line, Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { CHART_COLORS, defaultOptions, lineChartOptions } from "@/lib/chartSetup";
 import { getPlatformConfig } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
@@ -124,11 +124,11 @@ export default function AudienceGrowth({
   }, [platformKeys, platformMap, allDates]);
 
   const followerGrowthOptions = {
-    ...defaultOptions,
+    ...lineChartOptions,
     scales: {
-      ...defaultOptions.scales,
+      ...lineChartOptions.scales,
       y: {
-        ...defaultOptions.scales.y,
+        ...lineChartOptions.scales.y,
         position: "left" as const,
         beginAtZero: false,
         title: { display: true, text: "Followers", color: CHART_COLORS.muted },
@@ -278,7 +278,7 @@ export default function AudienceGrowth({
       {/* Reach + Profile Views */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="Daily Reach by Platform">
-          <Line data={reachData} options={defaultOptions} />
+          <Line data={reachData} options={lineChartOptions} />
         </ChartCard>
         <ChartCard title="Profile / Page Views">
           <Bar data={profileViewsData} options={defaultOptions} />
