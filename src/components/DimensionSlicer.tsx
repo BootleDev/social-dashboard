@@ -6,8 +6,10 @@ import type { ChartEvent, ActiveElement } from "chart.js";
 import "@/lib/chartSetup";
 import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
+import InsightStrip from "./InsightStrip";
 import PostDrilldownPanel from "./PostDrilldownPanel";
 import { groupByDimension, timeBucket, dayOfWeek, str, num } from "@/lib/utils";
+import { describe, outlierIndices, formatPct } from "@/lib/stats";
 import {
   saveRate,
   commentRate,
@@ -305,6 +307,53 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
     return grouped.map((g) => g.label);
   }, [posts, dim, metric, normalizers]);
 
+  // Per-group raw metric values. Used to detect outliers and surface the
+  // "remove this one post and the average halves" callout. We deliberately
+  // rebuild this here rather than refactoring groupByDimension to avoid
+  // ripple changes across every other caller.
+  const groupValues = useMemo(() => {
+    const map = new Map<string, number[]>();
+    for (const r of posts) {
+      const key = dim.getKey(r) || "untagged";
+      if (key === "untagged" || key === "") continue;
+      const v = metric.getMetric(r, normalizers);
+      if (v === undefined || !Number.isFinite(v)) continue;
+      const arr = map.get(key) ?? [];
+      arr.push(v);
+      map.set(key, arr);
+    }
+    return map;
+  }, [posts, dim, metric, normalizers]);
+
+  const dimensionInsight = useMemo(() => {
+    if (bucketKeys.length === 0) return null;
+    const topLabel = bucketKeys[0];
+    const topVals = groupValues.get(topLabel) ?? [];
+    const topStats = describe(topVals);
+    if (!topStats) return null;
+    const outliers = outlierIndices(topVals);
+    // Mean impact of dropping outliers — quantifies "one freak post drives this"
+    const cleaned = topVals.filter((_, i) => !outliers.includes(i));
+    const cleanMean =
+      cleaned.length > 0
+        ? cleaned.reduce((s, v) => s + v, 0) / cleaned.length
+        : topStats.mean;
+    const outlierImpact =
+      topStats.mean !== 0
+        ? ((topStats.mean - cleanMean) / topStats.mean) * 100
+        : 0;
+    const allValues: number[] = [];
+    for (const arr of groupValues.values()) for (const v of arr) allValues.push(v);
+    const overallStats = describe(allValues);
+    return {
+      topLabel,
+      topStats,
+      overallStats,
+      outlierCount: outliers.length,
+      outlierImpact,
+    };
+  }, [bucketKeys, groupValues]);
+
   const chartOptions = useMemo(
     () => ({
       ...defaultOptions,
@@ -399,6 +448,49 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
         </div>
       ) : (
         <>
+          {dimensionInsight && (
+            <InsightStrip
+              headline={
+                <>
+                  <strong>{dimensionInsight.topLabel}</strong> leads on{" "}
+                  {metric.label.toLowerCase()}:{" "}
+                  <strong>{metric.format(dimensionInsight.topStats.mean)}</strong>{" "}
+                  avg (range{" "}
+                  {metric.format(dimensionInsight.topStats.min)}–
+                  {metric.format(dimensionInsight.topStats.max)})
+                  {dimensionInsight.outlierCount > 0 &&
+                    Math.abs(dimensionInsight.outlierImpact) >= 10 && (
+                      <>
+                        {" · "}
+                        <span style={{ color: "var(--danger, #e74c3c)" }}>
+                          {dimensionInsight.outlierCount} outlier
+                          {dimensionInsight.outlierCount > 1 ? "s" : ""} drive{" "}
+                          {formatPct(dimensionInsight.outlierImpact)} of avg
+                        </span>
+                      </>
+                    )}
+                </>
+              }
+              confidence={
+                dimensionInsight.topStats.n < 5
+                  ? `n=${dimensionInsight.topStats.n} · low confidence`
+                  : undefined
+              }
+              stats={dimensionInsight.topStats}
+              formatStat={(v) => metric.format(v)}
+              extra={
+                dimensionInsight.overallStats && (
+                  <span>
+                    All groups combined: median{" "}
+                    {metric.format(dimensionInsight.overallStats.median)} · P25–P75{" "}
+                    {metric.format(dimensionInsight.overallStats.p25)}–
+                    {metric.format(dimensionInsight.overallStats.p75)} · n=
+                    {dimensionInsight.overallStats.n}
+                  </span>
+                )
+              }
+            />
+          )}
           <Bar data={chartData} options={chartOptions} />
           <p
             className="text-[10px] mt-2 text-right"

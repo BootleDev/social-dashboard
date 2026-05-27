@@ -5,6 +5,8 @@ import { toTopPin, type TopPin } from "@/lib/types";
 import { formatNumber, str } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 import PostDrilldownPanel from "./PostDrilldownPanel";
+import InsightStrip from "./InsightStrip";
+import { describe } from "@/lib/stats";
 
 interface PinterestTopPinsProps {
   records: AirtableRecord[];
@@ -137,6 +139,50 @@ export default function PinterestTopPins({
         </div>
       </div>
 
+      {(() => {
+        if (filtered.length < 2) return null;
+        const values = filtered.map((p) =>
+          sortBy === "IMPRESSION"
+            ? p.impressions
+            : sortBy === "SAVE"
+              ? p.saves
+              : p.outboundClick,
+        );
+        const stats = describe(values);
+        if (!stats || stats.max === 0) return null;
+        const headroom = stats.median > 0 ? stats.max / stats.median : 0;
+        const top = filtered[0];
+        return (
+          <InsightStrip
+            headline={
+              <>
+                Top pin: <strong>{formatNumber(stats.max)}</strong>{" "}
+                {SORT_LABEL[sortBy].toLowerCase()}
+                {" · median "}
+                <strong>{formatNumber(stats.median)}</strong>
+                {headroom > 1.5 && (
+                  <>
+                    {" · "}
+                    <span style={{ color: "var(--success, #2ecc71)" }}>
+                      top pin is {headroom.toFixed(1)}× median
+                    </span>
+                  </>
+                )}
+                {top && (
+                  <>
+                    {" · "}
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      ranked #{top.rank}
+                    </span>
+                  </>
+                )}
+              </>
+            }
+            stats={stats}
+            formatStat={(v) => formatNumber(v)}
+          />
+        );
+      })()}
       {filtered.length === 0 ? (
         <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
           No top-pins data for this metric yet.

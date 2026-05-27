@@ -12,6 +12,7 @@ import {
   buildBootleKeywordAllowlist,
   matchesBootleAllowlist,
 } from "@/lib/seasonal";
+import InsightStrip from "./InsightStrip";
 
 interface PinterestInsightsProps {
   trends: AirtableRecord[];
@@ -233,6 +234,55 @@ function TrendsPanel({ records, bootleAllowlist }: TrendsPanelProps) {
         Available regions: US, GB+IE · DE coming soon (Pinterest Trends
         Refresher cron does not yet include DE+AT+CH).
       </p>
+
+      {(() => {
+        // Top Bootle-relevant match by WoW growth, for the leading-sentence
+        // insight. We always compute from baseFiltered (full list) regardless
+        // of toggle state, so the insight tells the user "x of N are relevant"
+        // even when they're viewing the filtered subset.
+        const matches = baseFiltered.filter((k) =>
+          matchesBootleAllowlist(k.keyword, bootleAllowlist),
+        );
+        if (matches.length === 0) return null;
+        const topByWoW = [...matches].sort(
+          (a, b) => b.pctGrowthWoW - a.pctGrowthWoW,
+        )[0];
+        const overlapPct =
+          baseFiltered.length > 0
+            ? (matches.length / baseFiltered.length) * 100
+            : 0;
+        return (
+          <InsightStrip
+            headline={
+              <>
+                <strong>{matches.length}</strong> of {baseFiltered.length}{" "}
+                {trendType} trends overlap Bootle (
+                {overlapPct.toFixed(0)}%)
+                {topByWoW && topByWoW.pctGrowthWoW > 0 && (
+                  <>
+                    {" · top match "}
+                    <strong>“{topByWoW.keyword}”</strong>{" "}
+                    <span style={{ color: "var(--success, #2ecc71)" }}>
+                      +{topByWoW.pctGrowthWoW}% WoW
+                    </span>
+                  </>
+                )}
+              </>
+            }
+            extra={
+              matches.length > 0 && (
+                <span>
+                  Other relevant movers:{" "}
+                  {matches
+                    .slice(1, 4)
+                    .map((m) => `${m.keyword} (+${m.pctGrowthWoW}%)`)
+                    .join(" · ") || "none"}
+                </span>
+              )
+            }
+          />
+        );
+      })()}
 
       {filtered.length === 0 ? (
         <p className="text-xs" style={{ color: "var(--text-secondary)" }}>

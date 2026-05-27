@@ -20,6 +20,8 @@ import type { AirtableRecord } from "@/lib/utils";
 import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
 import AudienceDemographics from "./AudienceDemographics";
 import PinterestTopPins from "./PinterestTopPins";
+import InsightStrip from "./InsightStrip";
+import { pearson, describe } from "@/lib/stats";
 
 interface ContentAnalysisExtraProps {
   /** Instagram audience demographics records. */
@@ -359,6 +361,35 @@ export default function ContentAnalysis({
     return { maxVideoViews, maxImpressions, avgFollowers };
   }, [posts]);
 
+  // Scatter insight: correlation between save rate and share rate, plus a
+  // "quadrant winner" — posts above median on BOTH axes (high personal AND
+  // social value). Surface count + top performer.
+  const scatterInsight = useMemo(() => {
+    if (scatterPosts.length < 3) return null;
+    const saves = scatterPosts.map(
+      (p) => (num(p.fields["Saves"]) / num(p.fields["Reach"])) * 100,
+    );
+    const shares = scatterPosts.map(
+      (p) => (num(p.fields["Shares"]) / num(p.fields["Reach"])) * 100,
+    );
+    const r = pearson(saves, shares);
+    const saveStats = describe(saves);
+    const shareStats = describe(shares);
+    if (!saveStats || !shareStats) return null;
+    const winners = scatterPosts.filter(
+      (_, i) => saves[i] >= saveStats.median && shares[i] >= shareStats.median,
+    );
+    const top = winners
+      .map((p) => ({
+        post: p,
+        score:
+          (num(p.fields["Saves"]) + num(p.fields["Shares"])) /
+          num(p.fields["Reach"]),
+      }))
+      .sort((a, b) => b.score - a.score)[0];
+    return { r, saveStats, shareStats, winnersCount: winners.length, top };
+  }, [scatterPosts]);
+
   const scatterOptions = {
     ...defaultOptions,
     onClick: (
@@ -481,12 +512,62 @@ export default function ContentAnalysis({
             </ChartCard>
           </div>
 
-          <ChartCard
-            title="Save Rate vs Share Rate"
-            tooltip="Intent signals — saves = personal value, shares = social value. Click a point to drill into the post."
-          >
-            <Scatter data={scatterData} options={scatterOptions} />
-          </ChartCard>
+          <div>
+            {scatterInsight && (
+              <InsightStrip
+                headline={
+                  <>
+                    {scatterInsight.r !== undefined && (
+                      <>
+                        Save vs Share correlation:{" "}
+                        <strong>
+                          {scatterInsight.r >= 0 ? "+" : ""}
+                          {scatterInsight.r.toFixed(2)}
+                        </strong>{" "}
+                        ({
+                          Math.abs(scatterInsight.r) >= 0.5
+                            ? "strong"
+                            : Math.abs(scatterInsight.r) >= 0.3
+                              ? "moderate"
+                              : "weak"
+                        })
+                        {" · "}
+                      </>
+                    )}
+                    <strong>{scatterInsight.winnersCount}</strong> posts win
+                    both axes (above median save AND share)
+                    {scatterInsight.top && (
+                      <>
+                        {" · top: "}
+                        <strong>
+                          Post {str(scatterInsight.top.post.fields["Post ID"]).slice(-8)}
+                        </strong>
+                      </>
+                    )}
+                  </>
+                }
+                stats={scatterInsight.saveStats}
+                formatStat={(v) => `${v.toFixed(2)}%`}
+                extra={
+                  <span>
+                    Save rate (x): median {scatterInsight.saveStats.median.toFixed(2)}%
+                    {" · "}
+                    Share rate (y): median {scatterInsight.shareStats.median.toFixed(2)}%
+                    {" · stdev save "}
+                    {scatterInsight.saveStats.stdev.toFixed(2)}%
+                    {", share "}
+                    {scatterInsight.shareStats.stdev.toFixed(2)}%
+                  </span>
+                }
+              />
+            )}
+            <ChartCard
+              title="Save Rate vs Share Rate"
+              tooltip="Intent signals — saves = personal value, shares = social value. Click a point to drill into the post."
+            >
+              <Scatter data={scatterData} options={scatterOptions} />
+            </ChartCard>
+          </div>
         </div>
       )}
 
