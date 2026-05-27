@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { str, num, formatNumber } from "@/lib/utils";
+import { str, num, formatNumber, formatLocalDate } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -19,6 +19,8 @@ interface PostDrilldownPanelProps {
   metricLabel?: string;
   getMetricValue?: (r: AirtableRecord) => number | undefined;
   formatMetric?: (v: number) => string;
+  /** IANA timezone for date display. Empty = browser local. */
+  timezone?: string;
   /** Called when the panel should close. */
   onClose: () => void;
 }
@@ -29,6 +31,7 @@ export default function PostDrilldownPanel({
   metricLabel,
   getMetricValue,
   formatMetric,
+  timezone = "",
   onClose,
 }: PostDrilldownPanelProps) {
   // Close on Escape
@@ -114,7 +117,10 @@ export default function PostDrilldownPanel({
               const platformConfig = getPlatformConfig(platform);
               const url = str(f["Media URL"]);
               const caption = str(f["Caption"]) || "(no caption)";
-              const publishedAt = str(f["Published At"]).split("T")[0];
+              const publishedAt = formatLocalDate(
+                str(f["Published At"]),
+                timezone || undefined,
+              );
               const reach = num(f["Reach"]);
               const metricVal = getMetricValue?.(p);
 

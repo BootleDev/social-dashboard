@@ -88,6 +88,77 @@ export function dayOfWeek(publishedAt: string): string {
   return DOW[d.getUTCDay()];
 }
 
+/**
+ * Timezone-aware date/time helpers added 2026-05-26 for the "when should I
+ * post" workflow. All helpers accept an IANA timezone string (e.g.
+ * "Europe/London", "America/New_York"); pass `undefined` for browser-local.
+ */
+
+/** Format an ISO timestamp as YYYY-MM-DD in the given IANA timezone. */
+export function formatLocalDate(iso: string, timezone?: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+  // en-CA returns YYYY-MM-DD which is the format we want.
+  return parts;
+}
+
+/** Format an ISO timestamp as "YYYY-MM-DD HH:mm" in the given IANA timezone. */
+export function formatLocalDateTime(iso: string, timezone?: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  // Two-pass to avoid locale-mixed output: build date, then time.
+  const date = formatLocalDate(iso, timezone);
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+  return `${date} ${time}`;
+}
+
+/** Day-of-week label (Sun..Sat) in the given IANA timezone. */
+export function dayOfWeekLocal(iso: string, timezone?: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "Unknown";
+  // Use weekday short to get e.g. "Mon", "Tue".
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+  }).format(d);
+}
+
+/** Hour (0-23) of the day in the given IANA timezone. */
+export function hourOfDayLocal(iso: string, timezone?: string): number {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return -1;
+  const hourStr = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    hour12: false,
+  }).format(d);
+  return parseInt(hourStr, 10);
+}
+
+/**
+ * List of presets shown in the timezone selector. Order matters — selector
+ * renders them in this order.
+ */
+export const TIMEZONE_PRESETS = [
+  { label: "Browser local", value: "" },
+  { label: "London (UK/EU)", value: "Europe/London" },
+  { label: "Stockholm (CET/CEST)", value: "Europe/Stockholm" },
+  { label: "New York", value: "America/New_York" },
+  { label: "Los Angeles", value: "America/Los_Angeles" },
+  { label: "UTC", value: "UTC" },
+] as const;
+
 /** Aggregate posts by post type, returning avg ER for each type. */
 export function avgERByPostType(
   posts: AirtableRecord[],

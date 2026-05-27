@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { num, str, formatNumber, formatPercent } from "@/lib/utils";
+import { num, str, formatNumber, formatPercent, formatLocalDate } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 import { toPost } from "@/lib/types";
@@ -33,6 +33,7 @@ type SortField =
 interface PostScorecardTableProps {
   posts: AirtableRecord[];
   normalizers?: ReachNormalizers;
+  timezone?: string;
 }
 
 const DEFAULT_NORMALIZERS: ReachNormalizers = {
@@ -44,6 +45,7 @@ const DEFAULT_NORMALIZERS: ReachNormalizers = {
 export default function PostScorecardTable({
   posts,
   normalizers = DEFAULT_NORMALIZERS,
+  timezone = "",
 }: PostScorecardTableProps) {
   const [sortBy, setSortBy] = useState<SortField>("Engagement Rate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -137,7 +139,7 @@ export default function PostScorecardTable({
                 str(p.fields["Caption"]).replace(/\n/g, " "),
                 str(p.fields["Platform"]),
                 str(p.fields["Post Type"]),
-                str(p.fields["Published At"]).split("T")[0],
+                formatLocalDate(str(p.fields["Published At"]), timezone || undefined),
                 String(num(p.fields["Reach"])),
                 (num(p.fields["Engagement Rate"]) * 100).toFixed(2),
                 ((saveRate(post) ?? 0) * 100).toFixed(2),
@@ -249,7 +251,7 @@ export default function PostScorecardTable({
                 {str(p.fields["Post Type"])}
               </td>
               <td className="py-2 px-2 text-right">
-                {str(p.fields["Published At"]).split("T")[0]}
+                {formatLocalDate(str(p.fields["Published At"]), timezone || undefined)}
               </td>
               <td className="py-2 px-2 text-right">
                 {formatNumber(num(p.fields["Reach"]))}

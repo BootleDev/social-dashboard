@@ -9,14 +9,19 @@ import DimensionSlicer from "./DimensionSlicer";
 import PostScorecardTable from "./PostScorecardTable";
 import PostingHeatmap from "./PostingHeatmap";
 import HashtagCharts from "./HashtagCharts";
+import BestTimeToPost from "./BestTimeToPost";
 import { num, avgERByPostType, avgERByTheme, sumField } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface ContentAnalysisProps {
   posts: AirtableRecord[];
+  timezone?: string;
 }
 
-export default function ContentAnalysis({ posts }: ContentAnalysisProps) {
+export default function ContentAnalysis({
+  posts,
+  timezone = "",
+}: ContentAnalysisProps) {
   const formatData = useMemo(() => {
     const breakdown = avgERByPostType(posts);
     return {
@@ -135,7 +140,7 @@ export default function ContentAnalysis({ posts }: ContentAnalysisProps) {
 
   return (
     <div className="space-y-6">
-      <PostScorecardTable posts={posts} />
+      <PostScorecardTable posts={posts} timezone={timezone} />
 
       <DimensionSlicer posts={posts} normalizers={normalizers} />
 
@@ -156,6 +161,12 @@ export default function ContentAnalysis({ posts }: ContentAnalysisProps) {
           />
         </ChartCard>
       </div>
+
+      <BestTimeToPost
+        posts={posts}
+        timezone={timezone}
+        normalizers={normalizers}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PostingHeatmap posts={posts} />

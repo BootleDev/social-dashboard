@@ -12,6 +12,8 @@ import TaggingPage from "@/app/dashboard/tagging/page";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
 import PlatformFilter from "@/components/PlatformFilter";
+import TimezoneSelector from "@/components/TimezoneSelector";
+import { useTimezone } from "@/lib/useTimezone";
 import ChatBox from "@/components/ChatBox";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -85,6 +87,7 @@ export default function DashboardPage() {
   const [competitorLoading, setCompetitorLoading] = useState(false);
   const [competitorError, setCompetitorError] = useState("");
   const [competitorFetched, setCompetitorFetched] = useState(false);
+  const [timezone, setTimezone] = useTimezone();
 
   const fetchData = useCallback((force = false) => {
     // MARKETING-19 Fix 7: when force=true (Refresh button), bypass the 30-min
@@ -296,6 +299,8 @@ export default function DashboardPage() {
             />
           )}
 
+          <TimezoneSelector value={timezone} onChange={setTimezone} />
+
           <nav
             className="flex gap-1 rounded-lg p-1"
             style={{ background: "var(--bg-secondary)" }}
@@ -347,7 +352,12 @@ export default function DashboardPage() {
                   prevDailyMetrics={comparisonDaily}
                 />
               )}
-              {tab === "content" && <ContentAnalysis posts={filteredPosts} />}
+              {tab === "content" && (
+                <ContentAnalysis
+                  posts={filteredPosts}
+                  timezone={timezone}
+                />
+              )}
               {tab === "audience" && (
                 <div className="space-y-6">
                   <AudienceGrowth
