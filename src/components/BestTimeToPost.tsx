@@ -163,6 +163,7 @@ export default function BestTimeToPost({
   normalizers = DEFAULT_NORMALIZERS,
 }: BestTimeToPostProps) {
   const [metricIdx, setMetricIdx] = useState(0);
+  const [minN, setMinN] = useState(2);
   const [drilldown, setDrilldown] = useState<{
     posts: AirtableRecord[];
     label: string;
@@ -175,7 +176,49 @@ export default function BestTimeToPost({
     () => buildGrid(posts, timezone, metric),
     [posts, timezone, metric],
   );
-  const max = useMemo(() => maxAcross(grid), [grid]);
+
+  // Rank all (day, hour) slots by metric, but only ones meeting the minimum
+  // sample size — otherwise a single freak post dominates the "best time" list.
+  const rankedSlots = useMemo(() => {
+    const slots: Array<{
+      day: string;
+      dayIdx: number;
+      hour: number;
+      avg: number;
+      n: number;
+      posts: AirtableRecord[];
+    }> = [];
+    for (let d = 0; d < DAYS.length; d++) {
+      for (let h = 0; h < 24; h++) {
+        const cell = grid[d][h];
+        if (cell.avg === null) continue;
+        if (cell.posts.length < minN) continue;
+        slots.push({
+          day: DAYS[d],
+          dayIdx: d,
+          hour: h,
+          avg: cell.avg,
+          n: cell.posts.length,
+          posts: cell.posts,
+        });
+      }
+    }
+    slots.sort((a, b) => b.avg - a.avg);
+    return slots;
+  }, [grid, minN]);
+
+  // Heatmap intensity is computed against the max of qualifying slots, so
+  // sub-min-N noise doesn't peg the color scale.
+  const max = useMemo(() => {
+    let m = 0;
+    for (const s of rankedSlots) if (s.avg > m) m = s.avg;
+    return m;
+  }, [rankedSlots]);
+
+  const topSlotKey = useMemo(() => {
+    if (rankedSlots.length === 0) return null;
+    return `${rankedSlots[0].dayIdx}-${rankedSlots[0].hour}`;
+  }, [rankedSlots]);
 
   const tzLabel = timezone || "browser local";
   const totalPostsCharted = useMemo(
@@ -187,14 +230,33 @@ export default function BestTimeToPost({
     [grid],
   );
 
+  // Average across all qualifying slots — used to express each top slot's
+  // performance as "+X% vs average" for an instant comparison.
+  const overallAvg = useMemo(() => {
+    if (rankedSlots.length === 0) return 0;
+    const sum = rankedSlots.reduce((s, slot) => s + slot.avg, 0);
+    return sum / rankedSlots.length;
+  }, [rankedSlots]);
+
   return (
     <ChartCard
       title="Best Time to Post"
       tooltip={`Average ${metric.label} by day-of-week × hour-of-day in your selected timezone. Click a cell to see contributing posts.`}
       height="auto"
     >
+      <div
+        className="text-xs mb-2 px-2 py-1.5 rounded"
+        style={{
+          background: "var(--bg-secondary)",
+          color: "var(--text-secondary)",
+        }}
+      >
+        Times shown in <strong style={{ color: "var(--text-primary)" }}>{tzLabel}</strong>
+        {" "}· change via the timezone selector in the top toolbar
+      </div>
+
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <label
             className="text-xs"
             style={{ color: "var(--text-secondary)" }}
@@ -218,14 +280,100 @@ export default function BestTimeToPost({
               </option>
             ))}
           </select>
+          <label
+            className="text-xs ml-2"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            Min posts per slot
+          </label>
+          <select
+            value={minN}
+            onChange={(e) => setMinN(Number(e.target.value))}
+            className="text-xs rounded px-2 py-1 border cursor-pointer outline-none"
+            style={{
+              background: "var(--bg-secondary)",
+              color: "var(--text-primary)",
+              borderColor: "var(--border)",
+            }}
+            aria-label="Minimum posts per slot"
+            title="Slots with fewer posts are excluded from rankings to reduce noise"
+          >
+            {[1, 2, 3, 5].map((n) => (
+              <option key={n} value={n}>
+                ≥ {n}
+              </option>
+            ))}
+          </select>
         </div>
         <span
           className="text-xs"
           style={{ color: "var(--text-secondary)" }}
         >
-          {totalPostsCharted} posts · TZ: {tzLabel}
+          {totalPostsCharted} posts
         </span>
       </div>
+
+      {rankedSlots.length > 0 && (
+        <div
+          className="mb-3 p-3 rounded"
+          style={{
+            background: "rgba(168, 85, 247, 0.08)",
+            border: "1px solid rgba(168, 85, 247, 0.25)",
+          }}
+        >
+          <div
+            className="text-xs font-medium mb-2"
+            style={{ color: "var(--text-primary)" }}
+          >
+            Top slots — {metric.label}
+          </div>
+          <div className="flex flex-col gap-1">
+            {rankedSlots.slice(0, 5).map((s, i) => {
+              const vsAvg =
+                overallAvg > 0 ? ((s.avg - overallAvg) / overallAvg) * 100 : 0;
+              return (
+                <button
+                  key={`${s.dayIdx}-${s.hour}`}
+                  onClick={() =>
+                    setDrilldown({
+                      posts: s.posts,
+                      label: `${s.day} ${s.hour.toString().padStart(2, "0")}:00 (${tzLabel})`,
+                    })
+                  }
+                  className="text-left text-xs flex items-center justify-between hover:bg-white/5 rounded px-1.5 py-1 cursor-pointer"
+                >
+                  <span style={{ color: "var(--text-primary)" }}>
+                    <span className="opacity-50 mr-2">#{i + 1}</span>
+                    {s.day} {s.hour.toString().padStart(2, "0")}:00
+                    <span
+                      className="ml-2 opacity-50"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      ({s.n} posts)
+                    </span>
+                  </span>
+                  <span>
+                    <span style={{ color: "var(--text-primary)" }}>
+                      {metric.format(s.avg)}
+                    </span>
+                    {vsAvg !== 0 && (
+                      <span
+                        className="ml-2"
+                        style={{
+                          color: vsAvg > 0 ? "#22c55e" : "#ef4444",
+                        }}
+                      >
+                        {vsAvg > 0 ? "+" : ""}
+                        {vsAvg.toFixed(0)}% vs avg
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {totalPostsCharted === 0 ? (
         <div
@@ -262,16 +410,22 @@ export default function BestTimeToPost({
                   </th>
                   {HOURS.map((h) => {
                     const cell = grid[dIdx][h];
+                    const qualifies = cell.posts.length >= minN;
                     const intensity =
-                      cell.avg === null || max === 0 ? 0 : cell.avg / max;
+                      cell.avg === null || max === 0 || !qualifies
+                        ? 0
+                        : cell.avg / max;
                     const bg = intensityColor(intensity);
                     const hasPosts = cell.posts.length > 0;
+                    const isTopSlot = `${dIdx}-${h}` === topSlotKey;
                     const title = hasPosts
                       ? `${day} ${h.toString().padStart(2, "0")}:00 · ${
                           cell.posts.length
                         } post${cell.posts.length === 1 ? "" : "s"} · avg ${
                           metric.label
-                        }: ${cell.avg !== null ? metric.format(cell.avg) : "—"}`
+                        }: ${cell.avg !== null ? metric.format(cell.avg) : "—"}${
+                          !qualifies ? " · below min-N threshold" : ""
+                        }`
                       : `${day} ${h.toString().padStart(2, "0")}:00 · no posts`;
                     return (
                       <td
@@ -281,8 +435,11 @@ export default function BestTimeToPost({
                         }`}
                         style={{
                           background: bg,
-                          border: "1px solid var(--border)",
+                          border: isTopSlot
+                            ? "2px solid #f59e0b"
+                            : "1px solid var(--border)",
                           color: intensity > 0.6 ? "#fff" : "var(--text-secondary)",
+                          opacity: hasPosts && !qualifies ? 0.4 : 1,
                         }}
                         title={title}
                         onClick={() => {
@@ -306,7 +463,8 @@ export default function BestTimeToPost({
             style={{ color: "var(--text-secondary)" }}
           >
             Numbers show post count per slot. Darker purple = higher avg{" "}
-            {metric.label}. Click any cell to see contributing posts.
+            {metric.label}. Amber border = top-ranked slot. Faded cells fall
+            below the min-N threshold. Click any cell to see contributing posts.
           </p>
         </div>
       )}

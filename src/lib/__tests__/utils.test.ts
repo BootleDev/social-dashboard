@@ -22,6 +22,7 @@ import {
   timeBucket,
   dayOfWeek,
   avgERByDimensionStacked,
+  sumByDimensionStacked,
 } from "../utils";
 import type { AirtableRecord } from "../utils";
 
@@ -226,6 +227,44 @@ describe("avgERByDimensionStacked", () => {
     );
     expect(r.primaries[0].label).toBe("untagged");
     expect(r.segments[0]).toBe("untagged");
+  });
+});
+
+// --- sumByDimensionStacked ---
+describe("sumByDimensionStacked", () => {
+  const posts = [
+    makeRecord({ "Post Type": "reel", "Content Theme": "Lifestyle", Engagement: 100 }),
+    makeRecord({ "Post Type": "reel", "Content Theme": "Lifestyle", Engagement: 50 }),
+    makeRecord({ "Post Type": "reel", "Content Theme": "Product", Engagement: 20 }),
+    makeRecord({ "Post Type": "image", "Content Theme": "Lifestyle", Engagement: 10 }),
+  ];
+
+  const result = sumByDimensionStacked(
+    posts,
+    (p) => str(p.fields["Post Type"]),
+    (p) => str(p.fields["Content Theme"]),
+    (p) => num(p.fields["Engagement"]),
+  );
+
+  it("sums metric per (primary, segment) cell", () => {
+    expect(result.matrix.reel.Lifestyle.sum).toBe(150);
+    expect(result.matrix.reel.Lifestyle.count).toBe(2);
+    expect(result.matrix.reel.Product.sum).toBe(20);
+    expect(result.matrix.image.Lifestyle.sum).toBe(10);
+  });
+
+  it("orders primaries by total metric desc", () => {
+    expect(result.primaries[0].label).toBe("reel");
+    expect(result.primaries[0].total).toBe(170);
+  });
+
+  it("orders segments by global metric total desc", () => {
+    expect(result.segments[0]).toBe("Lifestyle");
+    expect(result.segments[1]).toBe("Product");
+  });
+
+  it("fills missing cells with zeros", () => {
+    expect(result.matrix.image.Product).toEqual({ sum: 0, count: 0 });
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Bar, Scatter } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
@@ -13,9 +13,55 @@ import {
   num,
   str,
   avgERByDimensionStacked,
+  sumByDimensionStacked,
   sumField,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
+
+// CHART METRIC RULES
+//   Additive metrics (Engagement, Impressions, Reach) -> stacked bars OK,
+//     segments contribute to a meaningful total.
+//   Rate metrics (Engagement Rate, Save Rate, Share Rate) -> grouped bars ONLY,
+//     stacking would produce a nonsensical sum-of-rates.
+type MetricKey = "engagement" | "engagementRate" | "impressions";
+
+interface MetricConfig {
+  label: string;
+  /** Whether stacking the metric across segments is semantically meaningful. */
+  additive: boolean;
+  /** y-axis suffix in chart tooltips */
+  formatter: (v: number) => string;
+}
+
+const METRICS: Record<MetricKey, MetricConfig> = {
+  engagement: {
+    label: "Total Engagement",
+    additive: true,
+    formatter: (v) => v.toLocaleString(),
+  },
+  impressions: {
+    label: "Total Impressions",
+    additive: true,
+    formatter: (v) => v.toLocaleString(),
+  },
+  engagementRate: {
+    label: "Avg Engagement Rate",
+    additive: false,
+    formatter: (v) => `${v.toFixed(2)}%`,
+  },
+};
+
+function metricGetter(key: MetricKey): (p: AirtableRecord) => number {
+  if (key === "engagement") {
+    return (p) =>
+      num(p.fields["Likes"]) +
+      num(p.fields["Comments"]) +
+      num(p.fields["Saves"]) +
+      num(p.fields["Shares"]);
+  }
+  if (key === "impressions") return (p) => num(p.fields["Impressions"]);
+  return (p) => num(p.fields["Engagement Rate"]);
+}
 
 // Palette used to color stacked segments. Reused across both stacked charts
 // so the same segment label gets the same color in the legend regardless of
@@ -39,65 +85,127 @@ export default function ContentAnalysis({
   posts,
   timezone = "",
 }: ContentAnalysisProps) {
-  // Post Type bars, segmented (stacked) by Content Theme so we see which
-  // themes drive ER within each format.
+  const [metricKey, setMetricKey] = useState<MetricKey>("engagement");
+  const metric = METRICS[metricKey];
+
+  // For ER (a rate), use avg aggregation. For additive metrics, use sum.
+  // Then choose stacked vs grouped based on whether the metric is additive.
   const formatData = useMemo(() => {
-    const stacked = avgERByDimensionStacked(
-      posts,
-      (p) => str(p.fields["Post Type"]) || "unknown",
-      (p) => str(p.fields["Content Theme"]) || "untagged",
-    );
+    const getPrimary = (p: AirtableRecord) =>
+      str(p.fields["Post Type"]) || "unknown";
+    const getSegment = (p: AirtableRecord) =>
+      str(p.fields["Content Theme"]) || "untagged";
+
+    if (metric.additive) {
+      const s = sumByDimensionStacked(posts, getPrimary, getSegment, metricGetter(metricKey));
+      return {
+        labels: s.primaries.map((p) => `${p.label} (${p.count})`),
+        datasets: s.segments.map((segment, i) => ({
+          label: segment,
+          data: s.primaries.map((p) => s.matrix[p.label][segment].sum),
+          backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
+          borderWidth: 0,
+        })),
+      };
+    }
+    const a = avgERByDimensionStacked(posts, getPrimary, getSegment);
     return {
-      labels: stacked.primaries.map((p) => `${p.label} (${p.count})`),
-      datasets: stacked.segments.map((segment, i) => ({
+      labels: a.primaries.map((p) => `${p.label} (${p.count})`),
+      datasets: a.segments.map((segment, i) => ({
         label: segment,
-        data: stacked.primaries.map(
-          (p) => stacked.matrix[p.label][segment].avg * 100,
-        ),
+        data: a.primaries.map((p) => a.matrix[p.label][segment].avg * 100),
         backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
         borderWidth: 0,
       })),
     };
-  }, [posts]);
+  }, [posts, metric.additive, metricKey]);
 
-  // Theme bars, segmented (stacked) by Post Type, capped to top 10 themes by total.
   const themeData = useMemo(() => {
-    const stacked = avgERByDimensionStacked(
-      posts,
-      (p) => str(p.fields["Content Theme"]) || "untagged",
-      (p) => str(p.fields["Post Type"]) || "unknown",
-    );
-    const topPrimaries = stacked.primaries.slice(0, 10);
+    const getPrimary = (p: AirtableRecord) =>
+      str(p.fields["Content Theme"]) || "untagged";
+    const getSegment = (p: AirtableRecord) =>
+      str(p.fields["Post Type"]) || "unknown";
+
+    if (metric.additive) {
+      const s = sumByDimensionStacked(posts, getPrimary, getSegment, metricGetter(metricKey));
+      const top = s.primaries.slice(0, 10);
+      return {
+        labels: top.map((p) => `${p.label} (${p.count})`),
+        datasets: s.segments.map((segment, i) => ({
+          label: segment,
+          data: top.map((p) => s.matrix[p.label][segment].sum),
+          backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
+          borderWidth: 0,
+        })),
+      };
+    }
+    const a = avgERByDimensionStacked(posts, getPrimary, getSegment);
+    const top = a.primaries.slice(0, 10);
     return {
-      labels: topPrimaries.map((p) => `${p.label} (${p.count})`),
-      datasets: stacked.segments.map((segment, i) => ({
+      labels: top.map((p) => `${p.label} (${p.count})`),
+      datasets: a.segments.map((segment, i) => ({
         label: segment,
-        data: topPrimaries.map(
-          (p) => stacked.matrix[p.label][segment].avg * 100,
-        ),
+        data: top.map((p) => a.matrix[p.label][segment].avg * 100),
         backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
         borderWidth: 0,
       })),
     };
-  }, [posts]);
+  }, [posts, metric.additive, metricKey]);
 
-  const stackedOptions = useMemo(
-    () => ({
+  // Stacked when additive (sums sum), grouped when a rate (sums don't sum).
+  const chartOptions = useMemo(() => {
+    const formatter = metric.formatter;
+    return {
       ...defaultOptions,
       scales: {
-        x: { ...defaultOptions.scales.x, stacked: true },
-        y: { ...defaultOptions.scales.y, stacked: true },
+        x: { ...defaultOptions.scales.x, stacked: metric.additive },
+        y: {
+          ...defaultOptions.scales.y,
+          stacked: metric.additive,
+          ticks: {
+            ...defaultOptions.scales.y.ticks,
+            callback: (v: string | number) => formatter(Number(v)),
+          },
+        },
       },
-    }),
-    [],
-  );
+      plugins: {
+        ...defaultOptions.plugins,
+        tooltip: {
+          ...defaultOptions.plugins.tooltip,
+          callbacks: {
+            label: (ctx: {
+              dataset: { label?: string };
+              parsed: { y: number | null; x: number | null };
+            }) => {
+              const v = ctx.parsed.y ?? ctx.parsed.x ?? 0;
+              return `${ctx.dataset.label}: ${formatter(v)}`;
+            },
+          },
+        },
+      },
+    };
+  }, [metric.additive, metric.formatter]);
 
-  const stackedHorizontalOptions = useMemo(
-    () => ({
-      ...stackedOptions,
-      indexAxis: "y" as const,
-    }),
-    [stackedOptions],
+  const chartOptionsHorizontal = useMemo(
+    () => {
+      const formatter = metric.formatter;
+      return {
+        ...chartOptions,
+        indexAxis: "y" as const,
+        scales: {
+          x: {
+            ...defaultOptions.scales.x,
+            stacked: metric.additive,
+            ticks: {
+              ...defaultOptions.scales.x.ticks,
+              callback: (v: string | number) => formatter(Number(v)),
+            },
+          },
+          y: { ...defaultOptions.scales.y, stacked: metric.additive },
+        },
+      };
+    },
+    [chartOptions, metric.additive, metric.formatter],
   );
 
   const scatterData = useMemo(() => {
@@ -184,18 +292,48 @@ export default function ContentAnalysis({
 
       <DimensionSlicer posts={posts} normalizers={normalizers} />
 
+      <div className="flex items-center gap-2 text-xs">
+        <span style={{ color: "var(--text-secondary)" }}>Metric:</span>
+        {(Object.keys(METRICS) as MetricKey[]).map((k) => (
+          <button
+            key={k}
+            onClick={() => setMetricKey(k)}
+            className="px-2 py-1 rounded cursor-pointer transition-colors"
+            style={{
+              background:
+                metricKey === k ? "var(--accent-purple)" : "var(--bg-secondary)",
+              color: metricKey === k ? "#fff" : "var(--text-secondary)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            {METRICS[k].label}
+          </button>
+        ))}
+        <span className="opacity-50 ml-2">
+          {metric.additive ? "stacked (additive)" : "grouped (rate)"}
+        </span>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard
-          title="Engagement Rate by Post Type × Theme"
-          tooltip="Stacked: each bar's segments show which themes drive ER within that format"
+          title={`${metric.label} by Post Type × Theme`}
+          tooltip={
+            metric.additive
+              ? "Stacked: each segment is contribution to the format's total"
+              : "Grouped: bars sit side-by-side. Rates don't sum."
+          }
         >
-          <Bar data={formatData} options={stackedOptions} />
+          <Bar data={formatData} options={chartOptions} />
         </ChartCard>
         <ChartCard
-          title="Content Theme × Post Type"
-          tooltip="Stacked: each theme's bar shows ER contribution by format"
+          title={`Content Theme × Post Type`}
+          tooltip={
+            metric.additive
+              ? "Stacked: each segment is contribution to the theme's total"
+              : "Grouped: bars sit side-by-side. Rates don't sum."
+          }
         >
-          <Bar data={themeData} options={stackedHorizontalOptions} />
+          <Bar data={themeData} options={chartOptionsHorizontal} />
         </ChartCard>
       </div>
 

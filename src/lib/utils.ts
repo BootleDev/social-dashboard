@@ -273,6 +273,68 @@ export function avgERByDimensionStacked(
   return { primaries, segments, matrix };
 }
 
+/**
+ * Like avgERByDimensionStacked, but sums the metric per (primary, segment)
+ * cell instead of averaging. Use for additive metrics (Engagement, Impressions,
+ * Reach) where stacked bars are semantically valid — segments are contribution
+ * to a total. Never use this with rates/ratios (ER, save rate) where stacking
+ * would produce a meaningless sum.
+ */
+export function sumByDimensionStacked(
+  posts: AirtableRecord[],
+  getPrimary: (p: AirtableRecord) => string,
+  getSegment: (p: AirtableRecord) => string,
+  getMetric: (p: AirtableRecord) => number | undefined,
+): {
+  primaries: Array<{ label: string; total: number; count: number }>;
+  segments: string[];
+  /** primary -> segment -> { sum, count } */
+  matrix: Record<string, Record<string, { sum: number; count: number }>>;
+} {
+  const cell = new Map<string, { sum: number; count: number }>();
+  const primaryTotals = new Map<string, { total: number; count: number }>();
+  const segmentTotals = new Map<string, number>();
+
+  for (const p of posts) {
+    const primary = getPrimary(p) || "untagged";
+    const segment = getSegment(p) || "untagged";
+    const metric = getMetric(p);
+    if (metric === undefined) continue;
+
+    const key = `${primary} ${segment}`;
+    const c = cell.get(key) ?? { sum: 0, count: 0 };
+    cell.set(key, { sum: c.sum + metric, count: c.count + 1 });
+
+    const pt = primaryTotals.get(primary) ?? { total: 0, count: 0 };
+    primaryTotals.set(primary, { total: pt.total + metric, count: pt.count + 1 });
+
+    segmentTotals.set(segment, (segmentTotals.get(segment) ?? 0) + metric);
+  }
+
+  const primaries = Array.from(primaryTotals.entries())
+    .map(([label, { total, count }]) => ({ label, total, count }))
+    .sort((a, b) => b.total - a.total);
+
+  // Sort segments by global metric total desc so highest-contribution segments
+  // sit at the base of stacked bars (visually clearer than count-based ordering).
+  const segments = Array.from(segmentTotals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label]) => label);
+
+  const matrix: Record<string, Record<string, { sum: number; count: number }>> = {};
+  for (const { label: primary } of primaries) {
+    matrix[primary] = {};
+    for (const segment of segments) {
+      const c = cell.get(`${primary} ${segment}`);
+      matrix[primary][segment] = c
+        ? { sum: c.sum, count: c.count }
+        : { sum: 0, count: 0 };
+    }
+  }
+
+  return { primaries, segments, matrix };
+}
+
 /** Group posts by day-of-week x hour for a heatmap. */
 export function postingHeatmap(
   posts: AirtableRecord[],
