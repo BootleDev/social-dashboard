@@ -21,7 +21,11 @@ interface PinterestInsightsProps {
   timezone?: string;
 }
 
-const REGIONS_AVAILABLE: Array<TrendingKeyword["region"]> = ["GB+IE", "US"];
+const REGIONS_AVAILABLE: Array<TrendingKeyword["region"]> = [
+  "GB+IE",
+  "US",
+  "DE+AT+CH",
+];
 const TREND_TYPES_AVAILABLE: Array<TrendingKeyword["trendType"]> = [
   "growing",
   "monthly",
@@ -230,8 +234,8 @@ function TrendsPanel({ records, bootleAllowlist }: TrendsPanelProps) {
         className="text-[10px] mb-2"
         style={{ color: "var(--text-secondary)" }}
       >
-        Available regions: US, GB+IE · DE coming soon (Pinterest Trends
-        Refresher cron does not yet include DE+AT+CH).
+        Available regions: US, GB+IE, DE+AT+CH. Snapshots refresh daily at
+        01:00 UTC.
       </p>
 
       {filtered.length === 0 ? (
