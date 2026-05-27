@@ -6,6 +6,7 @@ import "@/lib/chartSetup";
 import { CHART_COLORS } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
 import AudienceMap from "./AudienceMap";
+import InsightStrip from "./InsightStrip";
 import { toAudienceDemographic, type AudienceDemographic } from "@/lib/types";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -382,6 +383,33 @@ function CountryView({ followers }: { followers: AudienceDemographic[] }) {
           {total.toLocaleString()} followers across {followers.length} countries
         </span>
       </div>
+      {top.length > 0 && total > 0 && (() => {
+        const leader = top[0];
+        const top5Sum = top.reduce((s, b) => s + b.value, 0);
+        const leaderPct = (leader.value / total) * 100;
+        const top5Pct = (top5Sum / total) * 100;
+        return (
+          <InsightStrip
+            headline={
+              <>
+                <strong>{leader.bucket}</strong> leads at{" "}
+                <strong>{leaderPct.toFixed(1)}%</strong> ·{" "}
+                top 5 = <strong>{top5Pct.toFixed(0)}%</strong> of audience
+                {" · "}
+                <span style={{ color: "var(--text-secondary)" }}>
+                  spread across {followers.length} countries
+                </span>
+              </>
+            }
+            extra={
+              <span>
+                Snapshot only — period-over-period mover analysis pending
+                historical demographic backfill.
+              </span>
+            }
+          />
+        );
+      })()}
       <AudienceMap
         countryCounts={countryCounts}
         total={total}

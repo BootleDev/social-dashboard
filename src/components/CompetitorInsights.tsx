@@ -5,7 +5,9 @@ import { Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
+import InsightStrip from "./InsightStrip";
 import { num, str, formatNumber } from "@/lib/utils";
+import { describe } from "@/lib/stats";
 import type { AirtableRecord } from "@/lib/utils";
 import { exportToCSV } from "@/lib/csv";
 
@@ -241,8 +243,52 @@ export default function CompetitorInsights({
     );
   }
 
+  // Cross-cutting competitor insight: top account by avg views, best hook
+  // structure, and views-distribution context (median + headroom).
+  const competitorInsight = (() => {
+    const topBrand = brandData[0];
+    const topHook = hookData[0];
+    const viewsStats = describe(records.map((r) => num(r.fields["Views"])));
+    if (!topBrand || !viewsStats) return null;
+    return { topBrand, topHook, viewsStats };
+  })();
+
   return (
     <div className="space-y-6">
+      {competitorInsight && (
+        <InsightStrip
+          headline={
+            <>
+              Top account:{" "}
+              <strong>@{competitorInsight.topBrand.handle}</strong>{" "}
+              ({formatNumber(competitorInsight.topBrand.avgViews)} avg views,{" "}
+              {competitorInsight.topBrand.count} posts)
+              {competitorInsight.topHook && (
+                <>
+                  {" · best hook: "}
+                  <strong>{competitorInsight.topHook.hook}</strong>{" "}
+                  ({formatNumber(competitorInsight.topHook.avgViews)} avg)
+                </>
+              )}
+            </>
+          }
+          stats={competitorInsight.viewsStats}
+          formatStat={(v) => formatNumber(v)}
+          extra={
+            <span>
+              Views distribution across {records.length} scraped posts.
+              Headroom: top post is{" "}
+              {competitorInsight.viewsStats.median > 0
+                ? (
+                    competitorInsight.viewsStats.max /
+                    competitorInsight.viewsStats.median
+                  ).toFixed(1) + "×"
+                : "—"}{" "}
+              median.
+            </span>
+          }
+        />
+      )}
       {/* Platform Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div
