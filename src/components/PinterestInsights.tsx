@@ -226,9 +226,19 @@ function TrendsPanel({ records, bootleAllowlist }: TrendsPanelProps) {
         </div>
       </div>
 
+      <p
+        className="text-[10px] mb-2"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        Available regions: US, GB+IE · DE coming soon (Pinterest Trends
+        Refresher cron does not yet include DE+AT+CH).
+      </p>
+
       {filtered.length === 0 ? (
         <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          No trending keywords for this filter combination.
+          {bootleOnly
+            ? "No Bootle-relevant trending keywords for this filter combination. Toggle 'Bootle-relevant' off to see the full list."
+            : "No trending keywords for this filter combination."}
         </p>
       ) : (
         <table className="w-full text-xs">

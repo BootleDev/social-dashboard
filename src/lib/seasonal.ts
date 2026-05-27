@@ -332,24 +332,56 @@ function nextPeak(
  * Pinterest trend keyword.
  */
 export const CONTENT_PILLAR_KEYWORDS: readonly string[] = [
+  // Direct drinkware / hydration
   "water bottle",
   "hydration",
+  "drinkware",
+  "drink",
+  "drinks",
+  "tumbler",
+  "thermos",
+  // Materials / sustainability
   "sustainable",
   "plastic free",
   "plastic-free",
-  "drinkware",
+  "eco",
+  "stainless steel",
+  "zero waste",
+  // Wellness adjacencies
+  "wellness",
   "tea",
   "infused water",
   "matcha",
-  "wellness",
+  "smoothie",
+  "self care",
+  // Aesthetic adjacencies (high-volume Pinterest categories drinkware shows up in)
+  "aesthetic",
+  "essentials",
   "minimalist",
+  "lifestyle",
+  "outfit",
+  "decor",
+  "interior",
+  "kitchen",
+  "desk setup",
+  "edc",
+  "cozy",
+  "cosy",
+  // Gifting adjacencies
+  "gift guide",
+  "gifts for",
+  "stocking stuffer",
+  "secret santa",
+  // Long-tail adjacencies surfaced by user keyword review (May 2026)
   "underconsumption",
   "buy it for life",
   "bifl",
-  "gift guide",
-  "gifts for",
-  "aesthetic",
-  "essentials",
+  "recipe",
+  "diy",
+  "dorm",
+  "brunch",
+  "party",
+  "hosting",
 ];
 
 /**
@@ -367,14 +399,47 @@ export function buildBootleKeywordAllowlist(
   return Array.from(set);
 }
 
-/** True if `trendKeyword` matches any allowlist entry by case-insensitive substring. */
+/**
+ * True if `trendKeyword` matches any allowlist entry. Matching is intentionally
+ * permissive because Pinterest trending keywords are short, casual, and rarely
+ * include our exact phrasing. We check:
+ *
+ * 1. Direct substring — allowlist entry appears inside the keyword
+ *    (e.g. "tea" in "matcha latte recipes")
+ * 2. Reverse substring — keyword appears inside an allowlist entry
+ *    (e.g. trending "wedding" matches allowlist "wedding gift")
+ * 3. Token overlap — any word in the keyword equals any word in any allowlist
+ *    entry (e.g. trending "graduation party ideas" overlaps allowlist
+ *    "graduation gift" on the word "graduation")
+ *
+ * Whitespace, hyphens, and apostrophes are treated as word boundaries.
+ */
 export function matchesBootleAllowlist(
   trendKeyword: string,
   allowlist: string[],
 ): boolean {
   const k = trendKeyword.toLowerCase();
+  const kTokens = tokenize(k);
+
   for (const allowed of allowlist) {
-    if (k.includes(allowed)) return true;
+    const a = allowed.toLowerCase();
+    if (k.includes(a) || a.includes(k)) return true;
+
+    // Token overlap. Only treats meaningful tokens (>= 3 chars) so common
+    // short words don't false-positive everything.
+    const aTokens = tokenize(a);
+    for (const kt of kTokens) {
+      if (kt.length < 3) continue;
+      if (aTokens.includes(kt)) return true;
+    }
   }
   return false;
+}
+
+/** Tokenize on whitespace, hyphens, apostrophes. Lowercase. Drops empty tokens. */
+function tokenize(s: string): string[] {
+  return s
+    .toLowerCase()
+    .split(/[\s\-'']+/)
+    .filter((t) => t.length > 0);
 }

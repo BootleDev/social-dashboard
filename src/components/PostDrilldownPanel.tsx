@@ -5,6 +5,19 @@ import { str, num, formatNumber, formatLocalDate } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 
+// Tag fields surfaced read-only in the drilldown. Each entry is the
+// Airtable field name. Pass 2 will make these editable inline by mapping
+// each to an Airtable schema choice list and POSTing changes back.
+const TAG_FIELDS = [
+  "Hook Type",
+  "Content Theme",
+  "Content Pillar",
+  "CTA Type",
+  "Visual Style",
+  "Setting",
+  "VO Type",
+] as const;
+
 /**
  * Reusable side-sheet that shows posts contributing to a clicked data point.
  * Decoupled from the source chart — caller provides the filtered set + a
@@ -177,6 +190,40 @@ export default function PostDrilldownPanel({
                                 : metricVal.toFixed(1)}
                             </span>
                           )}
+                      </div>
+
+                      {/* Tag readout — all classification fields in one block.
+                          Pass 2: each value becomes an inline dropdown. */}
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {TAG_FIELDS.map((field) => {
+                          const value = str(f[field]);
+                          if (!value) return null;
+                          return (
+                            <span
+                              key={field}
+                              className="text-[10px] px-1.5 py-0.5 rounded"
+                              style={{
+                                background: "var(--bg-secondary)",
+                                color: "var(--text-secondary)",
+                                border: "1px solid var(--border)",
+                              }}
+                              title={`${field}: ${value}`}
+                            >
+                              <span style={{ opacity: 0.6 }}>{field}:</span>{" "}
+                              <span style={{ color: "var(--text-primary)" }}>
+                                {value}
+                              </span>
+                            </span>
+                          );
+                        })}
+                        {TAG_FIELDS.every((field) => !str(f[field])) && (
+                          <span
+                            className="text-[10px] italic"
+                            style={{ color: "var(--text-secondary)" }}
+                          >
+                            untagged
+                          </span>
+                        )}
                       </div>
                     </div>
                     {url && (

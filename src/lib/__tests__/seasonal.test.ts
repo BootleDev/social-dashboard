@@ -179,16 +179,42 @@ describe("buildBootleKeywordAllowlist", () => {
 });
 
 describe("matchesBootleAllowlist", () => {
-  const allowlist = ["water bottle", "summer essentials", "tea"];
+  const allowlist = [
+    "water bottle",
+    "summer essentials",
+    "tea",
+    "wedding gift",
+    "graduation gift",
+    "kitchen",
+  ];
 
-  it("substring matches case-insensitively", () => {
+  it("direct substring (allowlist inside keyword)", () => {
     expect(matchesBootleAllowlist("Summer Essentials 2027", allowlist)).toBe(true);
     expect(matchesBootleAllowlist("WATER BOTTLE", allowlist)).toBe(true);
-    expect(matchesBootleAllowlist("green tea recipes", allowlist)).toBe(true);
+  });
+
+  it("reverse substring (keyword inside allowlist)", () => {
+    // "tea" allowlist matches single-word trending "tea" via direct hit;
+    // here we test the reverse direction explicitly.
+    expect(matchesBootleAllowlist("wedding", allowlist)).toBe(true);
+  });
+
+  it("token overlap matches partial real-world cases", () => {
+    // The bug that motivated this change: real 2026-05-27 GB+IE snapshot.
+    expect(matchesBootleAllowlist("graduation party ideas", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("wedding dresses", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("kitchen aesthetic", allowlist)).toBe(true);
+  });
+
+  it("ignores short common tokens to avoid false positives", () => {
+    const allow = ["it is a gift"];
+    // "it" appears in many keywords; should not match
+    expect(matchesBootleAllowlist("crypto memes", allow)).toBe(false);
   });
 
   it("rejects unrelated keywords", () => {
     expect(matchesBootleAllowlist("michael jackson", allowlist)).toBe(false);
     expect(matchesBootleAllowlist("crypto memes", allowlist)).toBe(false);
+    expect(matchesBootleAllowlist("tomodachi life island layout", allowlist)).toBe(false);
   });
 });

@@ -7,8 +7,8 @@ import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
 import DimensionSlicer from "./DimensionSlicer";
 import PostScorecardTable from "./PostScorecardTable";
-import PostingHeatmap from "./PostingHeatmap";
 import HashtagCharts from "./HashtagCharts";
+import PostDrilldownPanel from "./PostDrilldownPanel";
 import {
   num,
   str,
@@ -121,6 +121,39 @@ export default function ContentAnalysis({
   const [metricKey, setMetricKey] = useState<MetricKey>("engagement");
   const metric = METRICS[metricKey];
 
+  // Drilldown shared across stacked bars, scatter, and hashtag bars. Holds
+  // the filtered post subset + the human-readable label of what was clicked.
+  const [drilldown, setDrilldown] = useState<{
+    posts: AirtableRecord[];
+    label: string;
+  } | null>(null);
+
+  // Precompute index by (Post Type, Content Theme) for fast drilldown lookup.
+  const postsByTypeTheme = useMemo(() => {
+    const map = new Map<string, AirtableRecord[]>();
+    for (const p of posts) {
+      const t = str(p.fields["Post Type"]) || "unknown";
+      const th = str(p.fields["Content Theme"]) || "untagged";
+      const key = `${t}${th}`;
+      const arr = map.get(key);
+      if (arr) arr.push(p);
+      else map.set(key, [p]);
+    }
+    return map;
+  }, [posts]);
+
+  const openTypeThemeDrill = (postType: string, theme: string) => {
+    const cleanType = postType.replace(/\s*\(\d+\)$/, "");
+    const cleanTheme = theme.replace(/\s*\(\d+\)$/, "");
+    const subset =
+      postsByTypeTheme.get(`${cleanType}${cleanTheme}`) ?? [];
+    if (subset.length === 0) return;
+    setDrilldown({
+      posts: subset,
+      label: `${cleanType} × ${cleanTheme}`,
+    });
+  };
+
   // For ER (a rate), use avg aggregation. For additive metrics, use sum.
   // Then choose stacked vs grouped based on whether the metric is additive.
   const formatData = useMemo(() => {
@@ -185,11 +218,40 @@ export default function ContentAnalysis({
     };
   }, [posts, metric.additive, metricKey]);
 
+  // Click handlers for Post Type × Theme stacked bars. The Chart.js onClick
+  // returns elements with the dataIndex (primary axis position) and
+  // datasetIndex (segment). We resolve those back to label strings via the
+  // chart's own labels and dataset metadata.
+  const onFormatBarClick = (
+    _e: unknown,
+    elements: Array<{ datasetIndex: number; index: number }>,
+    chart: { data: { labels?: unknown[]; datasets: Array<{ label?: string }> } },
+  ) => {
+    if (!elements.length) return;
+    const { datasetIndex, index } = elements[0];
+    const primaryLabel = String(chart.data.labels?.[index] ?? "");
+    const segmentLabel = chart.data.datasets[datasetIndex]?.label ?? "";
+    openTypeThemeDrill(primaryLabel, segmentLabel);
+  };
+
+  const onThemeBarClick = (
+    _e: unknown,
+    elements: Array<{ datasetIndex: number; index: number }>,
+    chart: { data: { labels?: unknown[]; datasets: Array<{ label?: string }> } },
+  ) => {
+    if (!elements.length) return;
+    const { datasetIndex, index } = elements[0];
+    const themeLabel = String(chart.data.labels?.[index] ?? "");
+    const typeLabel = chart.data.datasets[datasetIndex]?.label ?? "";
+    openTypeThemeDrill(typeLabel, themeLabel);
+  };
+
   // Stacked when additive (sums sum), grouped when a rate (sums don't sum).
   const chartOptions = useMemo(() => {
     const formatter = metric.formatter;
     return {
       ...defaultOptions,
+      onClick: onFormatBarClick,
       scales: {
         x: { ...defaultOptions.scales.x, stacked: metric.additive },
         y: {
@@ -217,13 +279,15 @@ export default function ContentAnalysis({
         },
       },
     };
-  }, [metric.additive, metric.formatter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metric.additive, metric.formatter, postsByTypeTheme]);
 
   const chartOptionsHorizontal = useMemo(
     () => {
       const formatter = metric.formatter;
       return {
         ...chartOptions,
+        onClick: onThemeBarClick,
         indexAxis: "y" as const,
         scales: {
           x: {
@@ -238,7 +302,15 @@ export default function ContentAnalysis({
         },
       };
     },
-    [chartOptions, metric.additive, metric.formatter],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [chartOptions, metric.additive, metric.formatter, postsByTypeTheme],
+  );
+
+  // Build the scatter point array AND keep a parallel index of the source
+  // post records so a click can resolve back to the original post.
+  const scatterPosts = useMemo(
+    () => posts.filter((p) => num(p.fields["Reach"]) > 0),
+    [posts],
   );
 
   const scatterData = useMemo(() => {
@@ -246,25 +318,17 @@ export default function ContentAnalysis({
       datasets: [
         {
           label: "Posts",
-          data: posts
-            .filter((p) => num(p.fields["Reach"]) > 0)
-            .map((p) => ({
-              x:
-                num(p.fields["Reach"]) > 0
-                  ? (num(p.fields["Saves"]) / num(p.fields["Reach"])) * 100
-                  : 0,
-              y:
-                num(p.fields["Reach"]) > 0
-                  ? (num(p.fields["Shares"]) / num(p.fields["Reach"])) * 100
-                  : 0,
-            })),
+          data: scatterPosts.map((p) => ({
+            x: (num(p.fields["Saves"]) / num(p.fields["Reach"])) * 100,
+            y: (num(p.fields["Shares"]) / num(p.fields["Reach"])) * 100,
+          })),
           backgroundColor: CHART_COLORS.purple + "80",
           pointRadius: 5,
           pointHoverRadius: 7,
         },
       ],
     };
-  }, [posts]);
+  }, [scatterPosts]);
 
   const normalizers = useMemo(() => {
     const maxVideoViews = posts.reduce(
@@ -282,6 +346,18 @@ export default function ContentAnalysis({
 
   const scatterOptions = {
     ...defaultOptions,
+    onClick: (
+      _e: unknown,
+      elements: Array<{ index: number }>,
+    ) => {
+      if (!elements.length) return;
+      const post = scatterPosts[elements[0].index];
+      if (!post) return;
+      setDrilldown({
+        posts: [post],
+        label: `Post ${str(post.fields["Post ID"]).slice(-10)} — Save vs Share`,
+      });
+    },
     scales: {
       ...defaultOptions.scales,
       x: {
@@ -380,15 +456,12 @@ export default function ContentAnalysis({
             </ChartCard>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <PostingHeatmap posts={posts} />
-            <ChartCard
-              title="Save Rate vs Share Rate"
-              tooltip="Intent signals — saves = personal value, shares = social value"
-            >
-              <Scatter data={scatterData} options={scatterOptions} />
-            </ChartCard>
-          </div>
+          <ChartCard
+            title="Save Rate vs Share Rate"
+            tooltip="Intent signals — saves = personal value, shares = social value. Click a point to drill into the post."
+          >
+            <Scatter data={scatterData} options={scatterOptions} />
+          </ChartCard>
         </div>
       )}
 
@@ -404,7 +477,26 @@ export default function ContentAnalysis({
         />
       )}
 
-      {subTab === "hashtags" && <HashtagCharts posts={posts} />}
+      {subTab === "hashtags" && (
+        <HashtagCharts
+          posts={posts}
+          onSelectHashtag={(tag, subset) =>
+            setDrilldown({
+              posts: subset,
+              label: `Hashtag #${tag}`,
+            })
+          }
+        />
+      )}
+
+      {drilldown && (
+        <PostDrilldownPanel
+          posts={drilldown.posts}
+          bucketLabel={drilldown.label}
+          timezone={timezone}
+          onClose={() => setDrilldown(null)}
+        />
+      )}
     </div>
   );
 }
