@@ -1,22 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { str, num, formatNumber, formatLocalDate } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
-
-// Tag fields surfaced read-only in the drilldown. Each entry is the
-// Airtable field name. Pass 2 will make these editable inline by mapping
-// each to an Airtable schema choice list and POSTing changes back.
-const TAG_FIELDS = [
-  "Hook Type",
-  "Content Theme",
-  "Content Pillar",
-  "CTA Type",
-  "Visual Style",
-  "Setting",
-  "VO Type",
-] as const;
+import PostTagEditor, { TAG_FIELD_CONFIG } from "./PostTagEditor";
 
 /**
  * Reusable side-sheet that shows posts contributing to a clicked data point.
@@ -47,6 +35,13 @@ export default function PostDrilldownPanel({
   timezone = "",
   onClose,
 }: PostDrilldownPanelProps) {
+  // Local overlay for in-session tag edits. Keyed by record id then field
+  // name; merged on top of the post's Airtable fields when rendering so
+  // edits stick visually even though we don't refetch.
+  const [overrides, setOverrides] = useState<
+    Record<string, Record<string, string>>
+  >({});
+
   // Close on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -192,39 +187,27 @@ export default function PostDrilldownPanel({
                           )}
                       </div>
 
-                      {/* Tag readout — all classification fields in one block.
-                          Pass 2: each value becomes an inline dropdown. */}
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {TAG_FIELDS.map((field) => {
-                          const value = str(f[field]);
-                          if (!value) return null;
-                          return (
-                            <span
-                              key={field}
-                              className="text-[10px] px-1.5 py-0.5 rounded"
-                              style={{
-                                background: "var(--bg-secondary)",
-                                color: "var(--text-secondary)",
-                                border: "1px solid var(--border)",
-                              }}
-                              title={`${field}: ${value}`}
-                            >
-                              <span style={{ opacity: 0.6 }}>{field}:</span>{" "}
-                              <span style={{ color: "var(--text-primary)" }}>
-                                {value}
-                              </span>
-                            </span>
-                          );
-                        })}
-                        {TAG_FIELDS.every((field) => !str(f[field])) && (
-                          <span
-                            className="text-[10px] italic"
-                            style={{ color: "var(--text-secondary)" }}
-                          >
-                            untagged
-                          </span>
+                      {/* Inline tag editor. Each field is a dropdown
+                          (or text input for free-form tags). Edits save
+                          to Airtable via PATCH /api/posts/[id] and reflect
+                          in the local overrides map without remounting. */}
+                      <PostTagEditor
+                        recordId={p.id}
+                        values={Object.fromEntries(
+                          TAG_FIELD_CONFIG.map((cfg) => [
+                            cfg.name,
+                            str(
+                              overrides[p.id]?.[cfg.name] ?? f[cfg.name],
+                            ),
+                          ]),
                         )}
-                      </div>
+                        onSaved={(field, value) =>
+                          setOverrides((prev) => ({
+                            ...prev,
+                            [p.id]: { ...(prev[p.id] ?? {}), [field]: value },
+                          }))
+                        }
+                      />
                     </div>
                     {url && (
                       <a

@@ -165,6 +165,33 @@ export async function getPinterestTopPins(opts: { noCache?: boolean } = {}) {
   });
 }
 
+/**
+ * PATCH a single Posts record by Airtable record id. Used by the Insights
+ * drilldown's inline tag editor. typecheckedAt boundary; the route handler
+ * is responsible for whitelisting which fields can be written.
+ */
+export async function updatePostRecord(
+  recordId: string,
+  fields: Record<string, unknown>,
+): Promise<AirtableRecord> {
+  const { baseId, apiKey } = getCredentials();
+  const url = `${BASE_URL}/${baseId}/${TABLES.POSTS}/${recordId}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ fields, typecast: false }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Airtable PATCH ${res.status}: ${err}`);
+  }
+  return (await res.json()) as AirtableRecord;
+}
+
 export async function getSeasonalOpportunities(
   opts: { noCache?: boolean } = {},
 ) {
