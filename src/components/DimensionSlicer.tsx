@@ -372,8 +372,8 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
   return (
     <ChartCard
       title="Dimension Slicer"
-      tooltip="Average metric per dimension value across filtered posts"
-      height="340px"
+      tooltip="Pick any post attribute (Dimension) and any metric to see how each group performs. Bars are sorted by the metric, group sample size is in parentheses, click a bar to see the contributing posts."
+      height="auto"
       headerAction={
         <StatsPanel
           stats={populationStats}
@@ -427,7 +427,7 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
       </div>
       {chartData.labels.length === 0 ? (
         <div
-          className="flex items-center justify-center h-full text-xs"
+          className="flex items-center justify-center text-xs py-12"
           style={{ color: "var(--text-secondary)" }}
         >
           No tagged data for this dimension yet. Tag posts in the Tagging tab to
@@ -435,7 +435,16 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
         </div>
       ) : (
         <>
-          <Bar data={chartData} options={chartOptions} />
+          {/* Bar chart needs an explicit height to render; row count drives it
+              dynamically (16px per group, min 240px, max 600px) so dimensions
+              with many buckets stay readable without overflowing. */}
+          <div
+            style={{
+              height: `${Math.min(600, Math.max(240, chartData.labels.length * 28))}px`,
+            }}
+          >
+            <Bar data={chartData} options={chartOptions} />
+          </div>
           <p
             className="text-[10px] mt-2 text-right"
             style={{ color: "var(--text-secondary)" }}

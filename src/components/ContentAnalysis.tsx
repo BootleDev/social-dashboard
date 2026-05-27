@@ -12,6 +12,7 @@ import PostDrilldownPanel from "./PostDrilldownPanel";
 import {
   num,
   str,
+  formatNumber,
   avgERByDimensionStacked,
   sumByDimensionStacked,
   sumField,
@@ -474,18 +475,44 @@ export default function ContentAnalysis({
               title={`${metric.label} by Post Type × Theme`}
               tooltip={
                 metric.additive
-                  ? "Stacked: each segment is contribution to the format's total"
-                  : "Grouped: bars sit side-by-side. Rates don't sum."
+                  ? `Each bar is a Post Type (Reel, static image, carousel, video, story). Within each bar, segments break the ${metric.label.toLowerCase()} down by Content Theme (Recipe/Infusion, Product, Design, Tutorial, etc.). Segments stack because ${metric.label.toLowerCase()} is additive — the bar total is the sum of all themes for that format. Number in parentheses is the post count for that Post Type.`
+                  : `Each bar is a Post Type. Within each bar, themes sit side-by-side (not stacked) because ${metric.label.toLowerCase()} is a rate — averaging rates is meaningful, summing them is not. Use this to compare which theme drives the best ${metric.label.toLowerCase()} within each format.`
+              }
+              headerAction={
+                <StatsPanel
+                  stats={describe(
+                    formatData.datasets.flatMap((ds) =>
+                      (ds.data as number[]).filter((v) => v > 0),
+                    ),
+                  )}
+                  format={(v) =>
+                    metric.additive ? formatNumber(v) : `${v.toFixed(2)}%`
+                  }
+                  context={`${metric.label} cell-value distribution across Post Type × Theme`}
+                />
               }
             >
               <Bar data={formatData} options={chartOptions} />
             </ChartCard>
             <ChartCard
-              title={`Content Theme × Post Type`}
+              title={`${metric.label} by Theme × Post Type`}
               tooltip={
                 metric.additive
-                  ? "Stacked: each segment is contribution to the theme's total"
-                  : "Grouped: bars sit side-by-side. Rates don't sum."
+                  ? `The same data flipped: each bar is a Content Theme (Recipe/Infusion, Product, Design, etc.) with segments showing which Post Type contributed. Use this view to see "which formats does each theme rely on" — e.g. Recipe content split across Reels vs static. Top 10 themes shown.`
+                  : `Each bar is a Content Theme; segments show Post Type performance (avg ${metric.label.toLowerCase()}) within that theme. Top 10 themes shown.`
+              }
+              headerAction={
+                <StatsPanel
+                  stats={describe(
+                    themeData.datasets.flatMap((ds) =>
+                      (ds.data as number[]).filter((v) => v > 0),
+                    ),
+                  )}
+                  format={(v) =>
+                    metric.additive ? formatNumber(v) : `${v.toFixed(2)}%`
+                  }
+                  context={`${metric.label} cell-value distribution across Theme × Post Type`}
+                />
               }
             >
               <Bar data={themeData} options={chartOptionsHorizontal} />

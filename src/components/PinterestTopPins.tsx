@@ -161,9 +161,14 @@ export default function PinterestTopPins({
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {filtered.map((p) => {
             const matchedPost = postsByPostId.get(p.postId);
-            const thumbnail = matchedPost
-              ? str(matchedPost.fields["Thumbnail URL"])
-              : "";
+            // Prefer the thumbnail written directly into Top Pins. Falls back
+            // to the joined Post record (works for pins still in the 180d
+            // refresher window). Old top pins surfacing in lifetime rankings
+            // have neither — they show "no thumbnail" until the workflow
+            // backfills.
+            const thumbnail =
+              p.thumbnailUrl ||
+              (matchedPost ? str(matchedPost.fields["Thumbnail URL"]) : "");
             const caption = matchedPost
               ? str(matchedPost.fields["Caption"])
               : "";

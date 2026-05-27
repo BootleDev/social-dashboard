@@ -178,6 +178,13 @@ export interface TopPin {
   videoMrcView: number;
   videoAvgWatchTimeSec: number;
   nearCompleteViews: number;
+  /**
+   * Direct CDN URL to the pin's image, written by the Pinterest Trends
+   * Refresher when available. Falls back to "" if the field isn't populated
+   * (e.g. for snapshots taken before the workflow added the column). UI
+   * code should treat empty as "look up via Posts table".
+   */
+  thumbnailUrl: string;
 }
 
 export function toTopPin(r: AirtableRecord): TopPin {
@@ -197,5 +204,6 @@ export function toTopPin(r: AirtableRecord): TopPin {
     videoMrcView: num(r.fields["Video MRC View"]),
     videoAvgWatchTimeSec: num(r.fields["Video Avg Watch Time"]),
     nearCompleteViews: num(r.fields["Near Complete Views"]),
+    thumbnailUrl: str(r.fields["Thumbnail URL"]),
   };
 }

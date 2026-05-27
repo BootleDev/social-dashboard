@@ -131,4 +131,13 @@ describe("toTopPin", () => {
     expect(p.saves).toBe(0);
     expect(p.videoMrcView).toBe(0);
   });
+
+  it("reads Thumbnail URL when present and defaults to empty string", () => {
+    const withThumb = toTopPin(
+      rec({ "Pin ID": "abc", "Thumbnail URL": "https://i.pinimg.com/x.jpg" }),
+    );
+    expect(withThumb.thumbnailUrl).toBe("https://i.pinimg.com/x.jpg");
+    const withoutThumb = toTopPin(rec({ "Pin ID": "abc" }));
+    expect(withoutThumb.thumbnailUrl).toBe("");
+  });
 });

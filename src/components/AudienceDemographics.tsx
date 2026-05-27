@@ -6,6 +6,8 @@ import "@/lib/chartSetup";
 import { CHART_COLORS } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
 import AudienceMap from "./AudienceMap";
+import StatsPanel from "./StatsPanel";
+import { describe } from "@/lib/stats";
 import { toAudienceDemographic, type AudienceDemographic } from "@/lib/types";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -248,15 +250,26 @@ export default function AudienceDemographics({
             "engaged",
             breakdown,
           );
+          const tooltipText =
+            breakdown === "age"
+              ? "Distribution of your Instagram follower base across age brackets (13-17, 18-24, 25-34, 35-44, 45-54, 55-64, 65+). Blue = total follower count in each bracket. Amber = Engaged subset (followers who liked/commented/saved in the last 30 days). The Engaged series only lights up once Meta's 100-engagement reporting threshold is met across the account."
+              : breakdown === "gender"
+                ? "Distribution of your Instagram follower base across gender categories Meta exposes (M / F / U for unknown). Same Follower vs Engaged split as Age. Note: Meta only returns binary categories — non-binary identities fall into U."
+                : "Top 10 cities by follower count — Meta's audience demographics API returns up to ~45 cities, ranked by count. Use this to spot geographic concentration that maps to local marketing or partnerships. No Engaged series at city granularity (Meta only exposes Engaged for age/gender/country).";
           return (
             <ChartCard
               key={breakdown}
               title={BREAKDOWN_LABEL[breakdown]}
               height="280px"
-              tooltip={
-                breakdown === "city"
-                  ? "Top 10 cities by follower count. API returns up to 45."
-                  : "Followers (blue) vs Engaged audience (amber). Engaged lights up once Meta's 100-engagement threshold is met."
+              tooltip={tooltipText}
+              headerAction={
+                <StatsPanel
+                  stats={describe(followerBuckets.map((b) => b.value))}
+                  format={(v) =>
+                    Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(1)
+                  }
+                  context={`Follower-count distribution across ${BREAKDOWN_LABEL[breakdown].toLowerCase()} buckets`}
+                />
               }
             >
               <BreakdownChart
