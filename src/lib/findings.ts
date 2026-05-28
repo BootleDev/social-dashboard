@@ -93,28 +93,48 @@ export function generateFindings(posts: AirtableRecord[]): Finding[] {
     ];
   }
 
-  // ── Finding 1: best Theme × Post Type combo by total engagement ──────────
+  // ── Finding 1: best Theme × Post Type combo by engagement per post ───────
+  // Ranking is per-post (not total) so a high-volume low-quality combo
+  // doesn't get falsely crowned. Min n=3 per group to avoid single-post
+  // outliers. Baseline excludes groups with zero total engagement so
+  // tracking-broken platforms (e.g. Pinterest returning 0 across the
+  // board) don't inflate the lift artificially.
+  const MIN_GROUP_N = 3;
   const themeFormat = groupBy(
     posts,
     (p) =>
       `${str(p.fields["Content Theme"]) || "untagged"}|${str(p.fields["Post Type"]) || "unknown"}`,
     { skipEmpty: true },
   );
-  themeFormat.sort((a, b) => b.totalEngagement - a.totalEngagement);
-  const top = themeFormat[0];
-  if (top && top.totalEngagement > 0 && top.posts.length >= 2) {
+  const eligible = themeFormat.filter((g) => g.posts.length >= MIN_GROUP_N);
+  eligible.sort(
+    (a, b) =>
+      b.totalEngagement / b.posts.length - a.totalEngagement / a.posts.length,
+  );
+  const top = eligible[0];
+  if (top && top.totalEngagement > 0) {
+    const topPerPost = top.totalEngagement / top.posts.length;
     const [theme, fmt] = top.key.split("|");
-    const otherAvg =
-      themeFormat.slice(1).reduce((a, g) => a + g.totalEngagement, 0) /
-      Math.max(themeFormat.length - 1, 1);
-    const lift = otherAvg > 0 ? top.totalEngagement / otherAvg : 0;
+    const baseline = eligible
+      .slice(1)
+      .filter((g) => g.totalEngagement > 0)
+      .map((g) => g.totalEngagement / g.posts.length);
+    const baselineAvg =
+      baseline.length > 0
+        ? baseline.reduce((a, b) => a + b, 0) / baseline.length
+        : 0;
+    const lift = baselineAvg > 0 ? topPerPost / baselineAvg : 0;
     findings.push({
       id: "top-combo",
       severity: "positive",
       headline: `${theme} × ${fmt} is your strongest combo`,
-      detail: `${top.posts.length} posts drove ${top.totalEngagement.toLocaleString()} total engagement${
-        lift > 1.5 ? ` — ${lift.toFixed(1)}× the average other combo` : ""
-      }.`,
+      detail: `${top.posts.length} posts averaging ${topPerPost.toFixed(
+        1,
+      )} engagement each${
+        lift > 1.5
+          ? ` — ${lift.toFixed(1)}× the per-post average of other engaged combos (excludes zero-engagement groups).`
+          : "."
+      }`,
     });
   }
 
@@ -158,13 +178,16 @@ export function generateFindings(posts: AirtableRecord[]): Finding[] {
     (p) => num(p.fields["Impressions"]) === 0,
   );
   if (pinterestPosts.length >= 10 && zeroImp.length / pinterestPosts.length >= 0.4) {
+    const allZero = zeroImp.length === pinterestPosts.length;
     findings.push({
       id: "pinterest-zero",
       severity: "warning",
       headline: `${zeroImp.length} of ${pinterestPosts.length} Pinterest pins have zero impressions`,
-      detail: `${((zeroImp.length / pinterestPosts.length) * 100).toFixed(
-        0,
-      )}% of pins in window haven't surfaced in search. Worth investigating board placement, keyword fit, or recency thresholds.`,
+      detail: allZero
+        ? `100% of pins in window show zero impressions. That's almost certainly a data-pipeline issue (Pinterest API call failing, not a real engagement collapse) — check Pinterest Top Pins table to confirm live impressions exist, then investigate the n8n Pinterest Data Refresher.`
+        : `${((zeroImp.length / pinterestPosts.length) * 100).toFixed(
+            0,
+          )}% of pins in window haven't surfaced. Worth investigating board placement, keyword fit, or recency thresholds.`,
     });
   }
 
