@@ -131,6 +131,59 @@ export default function Overview({
         ? reachScores.reduce((a, b) => a + b, 0) / reachScores.length
         : undefined;
 
+    // Per-platform breakdowns. Each KPI gets a small platform-pill row
+    // so blended aggregates (e.g. Save Rate 0.1%) don't hide the fact
+    // that one platform is doing all the work and another is at zero.
+    const postsByPlatform = new Map<string, typeof posts>();
+    for (const p of posts) {
+      const k = str(p.fields["Platform"]);
+      if (!k) continue;
+      if (!postsByPlatform.has(k)) postsByPlatform.set(k, []);
+      postsByPlatform.get(k)!.push(p);
+    }
+
+    const breakdownFollowers = platformKeys.map((k) => {
+      const m = platformMap.get(k) ?? [];
+      const latest = m[0];
+      return {
+        platform: k,
+        value: formatNumber(latest ? num(latest.fields["Followers"]) : 0),
+      };
+    });
+
+    const breakdownReach = platformKeys.map((k) => {
+      const m = platformMap.get(k) ?? [];
+      return { platform: k, value: formatNumber(sumField(m, "Reach")) };
+    });
+
+    const breakdownImpressions = platformKeys.map((k) => {
+      const m = platformMap.get(k) ?? [];
+      return { platform: k, value: formatNumber(sumField(m, "Impressions")) };
+    });
+
+    const breakdownPosts = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({ platform, value: String(ps.length) }),
+    );
+
+    const breakdownER = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({
+        platform,
+        value: `${(avgField(ps, "Engagement Rate") * 100).toFixed(1)}%`,
+      }),
+    );
+
+    const breakdownSaveRate = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => {
+        const withReach = ps.filter((p) => num(p.fields["Reach"]) > 0);
+        const avg =
+          withReach.length > 0
+            ? withReach.reduce((s, p) => s + (saveRate(toPost(p)) ?? 0), 0) /
+              withReach.length
+            : 0;
+        return { platform, value: `${(avg * 100).toFixed(2)}%` };
+      },
+    );
+
     return {
       totalFollowers,
       followersChange:
@@ -158,6 +211,12 @@ export default function Overview({
       totalVideoViews,
       avgEngScore,
       avgReachScore,
+      breakdownFollowers,
+      breakdownReach,
+      breakdownImpressions,
+      breakdownPosts,
+      breakdownER,
+      breakdownSaveRate,
     };
   }, [
     posts,
@@ -297,11 +356,13 @@ export default function Overview({
           value={formatNumber(kpis.totalFollowers)}
           change={kpis.followersChange}
           tooltip={`Combined ${platformCountLabel} followers`}
+          breakdown={kpis.breakdownFollowers}
         />
         <KPICard
           title="Total Reach"
           value={formatNumber(kpis.totalReach)}
           change={kpis.reachChange}
+          breakdown={kpis.breakdownReach}
         />
         <KPICard
           title="Impressions"
@@ -314,8 +375,13 @@ export default function Overview({
             kpis.totalImpressions > 0 ? kpis.impressionsChange : undefined
           }
           tooltip="Instagram retired the account-level impressions metric in 2024 (now reported as 'views'). Shows — until the Social Data Refresher is migrated to the views metric. Not a tracking gap on our end."
+          breakdown={kpis.breakdownImpressions}
         />
-        <KPICard title="Posts Published" value={String(kpis.postsPublished)} />
+        <KPICard
+          title="Posts Published"
+          value={String(kpis.postsPublished)}
+          breakdown={kpis.breakdownPosts}
+        />
       </div>
 
       {/* KPI Row 2 — quality */}
@@ -325,6 +391,7 @@ export default function Overview({
           value={formatPercent(kpis.avgER)}
           change={kpis.erChange}
           tooltip="Average across all posts in range"
+          breakdown={kpis.breakdownER}
         />
         <KPICard
           title="Avg Save Rate"
@@ -334,6 +401,7 @@ export default function Overview({
               : "—"
           }
           tooltip="Saves / Reach — strong signal for algorithmic distribution"
+          breakdown={kpis.breakdownSaveRate}
         />
         <KPICard
           title="Engagement Score"
