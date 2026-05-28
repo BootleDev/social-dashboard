@@ -172,38 +172,6 @@ export default function ContentAnalysis({
     });
   };
 
-  // For ER (a rate), use avg aggregation. For additive metrics, use sum.
-  // Then choose stacked vs grouped based on whether the metric is additive.
-  const formatData = useMemo(() => {
-    const getPrimary = (p: AirtableRecord) =>
-      str(p.fields["Post Type"]) || "unknown";
-    const getSegment = (p: AirtableRecord) =>
-      str(p.fields["Content Theme"]) || "untagged";
-
-    if (metric.additive) {
-      const s = sumByDimensionStacked(posts, getPrimary, getSegment, metricGetter(metricKey));
-      return {
-        labels: s.primaries.map((p) => `${p.label} (${p.count})`),
-        datasets: s.segments.map((segment, i) => ({
-          label: segment,
-          data: s.primaries.map((p) => s.matrix[p.label][segment].sum),
-          backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
-          borderWidth: 0,
-        })),
-      };
-    }
-    const a = avgERByDimensionStacked(posts, getPrimary, getSegment);
-    return {
-      labels: a.primaries.map((p) => `${p.label} (${p.count})`),
-      datasets: a.segments.map((segment, i) => ({
-        label: segment,
-        data: a.primaries.map((p) => a.matrix[p.label][segment].avg * 100),
-        backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
-        borderWidth: 0,
-      })),
-    };
-  }, [posts, metric.additive, metricKey]);
-
   const themeData = useMemo(() => {
     const getPrimary = (p: AirtableRecord) =>
       str(p.fields["Content Theme"]) || "untagged";
@@ -470,54 +438,29 @@ export default function ContentAnalysis({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard
-              title={`${metric.label} by Post Type × Theme`}
-              tooltip={
-                metric.additive
-                  ? `Each bar is a Post Type (Reel, static image, carousel, video, story). Within each bar, segments break the ${metric.label.toLowerCase()} down by Content Theme (Recipe/Infusion, Product, Design, Tutorial, etc.). Segments stack because ${metric.label.toLowerCase()} is additive — the bar total is the sum of all themes for that format. Number in parentheses is the post count for that Post Type.`
-                  : `Each bar is a Post Type. Within each bar, themes sit side-by-side (not stacked) because ${metric.label.toLowerCase()} is a rate — averaging rates is meaningful, summing them is not. Use this to compare which theme drives the best ${metric.label.toLowerCase()} within each format.`
-              }
-              headerAction={
-                <StatsPanel
-                  stats={describe(
-                    formatData.datasets.flatMap((ds) =>
-                      (ds.data as number[]).filter((v) => v > 0),
-                    ),
-                  )}
-                  format={(v) =>
-                    metric.additive ? formatNumber(v) : `${v.toFixed(2)}%`
-                  }
-                  context={`${metric.label} cell-value distribution across Post Type × Theme`}
-                />
-              }
-            >
-              <Bar data={formatData} options={chartOptions} />
-            </ChartCard>
-            <ChartCard
-              title={`${metric.label} by Theme × Post Type`}
-              tooltip={
-                metric.additive
-                  ? `The same data flipped: each bar is a Content Theme (Recipe/Infusion, Product, Design, etc.) with segments showing which Post Type contributed. Use this view to see "which formats does each theme rely on" — e.g. Recipe content split across Reels vs static. Top 10 themes shown.`
-                  : `Each bar is a Content Theme; segments show Post Type performance (avg ${metric.label.toLowerCase()}) within that theme. Top 10 themes shown.`
-              }
-              headerAction={
-                <StatsPanel
-                  stats={describe(
-                    themeData.datasets.flatMap((ds) =>
-                      (ds.data as number[]).filter((v) => v > 0),
-                    ),
-                  )}
-                  format={(v) =>
-                    metric.additive ? formatNumber(v) : `${v.toFixed(2)}%`
-                  }
-                  context={`${metric.label} cell-value distribution across Theme × Post Type`}
-                />
-              }
-            >
-              <Bar data={themeData} options={chartOptionsHorizontal} />
-            </ChartCard>
-          </div>
+          <ChartCard
+            title={`${metric.label} by Theme × Post Type`}
+            tooltip={
+              metric.additive
+                ? `Each bar is a Content Theme (Recipes, Product, UGC, Sustainability, etc.) with segments showing how each Post Type contributed. Reads as "what creative themes drive the most ${metric.label.toLowerCase()}, and which formats deliver them?" Top 10 themes shown.`
+                : `Each bar is a Content Theme; segments show avg ${metric.label.toLowerCase()} by Post Type within that theme. Top 10 themes shown.`
+            }
+            headerAction={
+              <StatsPanel
+                stats={describe(
+                  themeData.datasets.flatMap((ds) =>
+                    (ds.data as number[]).filter((v) => v > 0),
+                  ),
+                )}
+                format={(v) =>
+                  metric.additive ? formatNumber(v) : `${v.toFixed(2)}%`
+                }
+                context={`${metric.label} cell-value distribution across Theme × Post Type`}
+              />
+            }
+          >
+            <Bar data={themeData} options={chartOptionsHorizontal} />
+          </ChartCard>
 
           <ChartCard
             title="Save Rate vs Share Rate"

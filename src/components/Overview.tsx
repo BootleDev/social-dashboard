@@ -250,8 +250,12 @@ export default function Overview({
     };
   }, [posts]);
 
-  // Top 5 posts by ER
-  const top5 = useMemo(() => topPosts(posts, "Engagement Rate", 5), [posts]);
+  // Top 5 posts by ER, with a 50-impression floor so a pin with 1 impression
+  // and 1 click (= 100% ER) doesn't dominate the list.
+  const top5 = useMemo(
+    () => topPosts(posts, "Engagement Rate", 5, { minImpressions: 50 }),
+    [posts],
+  );
 
   // Follower counts move in a narrow band (e.g. 677–694). With a 0-based axis
   // the line looks dead flat, so zoom the y-axis to the actual range.

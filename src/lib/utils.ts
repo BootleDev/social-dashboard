@@ -405,13 +405,20 @@ export function getPlatformKeys(records: AirtableRecord[]): string[] {
   );
 }
 
-/** Get top N posts by a numeric field (descending). */
+/** Get top N posts by a numeric field (descending).
+ *
+ * Optional `minImpressions` filter prevents tiny-sample noise (e.g. a pin with
+ * 1 impression / 1 click reading as 100% ER) from dominating ranked lists.
+ */
 export function topPosts(
   posts: AirtableRecord[],
   field: string,
   n: number,
+  opts: { minImpressions?: number } = {},
 ): AirtableRecord[] {
+  const min = opts.minImpressions ?? 0;
   return [...posts]
+    .filter((p) => num(p.fields["Impressions"]) >= min)
     .sort((a, b) => num(b.fields[field]) - num(a.fields[field]))
     .slice(0, n);
 }

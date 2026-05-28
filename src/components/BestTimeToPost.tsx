@@ -165,7 +165,10 @@ export default function BestTimeToPost({
   normalizers = DEFAULT_NORMALIZERS,
 }: BestTimeToPostProps) {
   const [metricIdx, setMetricIdx] = useState(0);
-  const [minN, setMinN] = useState(2);
+  // Default to ≥5 posts per slot: any "best time" claim with sample n<5 is
+  // statistical noise (one viral outlier swings the avg). User can lower it
+  // explicitly if they want exploratory slot scans.
+  const [minN, setMinN] = useState(5);
   const [drilldown, setDrilldown] = useState<{
     posts: AirtableRecord[];
     label: string;
