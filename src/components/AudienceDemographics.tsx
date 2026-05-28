@@ -5,7 +5,6 @@ import { Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { CHART_COLORS } from "@/lib/chartSetup";
 import ChartCard from "./ChartCard";
-import AudienceMap from "./AudienceMap";
 import StatsPanel from "./StatsPanel";
 import { describe } from "@/lib/stats";
 import { toAudienceDemographic, type AudienceDemographic } from "@/lib/types";
@@ -357,21 +356,32 @@ function InsightLine({
   );
 }
 
-/** World choropleth + top-countries list, replacing the old country bar. */
+/** Ranked country list with bar viz. Replaces the world map (dropped 2026-05-28
+ *  with react-simple-maps removal — incompatible peer-dep with React 19). */
 function CountryView({ followers }: { followers: AudienceDemographic[] }) {
   const total = useMemo(
     () => followers.reduce((s, b) => s + b.value, 0),
     [followers],
   );
-  const countryCounts = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const b of followers) out[b.bucket] = b.value;
-    return out;
-  }, [followers]);
-  const top = useMemo(
-    () => [...followers].sort((a, b) => b.value - a.value).slice(0, 5),
+  const ranked = useMemo(
+    () => [...followers].sort((a, b) => b.value - a.value),
     [followers],
   );
+  const max = ranked[0]?.value ?? 0;
+
+  // Use Intl.DisplayNames (no dep) to render readable country names.
+  const displayNames =
+    typeof Intl !== "undefined" && typeof Intl.DisplayNames === "function"
+      ? new Intl.DisplayNames(["en"], { type: "region" })
+      : null;
+  const countryName = (alpha2: string): string => {
+    if (!displayNames) return alpha2;
+    try {
+      return displayNames.of(alpha2.toUpperCase()) ?? alpha2;
+    } catch {
+      return alpha2;
+    }
+  };
 
   return (
     <div
@@ -395,32 +405,51 @@ function CountryView({ followers }: { followers: AudienceDemographic[] }) {
           {total.toLocaleString()} followers across {followers.length} countries
         </span>
       </div>
-      <AudienceMap
-        countryCounts={countryCounts}
-        total={total}
-        height={300}
-      />
-      <div className="flex flex-wrap gap-2 text-xs">
-        {top.map((b, i) => {
-          const pct = total > 0 ? ((b.value / total) * 100).toFixed(1) : "0";
+      <div className="space-y-1.5">
+        {ranked.map((b, i) => {
+          const pct = total > 0 ? (b.value / total) * 100 : 0;
+          const barWidth = max > 0 ? (b.value / max) * 100 : 0;
           return (
-            <span
+            <div
               key={b.bucket}
-              className="px-2 py-1 rounded"
-              style={{
-                background:
-                  i === 0
-                    ? "rgba(1, 113, 228, 0.2)"
-                    : "var(--bg-secondary)",
-                border: "1px solid var(--border)",
-                color: "var(--text-primary)",
-              }}
+              className="grid items-center gap-2 text-xs"
+              style={{ gridTemplateColumns: "20px 1fr 80px 60px" }}
             >
-              <span className="opacity-60">#{i + 1}</span> {b.bucket}{" "}
-              <span style={{ color: "var(--text-secondary)" }}>
-                {b.value.toLocaleString()} ({pct}%)
+              <span
+                className="text-[10px] text-right tabular-nums"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {i + 1}
               </span>
-            </span>
+              <div
+                className="truncate"
+                style={{ color: "var(--text-primary)" }}
+                title={countryName(b.bucket)}
+              >
+                {countryName(b.bucket)}
+              </div>
+              <div
+                className="relative h-2 rounded overflow-hidden"
+                style={{ background: "var(--bg-secondary)" }}
+              >
+                <div
+                  className="absolute inset-y-0 left-0 rounded"
+                  style={{
+                    width: `${barWidth}%`,
+                    background: "rgba(1, 113, 228, 0.8)",
+                  }}
+                />
+              </div>
+              <div
+                className="text-right tabular-nums text-[11px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {b.value.toLocaleString()}{" "}
+                <span style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
+                  ({pct.toFixed(1)}%)
+                </span>
+              </div>
+            </div>
           );
         })}
       </div>

@@ -16,8 +16,7 @@
     "next": "^16.1.6",
     "react": "^19",
     "react-chartjs-2": "^5.3.1",
-    "react-dom": "^19",
-    "react-simple-maps": "^3.0.0"
+    "react-dom": "^19"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
@@ -27,7 +26,6 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/react-simple-maps": "^3.0.6",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
     "jsdom": "^28.1.0",
