@@ -22,6 +22,7 @@ import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
 import AudienceDemographics from "./AudienceDemographics";
 import PinterestTopPins from "./PinterestTopPins";
 import StatsPanel from "./StatsPanel";
+import TopFindings from "./TopFindings";
 import { describe } from "@/lib/stats";
 
 interface ContentAnalysisExtraProps {
@@ -400,6 +401,7 @@ export default function ContentAnalysis({
 
   return (
     <div className="space-y-4">
+      <TopFindings posts={posts} />
       <SubNav
         storageKey="insights"
         items={SUBNAV_ITEMS}
