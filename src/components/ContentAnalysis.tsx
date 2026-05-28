@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Bar, Scatter } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import ChartCard from "./ChartCard";
 import DimensionSlicer from "./DimensionSlicer";
 import PostScorecardTable from "./PostScorecardTable";
@@ -12,6 +12,7 @@ import PostDrilldownPanel from "./PostDrilldownPanel";
 import {
   num,
   str,
+  recordReach,
   formatNumber,
   avgERByDimensionStacked,
   sumByDimensionStacked,
@@ -93,19 +94,6 @@ function metricGetter(key: MetricKey): (p: AirtableRecord) => number {
   return (p) => num(p.fields["Engagement Rate"]);
 }
 
-// Palette used to color stacked segments. Reused across both stacked charts
-// so the same segment label gets the same color in the legend regardless of
-// which chart it appears in.
-const SEGMENT_COLORS = [
-  CHART_COLORS.purple,
-  CHART_COLORS.blue,
-  CHART_COLORS.cyan,
-  CHART_COLORS.green,
-  CHART_COLORS.amber,
-  CHART_COLORS.pink,
-  CHART_COLORS.red,
-];
-
 interface ContentAnalysisProps extends ContentAnalysisExtraProps {
   posts: AirtableRecord[];
   timezone?: string;
@@ -117,6 +105,13 @@ export default function ContentAnalysis({
   instagramAudience = [],
   pinterestTopPins = [],
 }: ContentAnalysisProps) {
+  const { colors, defaultOptions } = useChartTheme();
+  // Palette used to color stacked segments. Reused across both stacked charts
+  // so the same segment label gets the same color in the legend regardless of
+  // which chart it appears in. The 6-entry blue-anchored ramp is indexed with
+  // `% SEGMENT_COLORS.length`, so it stays safe for any number of segments.
+  const SEGMENT_COLORS = colors.series;
+
   const [subTab, setSubTab] = useSubNav<InsightsTab>(
     "insights",
     "performance",
@@ -203,7 +198,7 @@ export default function ContentAnalysis({
         borderWidth: 0,
       })),
     };
-  }, [posts, metric.additive, metricKey]);
+  }, [posts, metric.additive, metricKey, SEGMENT_COLORS]);
 
   // Click handlers for Post Type × Theme stacked bars. The Chart.js onClick
   // returns elements with the dataIndex (primary axis position) and
@@ -267,7 +262,7 @@ export default function ContentAnalysis({
       },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metric.additive, metric.formatter, postsByTypeTheme]);
+  }, [metric.additive, metric.formatter, postsByTypeTheme, defaultOptions]);
 
   const chartOptionsHorizontal = useMemo(
     () => {
@@ -290,13 +285,13 @@ export default function ContentAnalysis({
       };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [chartOptions, metric.additive, metric.formatter, postsByTypeTheme],
+    [chartOptions, metric.additive, metric.formatter, postsByTypeTheme, defaultOptions],
   );
 
   // Build the scatter point array AND keep a parallel index of the source
   // post records so a click can resolve back to the original post.
   const scatterPosts = useMemo(
-    () => posts.filter((p) => num(p.fields["Reach"]) > 0),
+    () => posts.filter((p) => recordReach(p) > 0),
     [posts],
   );
 
@@ -306,16 +301,16 @@ export default function ContentAnalysis({
         {
           label: "Posts",
           data: scatterPosts.map((p) => ({
-            x: (num(p.fields["Saves"]) / num(p.fields["Reach"])) * 100,
-            y: (num(p.fields["Shares"]) / num(p.fields["Reach"])) * 100,
+            x: (num(p.fields["Saves"]) / recordReach(p)) * 100,
+            y: (num(p.fields["Shares"]) / recordReach(p)) * 100,
           })),
-          backgroundColor: CHART_COLORS.purple + "80",
+          backgroundColor: colors.series[0] + "80",
           pointRadius: 5,
           pointHoverRadius: 7,
         },
       ],
     };
-  }, [scatterPosts]);
+  }, [scatterPosts, colors]);
 
   const normalizers = useMemo(() => {
     const maxVideoViews = posts.reduce(
@@ -335,7 +330,7 @@ export default function ContentAnalysis({
   const scatterSaveStats = useMemo(() => {
     if (scatterPosts.length < 3) return undefined;
     const saves = scatterPosts.map(
-      (p) => (num(p.fields["Saves"]) / num(p.fields["Reach"])) * 100,
+      (p) => (num(p.fields["Saves"]) / recordReach(p)) * 100,
     );
     return describe(saves);
   }, [scatterPosts]);
@@ -357,7 +352,7 @@ export default function ContentAnalysis({
         label: `Post ${str(post.fields["Post ID"]).slice(-10)} — Save vs Share`,
         metricLabel: "Save Rate",
         getMetricValue: (r) => {
-          const reach = num(r.fields["Reach"]);
+          const reach = recordReach(r);
           if (reach <= 0) return undefined;
           return (num(r.fields["Saves"]) / reach) * 100;
         },
@@ -371,7 +366,7 @@ export default function ContentAnalysis({
         title: {
           display: true,
           text: "Save Rate %",
-          color: CHART_COLORS.muted,
+          color: colors.axis,
         },
       },
       y: {
@@ -379,7 +374,7 @@ export default function ContentAnalysis({
         title: {
           display: true,
           text: "Share Rate %",
-          color: CHART_COLORS.muted,
+          color: colors.axis,
         },
       },
     },
@@ -426,7 +421,7 @@ export default function ContentAnalysis({
                 style={{
                   background:
                     metricKey === k
-                      ? "var(--accent-purple)"
+                      ? "var(--brand)"
                       : "var(--bg-secondary)",
                   color: metricKey === k ? "#fff" : "var(--text-secondary)",
                   border: "1px solid var(--border)",

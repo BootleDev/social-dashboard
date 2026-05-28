@@ -150,13 +150,13 @@ function maxAcross(grid: CellState[][]): number {
   return max;
 }
 
-/** Intensity 0..1 → CSS color. Uses purple scale matching the dashboard. */
+/** Intensity 0..1 → CSS color. Brand-blue opacity ramp (#0171E4). */
 function intensityColor(intensity: number): string {
-  // 0 = transparent, 1 = full purple.
-  // Clamp.
+  // 0 = near-transparent, 1 = full brand blue. Opacity ramp reads on both
+  // light and dark cell backgrounds without needing a per-theme branch.
   const t = Math.max(0, Math.min(1, intensity));
-  // Use rgba purple #a855f7
-  return `rgba(168, 85, 247, ${0.05 + t * 0.85})`;
+  // Brand blue #0171E4 = rgb(1, 113, 228)
+  return `rgba(1, 113, 228, ${0.05 + t * 0.85})`;
 }
 
 export default function BestTimeToPost({
@@ -334,8 +334,8 @@ export default function BestTimeToPost({
         <div
           className="mb-3 p-3 rounded"
           style={{
-            background: "rgba(168, 85, 247, 0.08)",
-            border: "1px solid rgba(168, 85, 247, 0.25)",
+            background: "var(--brand-soft)",
+            border: "1px solid var(--brand)",
           }}
         >
           <div
@@ -377,7 +377,7 @@ export default function BestTimeToPost({
                       <span
                         className="ml-2"
                         style={{
-                          color: vsAvg > 0 ? "#22c55e" : "#ef4444",
+                          color: vsAvg > 0 ? "var(--success)" : "var(--danger)",
                         }}
                       >
                         {vsAvg > 0 ? "+" : ""}
@@ -453,7 +453,7 @@ export default function BestTimeToPost({
                         style={{
                           background: bg,
                           border: isTopSlot
-                            ? "2px solid #f59e0b"
+                            ? "2px solid var(--brand)"
                             : "1px solid var(--border)",
                           color: intensity > 0.6 ? "#fff" : "var(--text-secondary)",
                           opacity: hasPosts && !qualifies ? 0.4 : 1,

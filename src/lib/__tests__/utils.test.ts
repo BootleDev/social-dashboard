@@ -23,6 +23,8 @@ import {
   dayOfWeek,
   avgERByDimensionStacked,
   sumByDimensionStacked,
+  recordReach,
+  sumReach,
 } from "../utils";
 import type { AirtableRecord } from "../utils";
 
@@ -445,6 +447,49 @@ describe("sumField", () => {
   it("handles missing field values", () => {
     const records = [makeRecord({ Reach: 100 }), makeRecord({})];
     expect(sumField(records, "Reach")).toBe(100);
+  });
+});
+
+// --- recordReach (Pinterest has no reach; uses impressions) ---
+describe("recordReach", () => {
+  it("returns the Reach field for non-Pinterest platforms", () => {
+    expect(
+      recordReach(makeRecord({ Platform: "instagram", Reach: 500, Impressions: 999 })),
+    ).toBe(500);
+  });
+
+  it("substitutes Impressions for Pinterest (Reach is structurally 0)", () => {
+    expect(
+      recordReach(makeRecord({ Platform: "pinterest", Reach: 0, Impressions: 371 })),
+    ).toBe(371);
+  });
+
+  it("is case/space-insensitive on platform", () => {
+    expect(
+      recordReach(makeRecord({ Platform: " Pinterest ", Reach: 0, Impressions: 8 })),
+    ).toBe(8);
+  });
+
+  it("falls back to Reach for Pinterest when impressions are 0", () => {
+    expect(
+      recordReach(makeRecord({ Platform: "pinterest", Reach: 0, Impressions: 0 })),
+    ).toBe(0);
+  });
+});
+
+// --- sumReach ---
+describe("sumReach", () => {
+  it("sums reach across mixed platforms, using impressions for Pinterest", () => {
+    const records = [
+      makeRecord({ Platform: "instagram", Reach: 100, Impressions: 9 }),
+      makeRecord({ Platform: "facebook", Reach: 200, Impressions: 9 }),
+      makeRecord({ Platform: "pinterest", Reach: 0, Impressions: 50 }),
+    ];
+    expect(sumReach(records)).toBe(350);
+  });
+
+  it("returns 0 for empty array", () => {
+    expect(sumReach([])).toBe(0);
   });
 });
 

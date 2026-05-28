@@ -128,7 +128,7 @@ export default function PinterestTopPins({
               className="text-xs px-2 py-1 rounded cursor-pointer transition-colors"
               style={{
                 background:
-                  sortBy === s ? "var(--accent-purple)" : "var(--bg-secondary)",
+                  sortBy === s ? "var(--brand)" : "var(--bg-secondary)",
                 color: sortBy === s ? "#fff" : "var(--text-secondary)",
                 border: "1px solid var(--border)",
               }}
@@ -211,7 +211,7 @@ export default function PinterestTopPins({
               >
                 <div
                   className="relative w-full"
-                  style={{ aspectRatio: "2 / 3", background: "#0a0a0a" }}
+                  style={{ aspectRatio: "2 / 3", background: "var(--bg-secondary)" }}
                 >
                   {thumbnail ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -232,7 +232,7 @@ export default function PinterestTopPins({
                   <span
                     className="absolute top-1.5 left-1.5 text-[10px] px-1.5 py-0.5 rounded font-medium"
                     style={{
-                      background: "rgba(168, 85, 247, 0.9)",
+                      background: "var(--brand)",
                       color: "#fff",
                     }}
                   >

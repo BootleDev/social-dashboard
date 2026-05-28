@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Line, Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions, lineChartOptions } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import { getPlatformConfig } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
@@ -14,6 +14,7 @@ import {
   groupByPlatform,
   getPlatformKeys,
   sumField,
+  sumReach,
   buildUnifiedDates,
   alignToDateArray,
   trimTrailingZeroDay,
@@ -30,6 +31,8 @@ export default function AudienceGrowth({
   posts,
   dailyMetrics,
 }: AudienceGrowthProps) {
+  const { colors, defaultOptions, lineChartOptions } = useChartTheme();
+
   const platformMap = useMemo(
     () => groupByPlatform(dailyMetrics),
     [dailyMetrics],
@@ -108,8 +111,8 @@ export default function AudienceGrowth({
             {
               label: `${getPlatformConfig(firstKey).label} Daily Gain`,
               data: maskedGain,
-              borderColor: CHART_COLORS.green,
-              backgroundColor: CHART_COLORS.green + "20",
+              borderColor: colors.series[3],
+              backgroundColor: colors.series[3] + "20",
               fill: true,
               tension: 0.3,
               pointRadius: 0,
@@ -123,7 +126,7 @@ export default function AudienceGrowth({
       labels,
       datasets: [...followerDatasets, ...gainDataset],
     };
-  }, [platformKeys, platformMap, allDates]);
+  }, [platformKeys, platformMap, allDates, colors]);
 
   const followerGrowthOptions = {
     ...lineChartOptions,
@@ -133,13 +136,13 @@ export default function AudienceGrowth({
         ...lineChartOptions.scales.y,
         position: "left" as const,
         beginAtZero: false,
-        title: { display: true, text: "Followers", color: CHART_COLORS.muted },
+        title: { display: true, text: "Followers", color: colors.axis },
       },
       y1: {
         position: "right" as const,
-        ticks: { color: CHART_COLORS.muted, font: { size: 10 } },
+        ticks: { color: colors.axis, font: { size: 10 } },
         grid: { drawOnChartArea: false },
-        title: { display: true, text: "Daily Gain", color: CHART_COLORS.muted },
+        title: { display: true, text: "Daily Gain", color: colors.axis },
       },
     },
   };
@@ -155,7 +158,7 @@ export default function AudienceGrowth({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: `${config.label} Reach`,
-          data: alignToDateArray(metrics, allDates, "Reach"),
+          data: alignToDateArray(metrics, allDates, key === "pinterest" ? "Impressions" : "Reach"),
           borderColor: config.color,
           tension: 0.3,
           pointRadius: 0,
@@ -207,7 +210,7 @@ export default function AudienceGrowth({
     const vals: number[] = [];
     for (const key of platformKeys) {
       const metrics = platformMap.get(key) ?? [];
-      const series = alignToDateArray(metrics, allDates, "Reach");
+      const series = alignToDateArray(metrics, allDates, key === "pinterest" ? "Impressions" : "Reach");
       for (const v of series) if (v > 0) vals.push(v);
     }
     return describe(vals);
@@ -236,7 +239,7 @@ export default function AudienceGrowth({
     [platformKeys, platformMap],
   );
 
-  const totalReach = sumField(dailyMetrics, "Reach");
+  const totalReach = sumReach(dailyMetrics);
   const totalWebClicks = sumField(dailyMetrics, "Website Clicks");
   // Website Clicks is no longer written by Meta Graph API v22.0 (closest field
   // bundles website + email + phone + address taps and isn't a substitute).

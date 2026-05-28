@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { str, num, formatNumber, formatLocalDate } from "@/lib/utils";
+import { str, recordReach, formatNumber, formatLocalDate } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 import PostTagEditor, { TAG_FIELD_CONFIG } from "./PostTagEditor";
@@ -139,7 +139,7 @@ export default function PostDrilldownPanel({
                 str(f["Published At"]),
                 timezone || undefined,
               );
-              const reach = num(f["Reach"]);
+              const reach = recordReach(p);
               const metricVal = getMetricValue?.(p);
 
               return (
@@ -217,7 +217,7 @@ export default function PostDrilldownPanel({
                         className="text-xs whitespace-nowrap rounded px-2 py-1 hover:bg-white/10"
                         style={{
                           border: "1px solid var(--border)",
-                          color: "var(--accent-purple)",
+                          color: "var(--brand)",
                         }}
                       >
                         Open ↗

@@ -52,7 +52,7 @@ export default function SubNav<K extends string>({
             onClick={() => onChange(item.key)}
             className="text-xs px-3 py-1.5 rounded-full cursor-pointer transition-colors"
             style={{
-              background: active ? "var(--accent-purple)" : "var(--bg-secondary)",
+              background: active ? "var(--brand)" : "var(--bg-secondary)",
               color: active ? "#fff" : "var(--text-secondary)",
               border: "1px solid var(--border)",
             }}

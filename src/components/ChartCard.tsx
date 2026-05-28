@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import InfoTooltip from "./InfoTooltip";
 
 interface ChartCardProps {
   title: string;
@@ -36,16 +37,7 @@ export default function ChartCard({
           style={{ color: "var(--text-secondary)" }}
         >
           {title}
-          {tooltip && (
-            <span
-              title={tooltip}
-              aria-label={tooltip}
-              role="img"
-              className="cursor-help opacity-50 hover:opacity-100 text-xs"
-            >
-              i
-            </span>
-          )}
+          {tooltip && <InfoTooltip text={tooltip} label={`About ${title}`} />}
         </h3>
         {headerAction}
       </div>

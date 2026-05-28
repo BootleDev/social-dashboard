@@ -19,6 +19,25 @@ export function str(val: unknown): string {
   return String(val ?? "");
 }
 
+/**
+ * Reach for a raw post record, accounting for Pinterest having no reach metric.
+ *
+ * Pinterest's API reports Impressions but not Reach, so the "Reach" field is
+ * structurally 0 on every Pinterest row while Impressions are populated. We
+ * substitute Impressions as Pinterest's reach-equivalent. All other platforms
+ * pass their real Reach through unchanged. Mirrors `effectiveReach` in
+ * derivedMetrics.ts (which operates on the parsed Post shape); kept here so
+ * display components can use it without converting to Post first.
+ */
+export function recordReach(record: AirtableRecord): number {
+  const platform = str(record.fields["Platform"]).toLowerCase().trim();
+  if (platform === "pinterest") {
+    const impressions = num(record.fields["Impressions"]);
+    return impressions > 0 ? impressions : num(record.fields["Reach"]);
+  }
+  return num(record.fields["Reach"]);
+}
+
 export function formatNumber(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
@@ -426,6 +445,16 @@ export function topPosts(
 /** Sum a numeric field across records. */
 export function sumField(records: AirtableRecord[], field: string): number {
   return records.reduce((acc, r) => acc + num(r.fields[field]), 0);
+}
+
+/**
+ * Sum reach across records using `recordReach` per row, so Pinterest rows
+ * (which report Impressions, not Reach) contribute their impressions instead
+ * of a structural 0. Use this instead of sumField(records, "Reach") anywhere
+ * a cross-platform reach total is shown.
+ */
+export function sumReach(records: AirtableRecord[]): number {
+  return records.reduce((acc, r) => acc + recordReach(r), 0);
 }
 
 /** Average a numeric field across records. */

@@ -9,6 +9,7 @@ export async function proxy(request: NextRequest) {
     pathname === "/login" ||
     pathname === "/api/auth" ||
     pathname.startsWith("/_next/") ||
+    pathname.startsWith("/fonts/") ||
     pathname === "/favicon.ico" ||
     pathname === "/favicon.svg" ||
     pathname === "/icon.svg" ||
@@ -39,6 +40,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|favicon.svg|icon|apple-icon|world-110m).*)",
+    "/((?!_next/static|_next/image|fonts|favicon.ico|favicon.svg|icon|apple-icon|world-110m).*)",
   ],
 };

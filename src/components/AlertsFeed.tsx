@@ -7,11 +7,14 @@ interface AlertsFeedProps {
   alerts: AirtableRecord[];
 }
 
+// Severity -> semantic theme tokens. CRITICAL = danger, HIGH = warning,
+// MEDIUM = info (brand blue), LOW = neutral surface. These invert with the
+// light/dark theme via the CSS-variable-backed Tailwind tokens.
 const severityColors: Record<string, string> = {
-  CRITICAL: "bg-red-500/20 text-red-400 border-red-500/30",
-  HIGH: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  MEDIUM: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  LOW: "bg-gray-500/20 text-gray-400 border-gray-500/30",
+  CRITICAL: "bg-danger-soft text-danger border-danger",
+  HIGH: "bg-warning-soft text-warning border-warning",
+  MEDIUM: "bg-info-soft text-info border-info",
+  LOW: "bg-surface-secondary text-muted border-hairline",
 };
 
 const typeIcons: Record<string, string> = {

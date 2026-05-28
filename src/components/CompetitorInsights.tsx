@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import ChartCard from "./ChartCard";
 import StatsPanel from "./StatsPanel";
 import { num, str, formatNumber } from "@/lib/utils";
@@ -22,6 +22,8 @@ export default function CompetitorInsights({
   loading,
   error,
 }: CompetitorInsightsProps) {
+  const { colors, defaultOptions } = useChartTheme();
+
   // Avg views by handle (brand comparison)
   const brandData = useMemo(() => {
     const groups = new Map<
@@ -63,13 +65,13 @@ export default function CompetitorInsights({
         {
           label: "Avg Views",
           data: brandData.map((b) => b.avgViews),
-          backgroundColor: CHART_COLORS.purple + "60",
-          borderColor: CHART_COLORS.purple,
+          backgroundColor: colors.series[0] + "60",
+          borderColor: colors.series[0],
           borderWidth: 1,
         },
       ],
     }),
-    [brandData],
+    [brandData, colors],
   );
 
   const brandERData = useMemo(
@@ -79,13 +81,13 @@ export default function CompetitorInsights({
         {
           label: "Like-to-View %",
           data: brandData.map((b) => b.avgER),
-          backgroundColor: CHART_COLORS.green + "60",
-          borderColor: CHART_COLORS.green,
+          backgroundColor: colors.series[1] + "60",
+          borderColor: colors.series[1],
           borderWidth: 1,
         },
       ],
     }),
-    [brandData],
+    [brandData, colors],
   );
 
   // Content theme breakdown (Topic field)
@@ -116,13 +118,13 @@ export default function CompetitorInsights({
         {
           label: "Posts",
           data: topicData.map((t) => t.count),
-          backgroundColor: CHART_COLORS.cyan + "60",
-          borderColor: CHART_COLORS.cyan,
+          backgroundColor: colors.series[2] + "60",
+          borderColor: colors.series[2],
           borderWidth: 1,
         },
       ],
     }),
-    [topicData],
+    [topicData, colors],
   );
 
   // Platform split
@@ -187,13 +189,13 @@ export default function CompetitorInsights({
         {
           label: "Avg Views",
           data: hookData.map((h) => h.avgViews),
-          backgroundColor: CHART_COLORS.amber + "60",
-          borderColor: CHART_COLORS.amber,
+          backgroundColor: colors.series[3] + "60",
+          borderColor: colors.series[3],
           borderWidth: 1,
         },
       ],
     }),
-    [hookData],
+    [hookData, colors],
   );
 
   // Top 20 posts table
@@ -220,7 +222,7 @@ export default function CompetitorInsights({
 
   if (error) {
     return (
-      <div className="rounded-xl p-6 border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
+      <div className="rounded-xl p-6 border border-danger bg-danger-soft text-danger text-sm">
         Error loading competitor data: {error}
       </div>
     );

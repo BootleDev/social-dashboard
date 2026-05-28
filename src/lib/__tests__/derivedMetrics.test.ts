@@ -7,6 +7,8 @@ import {
   watchTimePct,
   engagementScore,
   reachScore,
+  effectiveReach,
+  engagementScoreBreakdown,
 } from "../derivedMetrics";
 import type { Post } from "../types";
 
@@ -134,5 +136,53 @@ describe("reachScore", () => {
     const low = makePost({ reach: 100, videoViews: 50 });
     const high = makePost({ reach: 4000, videoViews: 1800 });
     expect(reachScore(high, normalizers)!).toBeGreaterThan(reachScore(low, normalizers)!);
+  });
+});
+
+describe("effectiveReach", () => {
+  it("returns real reach for non-Pinterest posts", () => {
+    expect(effectiveReach(makePost({ platform: "instagram", reach: 1000 }))).toBe(
+      1000,
+    );
+  });
+
+  it("uses impressions for Pinterest (reach is structurally 0)", () => {
+    expect(
+      effectiveReach(makePost({ platform: "pinterest", reach: 0, impressions: 371 })),
+    ).toBe(371);
+  });
+
+  it("lets Pinterest posts produce a defined save rate via impressions", () => {
+    // Before the impressions substitution this returned undefined (reach=0),
+    // which is exactly why Pinterest engagement scores were blank.
+    const pin = makePost({
+      platform: "pinterest",
+      reach: 0,
+      impressions: 100,
+      saves: 5,
+      comments: 2,
+    });
+    expect(saveRate(pin)).toBeCloseTo(0.05);
+    expect(engagementScore(pin)).not.toBeUndefined();
+  });
+});
+
+describe("engagementScoreBreakdown", () => {
+  it("returns components whose points sum to the composite score", () => {
+    const post = makePost({
+      reach: 1000,
+      saves: 20,
+      comments: 10,
+      engagementRate: 0.05,
+    });
+    const breakdown = engagementScoreBreakdown(post)!;
+    expect(breakdown).toHaveLength(3);
+    const sumPoints = breakdown.reduce((s, c) => s + c.points, 0);
+    expect(sumPoints).toBeCloseTo(engagementScore(post)!);
+  });
+
+  it("is undefined when the score is undefined (no reach/impressions)", () => {
+    const post = makePost({ platform: "instagram", reach: 0, impressions: 0 });
+    expect(engagementScoreBreakdown(post)).toBeUndefined();
   });
 });

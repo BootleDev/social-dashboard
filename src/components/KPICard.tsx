@@ -1,6 +1,7 @@
 "use client";
 
 import { getPlatformConfig } from "@/lib/platforms";
+import InfoTooltip from "./InfoTooltip";
 
 export interface KPIBreakdownEntry {
   /** Platform key — "instagram", "facebook", "pinterest". */
@@ -35,7 +36,7 @@ export default function KPICard({
   const isNegative = change !== undefined && change < 0;
   const isGood = invertChange ? isNegative : isPositive;
   const isBad = invertChange ? isPositive : isNegative;
-  const changeColor = isGood ? "text-green-400" : isBad ? "text-red-400" : "";
+  const changeColor = isGood ? "text-success" : isBad ? "text-danger" : "";
   const arrow = isPositive ? "\u2191" : isNegative ? "\u2193" : "";
 
   const platformConfig = platformLabel
@@ -66,16 +67,7 @@ export default function KPICard({
             {platformConfig.label}
           </span>
         )}
-        {tooltip && (
-          <span
-            title={tooltip}
-            aria-label={tooltip}
-            role="img"
-            className="cursor-help opacity-50 hover:opacity-100"
-          >
-            i
-          </span>
-        )}
+        {tooltip && <InfoTooltip text={tooltip} label={`What is ${title}?`} />}
       </span>
       <span className="text-2xl font-bold">{value}</span>
       <div className="flex items-center gap-2">

@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import ChartCard from "./ChartCard";
 import StatsPanel from "./StatsPanel";
 import { describe } from "@/lib/stats";
@@ -70,6 +70,8 @@ function BreakdownChart({
   followerBuckets,
   engagedBuckets,
 }: BreakdownChartProps) {
+  const { colors } = useChartTheme();
+
   // Build a unified bucket ordering driven by follower data (the source of
   // truth for "who is in the audience"), then look up engaged values into
   // the same bucket positions. Engaged data lights up automatically when
@@ -87,13 +89,13 @@ function BreakdownChart({
       {
         label: "Followers",
         data: followerBuckets.map((b) => b.value),
-        backgroundColor: CHART_COLORS.blue,
+        backgroundColor: colors.series[0],
         borderRadius: 4,
       },
       {
         label: "Engaged (30d)",
         data: engagedValues,
-        backgroundColor: CHART_COLORS.amber,
+        backgroundColor: colors.series[1],
         borderRadius: 4,
       },
     ],
@@ -109,7 +111,7 @@ function BreakdownChart({
         position: "top" as const,
         align: "end" as const,
         labels: {
-          color: CHART_COLORS.muted,
+          color: colors.axis,
           font: { size: 10 },
           boxWidth: 10,
           boxHeight: 10,
@@ -117,10 +119,10 @@ function BreakdownChart({
         },
       },
       tooltip: {
-        backgroundColor: "#1e2230",
-        titleColor: CHART_COLORS.white,
-        bodyColor: CHART_COLORS.muted,
-        borderColor: CHART_COLORS.grid,
+        backgroundColor: colors.tooltipBg,
+        titleColor: colors.tooltipText,
+        bodyColor: colors.axis,
+        borderColor: colors.grid,
         borderWidth: 1,
         callbacks: {
           // Append % of audience to each tooltip line.
@@ -139,11 +141,11 @@ function BreakdownChart({
     },
     scales: {
       x: {
-        ticks: { color: CHART_COLORS.muted, font: { size: 11 } },
-        grid: { color: CHART_COLORS.grid },
+        ticks: { color: colors.axis, font: { size: 11 } },
+        grid: { color: colors.grid },
       },
       y: {
-        ticks: { color: CHART_COLORS.muted, font: { size: 11 } },
+        ticks: { color: colors.axis, font: { size: 11 } },
         grid: { color: "transparent" },
       },
     },
@@ -436,7 +438,7 @@ function CountryView({ followers }: { followers: AudienceDemographic[] }) {
                   className="absolute inset-y-0 left-0 rounded"
                   style={{
                     width: `${barWidth}%`,
-                    background: "rgba(1, 113, 228, 0.8)",
+                    background: "var(--brand)",
                   }}
                 />
               </div>

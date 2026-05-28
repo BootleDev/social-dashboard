@@ -137,7 +137,7 @@ export default function PostTagEditor({
                 <span className="opacity-60 normal-case">saving…</span>
               )}
               {status === "error" && (
-                <span style={{ color: "#ef4444" }} className="normal-case">
+                <span style={{ color: "var(--danger)" }} className="normal-case">
                   retry
                 </span>
               )}
@@ -150,7 +150,7 @@ export default function PostTagEditor({
                 className="text-[11px] px-1.5 py-0.5 rounded outline-none cursor-pointer"
                 style={{
                   background: "var(--bg-secondary)",
-                  border: `1px solid ${status === "error" ? "#ef4444" : "var(--border)"}`,
+                  border: `1px solid ${status === "error" ? "var(--danger)" : "var(--border)"}`,
                   color: "var(--text-primary)",
                 }}
               >
@@ -174,7 +174,7 @@ export default function PostTagEditor({
                 className="text-[11px] px-1.5 py-0.5 rounded outline-none"
                 style={{
                   background: "var(--bg-secondary)",
-                  border: `1px solid ${status === "error" ? "#ef4444" : "var(--border)"}`,
+                  border: `1px solid ${status === "error" ? "var(--danger)" : "var(--border)"}`,
                   color: "var(--text-primary)",
                 }}
               />

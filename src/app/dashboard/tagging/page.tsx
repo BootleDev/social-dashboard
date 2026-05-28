@@ -265,7 +265,7 @@ function PostTagCard({
               </span>
             )}
             {num(record.fields["Engagement Rate"]) > 0 && (
-              <span className="text-xs text-green-400">
+              <span className="text-xs text-success">
                 {(num(record.fields["Engagement Rate"]) * 100).toFixed(2)}% ER
               </span>
             )}
@@ -373,7 +373,7 @@ function PostTagCard({
       </div>
 
       {error && (
-        <p className="text-xs text-red-400">{error}</p>
+        <p className="text-xs text-danger">{error}</p>
       )}
 
       {/* Actions */}
@@ -382,7 +382,7 @@ function PostTagCard({
           onClick={approve}
           disabled={saving}
           className="px-4 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50 cursor-pointer"
-          style={{ background: "var(--accent-purple)", color: "#fff" }}
+          style={{ background: "var(--brand)", color: "#fff" }}
         >
           {saving ? "Saving…" : "Approve"}
         </button>
@@ -605,7 +605,7 @@ export default function TaggingPage() {
             onClick={bulkApprove}
             disabled={visibleSelectedCount === 0 || bulkApproving}
             className="px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-40 cursor-pointer"
-            style={{ background: "var(--accent-purple)", color: "#fff" }}
+            style={{ background: "var(--brand)", color: "#fff" }}
           >
             {bulkApproving
               ? "Approving…"
@@ -615,13 +615,13 @@ export default function TaggingPage() {
       )}
 
       {bulkError && (
-        <div className="rounded-xl p-3 border border-red-500/30 bg-red-500/10 text-red-400 text-xs">
+        <div className="rounded-xl p-3 border border-danger bg-danger-soft text-danger text-xs">
           {bulkError}
         </div>
       )}
 
       {error && (
-        <div className="rounded-xl p-4 border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
+        <div className="rounded-xl p-4 border border-danger bg-danger-soft text-danger text-sm">
           {error}
         </div>
       )}

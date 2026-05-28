@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { defaultOptions, lineChartOptions } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import { getPlatformConfig } from "@/lib/platforms";
 import ChartCard from "./ChartCard";
 import {
@@ -13,6 +13,7 @@ import {
   formatPercent,
   avgField,
   sumField,
+  sumReach,
   groupByPlatform,
   getPlatformKeys,
   buildUnifiedDates,
@@ -87,6 +88,8 @@ export default function PlatformCompare({
   posts,
   dailyMetrics,
 }: PlatformCompareProps) {
+  const { defaultOptions, lineChartOptions } = useChartTheme();
+
   const metricsMap = useMemo(
     () => groupByPlatform(dailyMetrics),
     [dailyMetrics],
@@ -111,7 +114,7 @@ export default function PlatformCompare({
       result[key] = {
         followers: latest ? num(latest.fields["Followers"]) : 0,
         avgER: avgField(platformPosts, "Engagement Rate") * 100,
-        totalReach: sumField(metrics, "Reach"),
+        totalReach: sumReach(metrics),
         totalImpressions: sumField(metrics, "Impressions"),
         posts: platformPosts.length,
         avgSaves:
@@ -191,7 +194,7 @@ export default function PlatformCompare({
         const metrics = metricsMap.get(key) ?? [];
         return {
           label: `${config.label} Reach`,
-          data: alignToDateArray(metrics, allDates, "Reach"),
+          data: alignToDateArray(metrics, allDates, key === "pinterest" ? "Impressions" : "Reach"),
           borderColor: config.color,
           backgroundColor: config.colorFill,
           fill: true,

@@ -3,8 +3,8 @@
 import { useMemo } from "react";
 import { Line, Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions, lineChartOptions } from "@/lib/chartSetup";
-import { getPlatformConfig } from "@/lib/platforms";
+import { useChartTheme } from "@/lib/useChartTheme";
+import { getPlatformConfig, platformSortOrder } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
 import AlertsFeed from "./AlertsFeed";
@@ -17,6 +17,8 @@ import {
   pctChange,
   topPosts,
   sumField,
+  recordReach,
+  sumReach,
   avgField,
   groupByPlatform,
   getPlatformKeys,
@@ -28,9 +30,59 @@ import {
   saveRate,
   engagementScore,
   reachScore,
+  engagementScoreBreakdown,
+  reachScoreBreakdown,
   type ReachNormalizers,
+  type ScoreComponent,
 } from "@/lib/derivedMetrics";
 import type { AirtableRecord } from "@/lib/utils";
+
+/**
+ * Build a legible tooltip for a composite score from its averaged component
+ * breakdowns. Shows each component's average raw input and the points it
+ * contributes (out of its max), so the abstract 0–100 number becomes readable:
+ *
+ *   "Composite 0–100, averaged across 7 posts:
+ *    • Save rate 0.2% → 3.2 / 40 pts
+ *    • Engagement rate 4.3% → 5.0 / 35 pts
+ *    • Comment rate 0.1% → 0.7 / 25 pts"
+ *
+ * `rawDisplay` is taken from the first post's component (representative format);
+ * the points are averaged across all posts so they sum to the displayed score.
+ */
+function buildScoreTooltip(
+  headline: string,
+  breakdowns: ScoreComponent[][],
+): string {
+  if (breakdowns.length === 0) {
+    return `${headline} No scored posts in this period yet.`;
+  }
+  const n = breakdowns[0].length;
+  const lines = Array.from({ length: n }, (_, i) => {
+    const label = breakdowns[0][i].label;
+    const max = breakdowns[0][i].max;
+    const avgPoints =
+      breakdowns.reduce((sum, b) => sum + b[i].points, 0) / breakdowns.length;
+    // Average the raw input where it is a percentage; for count-based inputs
+    // (video views / impressions) show the average count.
+    const raws = breakdowns.map((b) => b[i].rawDisplay);
+    const isPct = raws[0].endsWith("%");
+    let rawAvg: string;
+    if (isPct) {
+      const avg =
+        raws.reduce((s, r) => s + parseFloat(r), 0) / raws.length;
+      rawAvg = `${avg.toFixed(2)}%`;
+    } else {
+      const avg =
+        raws.reduce((s, r) => s + parseFloat(r || "0"), 0) / raws.length;
+      rawAvg = `${Math.round(avg)}`;
+    }
+    return `• ${label} ${rawAvg} → ${avgPoints.toFixed(1)} / ${max.toFixed(0)} pts`;
+  });
+  return `${headline} Averaged across ${breakdowns.length} scored post${
+    breakdowns.length === 1 ? "" : "s"
+  }: ${lines.join("  ")}`;
+}
 
 interface OverviewProps {
   posts: AirtableRecord[];
@@ -49,6 +101,8 @@ export default function Overview({
   prevPosts,
   prevDailyMetrics,
 }: OverviewProps) {
+  const { colors, defaultOptions, lineChartOptions } = useChartTheme();
+
   const platformMap = useMemo(
     () => groupByPlatform(dailyMetrics),
     [dailyMetrics],
@@ -76,8 +130,8 @@ export default function Overview({
     const avgER = avgField(posts, "Engagement Rate") * 100;
     const prevAvgER = avgField(prevPosts, "Engagement Rate") * 100;
 
-    const totalReach = sumField(dailyMetrics, "Reach");
-    const prevTotalReach = sumField(prevDailyMetrics, "Reach");
+    const totalReach = sumReach(dailyMetrics);
+    const prevTotalReach = sumReach(prevDailyMetrics);
 
     const totalImpressions = sumField(dailyMetrics, "Impressions");
     const prevTotalImpressions = sumField(prevDailyMetrics, "Impressions");
@@ -90,7 +144,7 @@ export default function Overview({
     const totalVideoViews = sumField(posts, "Video Views");
 
     // Save Rate: avg across posts that have reach > 0
-    const postsWithReach = posts.filter((p) => num(p.fields["Reach"]) > 0);
+    const postsWithReach = posts.filter((p) => recordReach(p) > 0);
     const avgSaveRate =
       postsWithReach.length > 0
         ? postsWithReach.reduce((sum, p) => {
@@ -131,6 +185,25 @@ export default function Overview({
         ? reachScores.reduce((a, b) => a + b, 0) / reachScores.length
         : undefined;
 
+    // Average each score's component contributions across the same posts, so
+    // the KPI tooltip can show WHAT drives the composite (e.g. "Save rate
+    // 0.2% → 3.2 / 40 pts"), not just the formula. Components sum to the score.
+    const engBreakdowns = posts
+      .map((p) => engagementScoreBreakdown(toPost(p)))
+      .filter((v): v is ScoreComponent[] => v !== undefined);
+    const reachBreakdowns = posts
+      .map((p) => reachScoreBreakdown(toPost(p), normalizers))
+      .filter((v): v is ScoreComponent[] => v !== undefined);
+
+    const engScoreTooltip = buildScoreTooltip(
+      "Composite 0–100: 40% save rate + 35% engagement rate + 25% comment rate.",
+      engBreakdowns,
+    );
+    const reachScoreTooltip = buildScoreTooltip(
+      "Composite 0–100: 50% reach rate + 30% video views + 20% impressions, each normalised within this period.",
+      reachBreakdowns,
+    );
+
     // Per-platform breakdowns. Each KPI gets a small platform-pill row
     // so blended aggregates (e.g. Save Rate 0.1%) don't hide the fact
     // that one platform is doing all the work and another is at zero.
@@ -153,7 +226,7 @@ export default function Overview({
 
     const breakdownReach = platformKeys.map((k) => {
       const m = platformMap.get(k) ?? [];
-      return { platform: k, value: formatNumber(sumField(m, "Reach")) };
+      return { platform: k, value: formatNumber(sumReach(m)) };
     });
 
     const breakdownImpressions = platformKeys.map((k) => {
@@ -174,7 +247,7 @@ export default function Overview({
 
     const breakdownSaveRate = Array.from(postsByPlatform.entries()).map(
       ([platform, ps]) => {
-        const withReach = ps.filter((p) => num(p.fields["Reach"]) > 0);
+        const withReach = ps.filter((p) => recordReach(p) > 0);
         const avg =
           withReach.length > 0
             ? withReach.reduce((s, p) => s + (saveRate(toPost(p)) ?? 0), 0) /
@@ -211,6 +284,8 @@ export default function Overview({
       totalVideoViews,
       avgEngScore,
       avgReachScore,
+      engScoreTooltip,
+      reachScoreTooltip,
       breakdownFollowers,
       breakdownReach,
       breakdownImpressions,
@@ -278,36 +353,63 @@ export default function Overview({
     };
   }, [platformKeys, platformMap, allDates]);
 
-  // Posts per week bar chart
+  // Posts per week, stacked by platform. Each weekly bar splits into
+  // platform-coloured segments so the chart shows both total output and the
+  // platform mix per week (consistent with the platform colours used across
+  // the rest of the dashboard).
   const postsPerWeekData = useMemo(() => {
-    const weekCounts = new Map<string, number>();
+    // week (ISO Sunday) -> platform key -> count
+    const weeks = new Map<string, Map<string, number>>();
+    const platformsSeen = new Set<string>();
+
     for (const p of posts) {
       const dateStr = str(p.fields["Published At"]);
       if (!dateStr) continue;
       const d = new Date(dateStr);
       const weekStart = new Date(d);
       weekStart.setUTCDate(d.getUTCDate() - d.getUTCDay());
-      const key = weekStart.toISOString().split("T")[0];
-      weekCounts.set(key, (weekCounts.get(key) ?? 0) + 1);
+      const week = weekStart.toISOString().split("T")[0];
+      const platform = str(p.fields["Platform"]).toLowerCase().trim() || "other";
+      platformsSeen.add(platform);
+
+      const row = weeks.get(week) ?? new Map<string, number>();
+      row.set(platform, (row.get(platform) ?? 0) + 1);
+      weeks.set(week, row);
     }
 
-    const sorted = Array.from(weekCounts.entries()).sort((a, b) =>
-      a[0].localeCompare(b[0]),
+    const sortedWeeks = Array.from(weeks.keys()).sort((a, b) =>
+      a.localeCompare(b),
+    );
+    // Order platforms by the dashboard's canonical sort where known.
+    const platforms = Array.from(platformsSeen).sort(
+      (a, b) => platformSortOrder(a) - platformSortOrder(b),
     );
 
     return {
-      labels: sorted.map(([w]) => w.slice(5)),
-      datasets: [
-        {
-          label: "Posts",
-          data: sorted.map(([, c]) => c),
-          backgroundColor: CHART_COLORS.purple + "60",
-          borderColor: CHART_COLORS.purple,
+      labels: sortedWeeks.map((w) => w.slice(5)),
+      datasets: platforms.map((key) => {
+        const config = getPlatformConfig(key);
+        return {
+          label: config.label,
+          data: sortedWeeks.map((w) => weeks.get(w)?.get(key) ?? 0),
+          backgroundColor: config.color + "cc",
+          borderColor: config.color,
           borderWidth: 1,
-        },
-      ],
+          stack: "posts",
+        };
+      }),
     };
   }, [posts]);
+
+  // Stacked bar options — same theme base, but both axes stacked so the
+  // per-platform segments sum into one bar per week.
+  const postsPerWeekOptions = {
+    ...defaultOptions,
+    scales: {
+      x: { ...defaultOptions.scales.x, stacked: true },
+      y: { ...defaultOptions.scales.y, stacked: true },
+    },
+  };
 
   // Top 5 posts by ER, with a 50-impression floor so a pin with 1 impression
   // and 1 click (= 100% ER) doesn't dominate the list.
@@ -408,7 +510,7 @@ export default function Overview({
           value={
             kpis.avgEngScore !== undefined ? kpis.avgEngScore.toFixed(1) : "—"
           }
-          tooltip="Composite 0–100: 40% save rate + 35% ER + 25% comment rate"
+          tooltip={kpis.engScoreTooltip}
         />
         <KPICard
           title="Reach Score"
@@ -417,7 +519,7 @@ export default function Overview({
               ? kpis.avgReachScore.toFixed(1)
               : "—"
           }
-          tooltip="Composite 0–100: 50% reach rate + 30% video views + 20% impressions (relative to this period)"
+          tooltip={kpis.reachScoreTooltip}
         />
       </div>
 
@@ -436,7 +538,7 @@ export default function Overview({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="Posts Per Week">
-          <Bar data={postsPerWeekData} options={defaultOptions} />
+          <Bar data={postsPerWeekData} options={postsPerWeekOptions} />
         </ChartCard>
         <AlertsFeed alerts={alerts} />
       </div>
@@ -461,7 +563,7 @@ export default function Overview({
             const platform = str(post.fields["Platform"]);
             const postType = str(post.fields["Post Type"]);
             const er = num(post.fields["Engagement Rate"]) * 100;
-            const reach = num(post.fields["Reach"]);
+            const reach = recordReach(post);
             const likes = num(post.fields["Likes"]);
             const saves = num(post.fields["Saves"]);
             const shares = num(post.fields["Shares"]);
@@ -515,7 +617,7 @@ export default function Overview({
                 >
                   <span>
                     ER:{" "}
-                    <strong className="text-green-400">{er.toFixed(2)}%</strong>
+                    <strong className="text-success">{er.toFixed(2)}%</strong>
                   </span>
                   <span>Reach: {formatNumber(reach)}</span>
                   <span>Likes: {formatNumber(likes)}</span>

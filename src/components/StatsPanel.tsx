@@ -69,7 +69,7 @@ export default function StatsPanel({
         aria-label={open ? "Hide statistics" : "Show statistics"}
         className="text-xs px-2 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:brightness-110"
         style={{
-          background: open ? "var(--accent-purple)" : "var(--bg-secondary)",
+          background: open ? "var(--brand)" : "var(--bg-secondary)",
           color: open ? "#fff" : "var(--text-secondary)",
           border: "1px solid var(--border)",
         }}

@@ -100,7 +100,7 @@ export default function UpcomingWindows({
               style={{
                 background:
                   marketFilter === m
-                    ? "var(--accent-purple)"
+                    ? "var(--brand)"
                     : "var(--bg-secondary)",
                 color: marketFilter === m ? "#fff" : "var(--text-secondary)",
                 border: "1px solid var(--border)",
@@ -144,10 +144,10 @@ export default function UpcomingWindows({
                 ? "in window"
                 : "upcoming";
             const statusColor = w.postPeak
-              ? "#9ca3af"
+              ? "var(--text-secondary)"
               : w.inWindow
-                ? "#f59e0b"
-                : "#3b82f6";
+                ? "var(--warning)"
+                : "var(--info)";
 
             return (
               <div

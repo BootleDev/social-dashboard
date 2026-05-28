@@ -174,7 +174,7 @@ function TrendsPanel({ records, bootleAllowlist }: TrendsPanelProps) {
           <label
             className="text-xs flex items-center gap-1.5 cursor-pointer px-2 py-1 rounded"
             style={{
-              background: bootleOnly ? "var(--accent-purple)" : "var(--bg-secondary)",
+              background: bootleOnly ? "var(--brand)" : "var(--bg-secondary)",
               color: bootleOnly ? "#fff" : "var(--text-secondary)",
               border: "1px solid var(--border)",
             }}
@@ -276,10 +276,10 @@ function TrendsPanel({ records, bootleAllowlist }: TrendsPanelProps) {
               const recent = series.slice(-4);
               const sparkColor =
                 recent.length >= 2 && recent[recent.length - 1] > recent[0]
-                  ? "#22c55e"
+                  ? "var(--success)"
                   : recent.length >= 2 && recent[recent.length - 1] < recent[0]
-                    ? "#ef4444"
-                    : "#9ca3af";
+                    ? "var(--danger)"
+                    : "var(--text-secondary)";
               return (
                 <tr
                   key={k.id}
@@ -319,11 +319,11 @@ function GrowthCell({ value }: { value: number }) {
   }
   const cls =
     value >= 100
-      ? "text-green-400"
+      ? "text-success"
       : value >= 10
-        ? "text-green-300"
+        ? "text-success"
         : value < 0
-          ? "text-red-400"
+          ? "text-danger"
           : "";
   const display = value >= 10001 ? "10000%+" : `${value > 0 ? "+" : ""}${value}%`;
   return <span className={cls}>{display}</span>;

@@ -9,6 +9,7 @@ import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
 import PlatformFilter from "@/components/PlatformFilter";
 import TimezoneSelector from "@/components/TimezoneSelector";
+import ThemeToggle from "@/components/ThemeToggle";
 import { useTimezone } from "@/lib/useTimezone";
 import ChatBox from "@/components/ChatBox";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
@@ -167,17 +168,20 @@ export default function DashboardPage() {
     [data, dateRange, selectedPlatforms],
   );
 
-  // Weekly summaries filtered by date range only.
-  // NOT by platform: Weekly Summary records have no "Platform" field (they hold
-  // a cross-platform "Platform Breakdown" instead), so platform-filtering would
-  // drop every record and the panel would always render its empty state.
-  const filteredSummaries = useMemo(
-    () =>
-      data
-        ? filterByDateRange(data.weeklySummaries, "Week Start", dateRange)
-        : [],
-    [data, dateRange],
-  );
+  // Weekly summaries are NOT filtered by the dashboard date range or platform.
+  // Each summary is a discrete weekly document, and the WeeklySummary panel has
+  // its own report picker for browsing history — gating it by the (default
+  // 30-day) range would hide most reports and starve the picker. So we pass the
+  // full set, sorted newest-first so summaries[0] is always the latest (the
+  // picker relies on that ordering).
+  // Not platform-filtered either: Weekly Summary records have no "Platform"
+  // field (they hold a cross-platform "Platform Breakdown" instead).
+  const filteredSummaries = useMemo(() => {
+    if (!data) return [];
+    return [...data.weeklySummaries].sort((a, b) =>
+      str(b.fields["Week Start"]).localeCompare(str(a.fields["Week Start"])),
+    );
+  }, [data]);
 
   // Comparison period metrics (same duration, immediately before selected range)
   const comparisonDaily = useMemo(() => {
@@ -322,6 +326,8 @@ export default function DashboardPage() {
 
           <TimezoneSelector value={timezone} onChange={setTimezone} />
 
+          <ThemeToggle />
+
           <nav
             className="flex gap-1 rounded-lg p-1"
             style={{ background: "var(--bg-secondary)" }}
@@ -339,8 +345,7 @@ export default function DashboardPage() {
                   tab === t.key ? "text-white" : ""
                 }`}
                 style={{
-                  background:
-                    tab === t.key ? "var(--accent-purple)" : "transparent",
+                  background: tab === t.key ? "var(--brand)" : "transparent",
                   color: tab === t.key ? "#fff" : "var(--text-secondary)",
                 }}
               >
@@ -356,7 +361,14 @@ export default function DashboardPage() {
         {loading && <LoadingSkeleton />}
 
         {error && (
-          <div className="rounded-xl p-6 border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
+          <div
+            className="rounded-xl p-6 text-sm"
+            style={{
+              border: "1px solid var(--danger)",
+              background: "var(--danger-soft)",
+              color: "var(--danger)",
+            }}
+          >
             Error loading data: {error}
           </div>
         )}

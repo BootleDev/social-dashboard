@@ -30,8 +30,8 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
       return (
-        <div className="rounded-xl p-6 border border-red-500/30 bg-red-500/10 text-sm">
-          <p className="font-medium text-red-400 mb-2">
+        <div className="rounded-xl p-6 border border-danger bg-danger-soft text-sm">
+          <p className="font-medium text-danger mb-2">
             Something went wrong rendering this section.
           </p>
           <p style={{ color: "var(--text-secondary)" }}>

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Bar } from "react-chartjs-2";
 import type { ChartEvent, ActiveElement } from "chart.js";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import ChartCard from "./ChartCard";
 import StatsPanel from "./StatsPanel";
 import PostDrilldownPanel from "./PostDrilldownPanel";
@@ -230,6 +230,7 @@ function computeMetricAvailability(
 }
 
 export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerProps) {
+  const { colors, defaultOptions } = useChartTheme();
   const [dimIndex, setDimIndex] = useState(0);
   const [metricIndex, setMetricIndex] = useState(0);
 
@@ -288,13 +289,13 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
         {
           label: metric.label,
           data: grouped.map((g) => g.avg),
-          backgroundColor: CHART_COLORS.purple + "80",
-          borderColor: CHART_COLORS.purple,
+          backgroundColor: colors.series[0] + "80",
+          borderColor: colors.series[0],
           borderWidth: 1,
         },
       ],
     };
-  }, [posts, dim, metric, normalizers]);
+  }, [posts, dim, metric, normalizers, colors]);
 
   // Bucket-label lookup (chart bar index → raw bucket key, since the chart
   // labels include the count suffix like "Question (49)").
@@ -354,11 +355,11 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
         ...defaultOptions.scales,
         x: {
           ...defaultOptions.scales.x,
-          title: { display: true, text: metric.yLabel, color: CHART_COLORS.muted },
+          title: { display: true, text: metric.yLabel, color: colors.axis },
         },
       },
     }),
-    [metric, bucketKeys],
+    [metric, bucketKeys, defaultOptions, colors],
   );
 
   const selectClass =

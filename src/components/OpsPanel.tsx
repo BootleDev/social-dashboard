@@ -38,7 +38,7 @@ export default function OpsPanel({ posts, dailyMetrics }: OpsPanelProps) {
             className="px-3 py-1.5 rounded text-xs font-medium transition-all cursor-pointer"
             style={{
               background:
-                sub === s.key ? "var(--accent-purple)" : "transparent",
+                sub === s.key ? "var(--brand)" : "transparent",
               color: sub === s.key ? "#fff" : "var(--text-secondary)",
             }}
             title={s.description}

@@ -2,24 +2,219 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   ABC Diatype — vendored from the storefront (bootle-v3/public/fonts).
+   Mirrors the @font-face block in bootle-v3/app/styles/app.css.
+   ABC Diatype is the Bootle brand typeface across all materials (vault note
+   notes/creative/visual-identity.md). Do not substitute.
+--------------------------------------------------------------------------- */
+@font-face {
+  font-family: 'ABC Diatype';
+  src:
+    url('/fonts/ABCDiatype-Regular.woff2') format('woff2'),
+    url('/fonts/ABCDiatype-Regular.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'ABC Diatype';
+  src:
+    url('/fonts/ABCDiatype-Medium.woff2') format('woff2'),
+    url('/fonts/ABCDiatype-Medium.woff') format('woff');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'ABC Diatype';
+  src:
+    url('/fonts/ABCDiatype-Bold.woff2') format('woff2'),
+    url('/fonts/ABCDiatype-Bold.woff') format('woff');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------------------------------------------------------------------------
+   Theme tokens — semantic CSS variables.
+
+   Source of truth: bootle-v3/tailwind.config.mjs (storefront brand tokens).
+   The vault note notes/creative/visual-identity.md confirms no separate
+   digital palette exists, so the storefront tokens ARE canonical here.
+
+   Components reference MEANING (--brand, --success, --bg-card, --text-...)
+   never raw hex. Light is the default (:root); .dark overrides. next-themes
+   toggles the `.dark` class on <html> with no flash.
+
+   Storefront token map (for traceability):
+     primary        #0171E4   -> --brand
+     primary_hover  #027DF9   -> --brand-hover
+     accent         #529DF6   -> --brand-subtle
+     error          #A92135   -> --danger
+     dark_black     #1B1C1F   -> dark --bg-primary / light --text-primary
+     davys_grey     #4A525D   -> light --text-secondary
+     ghost_white    #F6F6F8   -> light --bg-primary / dark --text-primary
+     anti_flash     #EFEFF2   -> light --bg-secondary
+     pale_navy      #E6E6EC   -> light --border
+     text_subtle    #98A1B2   -> dark --text-secondary
+     light_cyan_blue#C7CED8   -> (muted accents)
+--------------------------------------------------------------------------- */
 :root {
-  --bg-primary: #0f1117;
-  --bg-secondary: #1a1d27;
-  --bg-card: #1e2230;
-  --border: #2a2e3d;
-  --text-primary: #f0f0f5;
-  --text-secondary: #9ca3af;
-  --accent-green: #22c55e;
-  --accent-red: #ef4444;
-  --accent-blue: #3b82f6;
-  --accent-amber: #f59e0b;
-  --accent-purple: #a855f7;
+  /* Brand / action — identical across themes */
+  --brand: #0171e4;
+  --brand-hover: #027df9;
+  --brand-subtle: #529df6;
+  --brand-soft: rgba(1, 113, 228, 0.12);
+
+  /* Semantic status — meaning is constant; values tuned per theme for contrast */
+  --success: #1f9d57;
+  --success-soft: rgba(31, 157, 87, 0.12);
+  --danger: #a92135; /* storefront error */
+  --danger-soft: rgba(169, 33, 53, 0.1);
+  --warning: #b7791f;
+  --warning-soft: rgba(183, 121, 31, 0.12);
+  --info: var(--brand);
+  --info-soft: var(--brand-soft);
+
+  /* Surfaces & text — LIGHT (default) */
+  --bg-primary: #f6f6f8; /* ghost_white */
+  --bg-secondary: #efeff2; /* anti_flash_white */
+  --bg-card: #ffffff;
+  --border: #e6e6ec; /* pale_navy */
+  --text-primary: #1b1c1f; /* dark_black */
+  --text-secondary: #4a525d; /* davys_grey */
+
+  /* Chart bridge — resolved by chartSetup.ts via getComputedStyle */
+  --chart-grid: #e6e6ec;
+  --chart-axis: #6b7280; /* text_muted */
+  --chart-tooltip-bg: #ffffff;
+  --chart-tooltip-text: #1b1c1f;
+  --chart-tooltip-muted: #4a525d;
+
+  /* Blue-anchored sequential ramp for NON-platform series.
+     Beyond chart-3 we step into semantic accents rather than random hues. */
+  --chart-1: #0171e4; /* brand */
+  --chart-2: #529df6; /* brand subtle */
+  --chart-3: #95a5dc; /* periwinkle */
+  --chart-4: #1f9d57; /* success */
+  --chart-5: #b7791f; /* warning */
+  --chart-6: #a92135; /* danger */
+}
+
+:root.dark {
+  /* Brand stays vivid; soft fills get a touch more opacity on dark */
+  --brand: #0171e4;
+  --brand-hover: #027df9;
+  --brand-subtle: #529df6;
+  --brand-soft: rgba(2, 125, 249, 0.18);
+
+  --success: #34d27b;
+  --success-soft: rgba(52, 210, 123, 0.16);
+  --danger: #e5556b; /* lightened error for contrast on dark */
+  --danger-soft: rgba(229, 85, 107, 0.16);
+  --warning: #e0a02b;
+  --warning-soft: rgba(224, 160, 43, 0.16);
+  --info: var(--brand-subtle);
+  --info-soft: var(--brand-soft);
+
+  /* Surfaces & text — DARK, re-anchored to dark_black #1B1C1F */
+  --bg-primary: #1b1c1f; /* dark_black */
+  --bg-secondary: #232427; /* one step up from dark_black */
+  --bg-card: #25272b;
+  --border: #34373d;
+  --text-primary: #f6f6f8; /* ghost_white */
+  --text-secondary: #98a1b2; /* text_subtle */
+
+  --chart-grid: #34373d;
+  --chart-axis: #98a1b2;
+  --chart-tooltip-bg: #25272b;
+  --chart-tooltip-text: #f6f6f8;
+  --chart-tooltip-muted: #98a1b2;
+
+  --chart-1: #529df6;
+  --chart-2: #0171e4;
+  --chart-3: #95a5dc;
+  --chart-4: #34d27b;
+  --chart-5: #e0a02b;
+  --chart-6: #e5556b;
 }
 
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'ABC Diatype', system-ui, -apple-system, sans-serif;
+}
+
+/* ---------------------------------------------------------------------------
+   Weekly report body (.report-body).
+
+   The Full Report HTML is generated upstream (n8n) with inline light-theme
+   colours baked into style="" attributes — color:#333/#666/#888 text,
+   background:#f5f5f5 table headers, border:#e0e0e0, and #cc0000/#2a7a2a for
+   down/up deltas. On the dark card those greys are near-invisible and the
+   light header fills clash. We can't edit the generator from here and the
+   content is injected via dangerouslySetInnerHTML, so we neutralise the
+   baked-in colours with theme-aware overrides scoped to .report-body.
+
+   !important is required because inline style attributes outrank normal
+   selectors. Scope keeps it from leaking to the rest of the app.
+--------------------------------------------------------------------------- */
+.report-body,
+.report-body h1,
+.report-body h2,
+.report-body h3,
+.report-body h4,
+.report-body p,
+.report-body li,
+.report-body strong,
+.report-body em,
+.report-body td,
+.report-body th,
+.report-body span {
+  /* Force readable text; neutralises baked-in #333/#666/#888.
+     Spans with explicit semantic colour (deltas) are re-coloured below. */
+  color: var(--text-primary) !important;
+}
+
+/* Secondary / annotation text (the generator uses #666 and #888 for these). */
+.report-body p[style*="#666"],
+.report-body p[style*="#888"],
+.report-body [style*="color:#888"],
+.report-body [style*="color:#666"] {
+  color: var(--text-secondary) !important;
+}
+
+.report-body table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.report-body th {
+  background: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.report-body td {
+  border: 1px solid var(--border) !important;
+}
+
+.report-body hr {
+  border: none !important;
+  border-top: 1px solid var(--border) !important;
+}
+
+/* Up / down deltas: remap the generator's hardcoded greens/reds to the
+   theme's semantic tokens so they stay meaningful and legible on dark. */
+.report-body [style*="#cc0000"],
+.report-body [style*="#c00"],
+.report-body [style*="color:#cc0000"] {
+  color: var(--danger) !important;
+}
+.report-body [style*="#2a7a2a"],
+.report-body [style*="color:#2a7a2a"] {
+  color: var(--success) !important;
 }
 
 /* Custom scrollbar */

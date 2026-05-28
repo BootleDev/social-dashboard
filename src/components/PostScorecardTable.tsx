@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { num, str, formatNumber, formatPercent, formatLocalDate } from "@/lib/utils";
+import { num, str, formatNumber, formatPercent, formatLocalDate, recordReach } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 import { toPost } from "@/lib/types";
@@ -70,12 +70,16 @@ export default function PostScorecardTable({
         ? getDerivedValue(a, sortBy)
         : sortBy === "Published At"
           ? str(a.fields[sortBy])
-          : num(a.fields[sortBy]);
+          : sortBy === "Reach"
+            ? recordReach(a)
+            : num(a.fields[sortBy]);
       const bVal = isDerived
         ? getDerivedValue(b, sortBy)
         : sortBy === "Published At"
           ? str(b.fields[sortBy])
-          : num(b.fields[sortBy]);
+          : sortBy === "Reach"
+            ? recordReach(b)
+            : num(b.fields[sortBy]);
       if (sortDir === "desc") return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
       return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
     });
@@ -140,7 +144,7 @@ export default function PostScorecardTable({
                 str(p.fields["Platform"]),
                 str(p.fields["Post Type"]),
                 formatLocalDate(str(p.fields["Published At"]), timezone || undefined),
-                String(num(p.fields["Reach"])),
+                String(recordReach(p)),
                 (num(p.fields["Engagement Rate"]) * 100).toFixed(2),
                 ((saveRate(post) ?? 0) * 100).toFixed(2),
                 ((viewThroughRate(post) ?? 0) * 100).toFixed(1),
@@ -279,9 +283,9 @@ export default function PostScorecardTable({
                 })()}
               </td>
               <td className="py-2 px-2 text-right">
-                {formatNumber(num(p.fields["Reach"]))}
+                {formatNumber(recordReach(p))}
               </td>
-              <td className="py-2 px-2 text-right text-green-400 font-medium">
+              <td className="py-2 px-2 text-right text-success font-medium">
                 {formatPercent(num(p.fields["Engagement Rate"]) * 100)}
               </td>
               <td className="py-2 px-2 text-right">
@@ -301,7 +305,7 @@ export default function PostScorecardTable({
                   const v = num(p.fields["Skip Rate"]);
                   if (v <= 0) return "\u2014";
                   // Skip Rate is 0-100 (percentage). Tint red when >70% (poor hook).
-                  const cls = v > 70 ? "text-red-400" : v > 50 ? "text-amber-400" : "";
+                  const cls = v > 70 ? "text-danger" : v > 50 ? "text-warning" : "";
                   return <span className={cls}>{v.toFixed(1)}%</span>;
                 })()}
               </td>
