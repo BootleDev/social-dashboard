@@ -7,6 +7,7 @@ import { useChartTheme } from "@/lib/useChartTheme";
 import { getPlatformConfig, platformSortOrder } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
+import { glossaryFor } from "@/lib/metricGlossary";
 import AlertsFeed from "./AlertsFeed";
 import WeeklySummary from "./WeeklySummary";
 import {
@@ -456,6 +457,7 @@ export default function Overview({
           title="Total Reach"
           value={formatNumber(kpis.totalReach)}
           change={kpis.reachChange}
+          tooltip={glossaryFor("Reach")}
           breakdown={kpis.breakdownReach}
         />
         <KPICard
@@ -484,7 +486,7 @@ export default function Overview({
           title="Avg Engagement Rate"
           value={formatPercent(kpis.avgER)}
           change={kpis.erChange}
-          tooltip="Average across all posts in range"
+          tooltip={glossaryFor("Engagement Rate")}
           breakdown={kpis.breakdownER}
         />
         <KPICard
@@ -494,7 +496,7 @@ export default function Overview({
               ? formatPercent(kpis.avgSaveRate * 100)
               : "—"
           }
-          tooltip="Saves / Reach — strong signal for algorithmic distribution"
+          tooltip={glossaryFor("Save Rate")}
           breakdown={kpis.breakdownSaveRate}
         />
         <KPICard

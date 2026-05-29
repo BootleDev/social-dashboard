@@ -12,6 +12,8 @@ import {
   reachScore,
 } from "@/lib/derivedMetrics";
 import { exportToCSV } from "@/lib/csv";
+import { glossaryFor } from "@/lib/metricGlossary";
+import InfoTooltip from "./InfoTooltip";
 
 type SortField =
   | "Published At"
@@ -216,8 +218,20 @@ export default function PostScorecardTable({
                   className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
                   onClick={() => toggleSort(f)}
                 >
-                  {labels[f] ?? f}
-                  {sortBy === f && (sortDir === "desc" ? " \u2193" : " \u2191")}
+                  <span className="inline-flex items-center gap-0.5 justify-end">
+                    {labels[f] ?? f}
+                    {glossaryFor(f) && (
+                      // Stop propagation so tapping the info icon doesn't also
+                      // trigger the column's click-to-sort handler.
+                      <span
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-normal"
+                      >
+                        <InfoTooltip text={glossaryFor(f)!} label={`What is ${f}?`} />
+                      </span>
+                    )}
+                    {sortBy === f && (sortDir === "desc" ? " \u2193" : " \u2191")}
+                  </span>
                 </th>
               );
             })}

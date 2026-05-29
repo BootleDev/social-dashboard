@@ -22,6 +22,8 @@ import {
 } from "@/lib/derivedMetrics";
 import { toPost } from "@/lib/types";
 import type { AirtableRecord } from "@/lib/utils";
+import { glossaryFor } from "@/lib/metricGlossary";
+import InfoTooltip from "./InfoTooltip";
 
 interface DimensionOption {
   label: string;
@@ -400,8 +402,14 @@ export default function DimensionSlicer({ posts }: DimensionSlicerProps) {
           </select>
         </div>
         <div className="flex items-center gap-1.5">
-          <label className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          <label className="text-xs flex items-center gap-1" style={{ color: "var(--text-secondary)" }}>
             Metric
+            {glossaryFor(METRIC_OPTIONS[metricIndex].label) && (
+              <InfoTooltip
+                text={glossaryFor(METRIC_OPTIONS[metricIndex].label)!}
+                label={`What is ${METRIC_OPTIONS[metricIndex].label}?`}
+              />
+            )}
           </label>
           <select
             className={selectClass}

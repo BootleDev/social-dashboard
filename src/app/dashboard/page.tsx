@@ -14,6 +14,7 @@ import { useTimezone } from "@/lib/useTimezone";
 import ChatBox from "@/components/ChatBox";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import OutOfRangeNotice from "@/components/OutOfRangeNotice";
 import { str, getComparisonPeriod, getPlatformKeys } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
@@ -375,6 +376,12 @@ export default function DashboardPage() {
 
         {data && !loading && (
           <ErrorBoundary>
+            <OutOfRangeNotice
+              allPosts={data.posts}
+              filteredPosts={filteredPosts}
+              selectedPlatforms={selectedPlatforms}
+              rangeLabel={dateRange.label}
+            />
             <div role="tabpanel">
               {tab === "pulse" && (
                 <Overview

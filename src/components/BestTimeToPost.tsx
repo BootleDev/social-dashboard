@@ -19,6 +19,8 @@ import StatsPanel from "./StatsPanel";
 import PostDrilldownPanel from "./PostDrilldownPanel";
 import { describe } from "@/lib/stats";
 import type { AirtableRecord } from "@/lib/utils";
+import { glossaryFor } from "@/lib/metricGlossary";
+import InfoTooltip from "./InfoTooltip";
 
 interface BestTimeToPostProps {
   posts: AirtableRecord[];
@@ -265,10 +267,16 @@ export default function BestTimeToPost({
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <label
-            className="text-xs"
+            className="text-xs flex items-center gap-1"
             style={{ color: "var(--text-secondary)" }}
           >
             Metric
+            {glossaryFor(metric.label) && (
+              <InfoTooltip
+                text={glossaryFor(metric.label)!}
+                label={`What is ${metric.label}?`}
+              />
+            )}
           </label>
           <select
             value={metricIdx}
