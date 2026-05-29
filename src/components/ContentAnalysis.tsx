@@ -16,7 +16,6 @@ import {
   formatNumber,
   avgERByDimensionStacked,
   sumByDimensionStacked,
-  sumField,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
@@ -312,20 +311,6 @@ export default function ContentAnalysis({
     };
   }, [scatterPosts, colors]);
 
-  const normalizers = useMemo(() => {
-    const maxVideoViews = posts.reduce(
-      (max, p) => Math.max(max, num(p.fields["Video Views"])),
-      0,
-    );
-    const maxImpressions = posts.reduce(
-      (max, p) => Math.max(max, num(p.fields["Impressions"])),
-      0,
-    );
-    const avgFollowers =
-      posts.length > 0 ? sumField(posts, "Followers") / posts.length : 1;
-    return { maxVideoViews, maxImpressions, avgFollowers };
-  }, [posts]);
-
   // Save-rate distribution stats for the Stats panel on the scatter.
   const scatterSaveStats = useMemo(() => {
     if (scatterPosts.length < 3) return undefined;
@@ -409,7 +394,7 @@ export default function ContentAnalysis({
         <div className="space-y-6">
           <PostScorecardTable posts={posts} timezone={timezone} />
 
-          <DimensionSlicer posts={posts} normalizers={normalizers} />
+          <DimensionSlicer posts={posts} />
 
           <div className="flex items-center gap-2 text-xs">
             <span style={{ color: "var(--text-secondary)" }}>Metric:</span>

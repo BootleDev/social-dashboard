@@ -32,7 +32,6 @@ import {
   reachScore,
   engagementScoreBreakdown,
   reachScoreBreakdown,
-  type ReachNormalizers,
   type ScoreComponent,
 } from "@/lib/derivedMetrics";
 import type { AirtableRecord } from "@/lib/utils";
@@ -57,28 +56,36 @@ function buildScoreTooltip(
   if (breakdowns.length === 0) {
     return `${headline} No scored posts in this period yet.`;
   }
-  const n = breakdowns[0].length;
-  const lines = Array.from({ length: n }, (_, i) => {
-    const label = breakdowns[0][i].label;
-    const max = breakdowns[0][i].max;
-    const avgPoints =
-      breakdowns.reduce((sum, b) => sum + b[i].points, 0) / breakdowns.length;
-    // Average the raw input where it is a percentage; for count-based inputs
-    // (video views / impressions) show the average count.
-    const raws = breakdowns.map((b) => b[i].rawDisplay);
-    const isPct = raws[0].endsWith("%");
-    let rawAvg: string;
-    if (isPct) {
-      const avg =
-        raws.reduce((s, r) => s + parseFloat(r), 0) / raws.length;
-      rawAvg = `${avg.toFixed(2)}%`;
-    } else {
-      const avg =
-        raws.reduce((s, r) => s + parseFloat(r || "0"), 0) / raws.length;
-      rawAvg = `${Math.round(avg)}`;
+  // Aggregate component contributions BY LABEL, not by position — different
+  // platforms have different components (IG: comment/save/ER; Pinterest:
+  // save/outbound-click; FB: ER) so a mixed-platform period must group each
+  // component by its name and average only over the posts that have it.
+  const byLabel = new Map<
+    string,
+    { points: number[]; raws: string[]; max: number; isPct: boolean }
+  >();
+  for (const breakdown of breakdowns) {
+    for (const c of breakdown) {
+      const entry =
+        byLabel.get(c.label) ??
+        { points: [], raws: [], max: c.max, isPct: c.rawDisplay.endsWith("%") };
+      entry.points.push(c.points);
+      entry.raws.push(c.rawDisplay);
+      byLabel.set(c.label, entry);
     }
-    return `• ${label} ${rawAvg} → ${avgPoints.toFixed(1)} / ${max.toFixed(0)} pts`;
+  }
+
+  const mean = (xs: number[]) =>
+    xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
+
+  const lines = Array.from(byLabel.entries()).map(([label, e]) => {
+    const avgPoints = mean(e.points);
+    const rawAvg = e.isPct
+      ? `${mean(e.raws.map((r) => parseFloat(r) || 0)).toFixed(2)}%`
+      : `${Math.round(mean(e.raws.map((r) => parseFloat(r) || 0)))}`;
+    return `• ${label} ${rawAvg} → ${avgPoints.toFixed(1)} / ${e.max.toFixed(0)} pts`;
   });
+
   return `${headline} Averaged across ${breakdowns.length} scored post${
     breakdowns.length === 1 ? "" : "s"
   }: ${lines.join("  ")}`;
@@ -154,21 +161,6 @@ export default function Overview({
         : undefined;
 
     // Composite scores: median across posts that have enough data
-    const normalizers: ReachNormalizers = {
-      maxVideoViews: posts.reduce(
-        (m, p) => Math.max(m, num(p.fields["Video Views"])),
-        0,
-      ),
-      maxImpressions: posts.reduce(
-        (m, p) => Math.max(m, num(p.fields["Impressions"])),
-        0,
-      ),
-      avgFollowers:
-        totalFollowers > 0 && platformKeys.length > 0
-          ? totalFollowers / platformKeys.length
-          : 1,
-    };
-
     const engScores = posts
       .map((p) => engagementScore(toPost(p)))
       .filter((v): v is number => v !== undefined);
@@ -178,7 +170,7 @@ export default function Overview({
         : undefined;
 
     const reachScores = posts
-      .map((p) => reachScore(toPost(p), normalizers))
+      .map((p) => reachScore(toPost(p)))
       .filter((v): v is number => v !== undefined);
     const avgReachScore =
       reachScores.length > 0
@@ -192,15 +184,15 @@ export default function Overview({
       .map((p) => engagementScoreBreakdown(toPost(p)))
       .filter((v): v is ScoreComponent[] => v !== undefined);
     const reachBreakdowns = posts
-      .map((p) => reachScoreBreakdown(toPost(p), normalizers))
+      .map((p) => reachScoreBreakdown(toPost(p)))
       .filter((v): v is ScoreComponent[] => v !== undefined);
 
     const engScoreTooltip = buildScoreTooltip(
-      "Composite 0–100: 40% save rate + 35% engagement rate + 25% comment rate.",
+      "Engagement quality vs platform norms (0–100). 50 = on par with typical for our size, 100 = aspirational. Components benchmarked per platform.",
       engBreakdowns,
     );
     const reachScoreTooltip = buildScoreTooltip(
-      "Composite 0–100: 50% reach rate + 30% video views + 20% impressions, each normalised within this period.",
+      "Distribution vs platform norms (0–100). 50 = on par with typical for our size, 100 = aspirational. Components benchmarked per platform.",
       reachBreakdowns,
     );
 

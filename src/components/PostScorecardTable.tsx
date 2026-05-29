@@ -10,7 +10,6 @@ import {
   viewThroughRate,
   engagementScore,
   reachScore,
-  type ReachNormalizers,
 } from "@/lib/derivedMetrics";
 import { exportToCSV } from "@/lib/csv";
 
@@ -32,19 +31,11 @@ type SortField =
 
 interface PostScorecardTableProps {
   posts: AirtableRecord[];
-  normalizers?: ReachNormalizers;
   timezone?: string;
 }
 
-const DEFAULT_NORMALIZERS: ReachNormalizers = {
-  maxVideoViews: 0,
-  maxImpressions: 0,
-  avgFollowers: 1,
-};
-
 export default function PostScorecardTable({
   posts,
-  normalizers = DEFAULT_NORMALIZERS,
   timezone = "",
 }: PostScorecardTableProps) {
   const [sortBy, setSortBy] = useState<SortField>("Engagement Rate");
@@ -59,7 +50,7 @@ export default function PostScorecardTable({
     if (field === "Save Rate") return saveRate(post) ?? -1;
     if (field === "VTR") return viewThroughRate(post) ?? -1;
     if (field === "Engagement Score") return engagementScore(post) ?? -1;
-    if (field === "Reach Score") return reachScore(post, normalizers) ?? -1;
+    if (field === "Reach Score") return reachScore(post) ?? -1;
     return -1;
   }
 
@@ -84,7 +75,7 @@ export default function PostScorecardTable({
       return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts, sortBy, sortDir, normalizers]);
+  }, [posts, sortBy, sortDir]);
 
   function toggleSort(field: SortField) {
     if (sortBy === field) {
@@ -149,7 +140,7 @@ export default function PostScorecardTable({
                 ((saveRate(post) ?? 0) * 100).toFixed(2),
                 ((viewThroughRate(post) ?? 0) * 100).toFixed(1),
                 (engagementScore(post) ?? 0).toFixed(1),
-                (reachScore(post, normalizers) ?? 0).toFixed(1),
+                (reachScore(post) ?? 0).toFixed(1),
                 num(p.fields["Skip Rate"]).toFixed(1),
                 String(num(p.fields["Reposts"])),
                 String(num(p.fields["Saves"])),
@@ -298,7 +289,7 @@ export default function PostScorecardTable({
                 {(() => { const v = engagementScore(toPost(p)); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
               </td>
               <td className="py-2 px-2 text-right">
-                {(() => { const v = reachScore(toPost(p), normalizers); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
+                {(() => { const v = reachScore(toPost(p)); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
               </td>
               <td className="py-2 px-2 text-right">
                 {(() => {

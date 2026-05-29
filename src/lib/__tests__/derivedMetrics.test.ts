@@ -119,23 +119,17 @@ describe("engagementScore", () => {
 });
 
 describe("reachScore", () => {
-  const normalizers = { maxVideoViews: 2000, maxImpressions: 3000, avgFollowers: 5000 };
-
   it("returns a number 0–100", () => {
-    const score = reachScore(makePost(), normalizers);
+    const score = reachScore(makePost());
     expect(score).toBeDefined();
     expect(score!).toBeGreaterThanOrEqual(0);
     expect(score!).toBeLessThanOrEqual(100);
   });
 
-  it("returns undefined when avgFollowers is 0", () => {
-    expect(reachScore(makePost(), { ...normalizers, avgFollowers: 0 })).toBeUndefined();
-  });
-
   it("scores higher for better reach", () => {
     const low = makePost({ reach: 100, videoViews: 50 });
     const high = makePost({ reach: 4000, videoViews: 1800 });
-    expect(reachScore(high, normalizers)!).toBeGreaterThan(reachScore(low, normalizers)!);
+    expect(reachScore(high)!).toBeGreaterThan(reachScore(low)!);
   });
 });
 

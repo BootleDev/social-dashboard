@@ -1,12 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
 import BestTimeToPost from "./BestTimeToPost";
 import PinterestInsights from "./PinterestInsights";
 import CompetitorInsights from "./CompetitorInsights";
 import UpcomingWindows from "./UpcomingWindows";
 import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
-import { num, sumField } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface PlanningPanelProps {
@@ -55,20 +53,6 @@ export default function PlanningPanel({
     VALID_KEYS,
   );
 
-  const normalizers = useMemo(() => {
-    const maxVideoViews = posts.reduce(
-      (max, p) => Math.max(max, num(p.fields["Video Views"])),
-      0,
-    );
-    const maxImpressions = posts.reduce(
-      (max, p) => Math.max(max, num(p.fields["Impressions"])),
-      0,
-    );
-    const avgFollowers =
-      posts.length > 0 ? sumField(posts, "Followers") / posts.length : 1;
-    return { maxVideoViews, maxImpressions, avgFollowers };
-  }, [posts]);
-
   return (
     <div className="space-y-4">
       <SubNav
@@ -86,7 +70,6 @@ export default function PlanningPanel({
           <BestTimeToPost
             posts={posts}
             timezone={timezone}
-            normalizers={normalizers}
           />
         </Section>
       )}

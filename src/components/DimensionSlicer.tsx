@@ -19,7 +19,6 @@ import {
   watchTimePct,
   engagementScore,
   reachScore,
-  type ReachNormalizers,
 } from "@/lib/derivedMetrics";
 import { toPost } from "@/lib/types";
 import type { AirtableRecord } from "@/lib/utils";
@@ -31,7 +30,7 @@ interface DimensionOption {
 
 interface MetricOption {
   label: string;
-  getMetric: (r: AirtableRecord, normalizers: ReachNormalizers) => number | undefined;
+  getMetric: (r: AirtableRecord) => number | undefined;
   format: (v: number) => string;
   yLabel: string;
 }
@@ -135,9 +134,9 @@ const METRIC_OPTIONS: MetricOption[] = [
   },
   {
     label: "Reach Score",
-    getMetric: (r, normalizers) => {
+    getMetric: (r) => {
       const p = toPost(r);
-      return reachScore(p, normalizers);
+      return reachScore(p);
     },
     format: (v) => v.toFixed(1),
     yLabel: "Reach Score (0–100)",
@@ -188,7 +187,6 @@ const METRIC_OPTIONS: MetricOption[] = [
 
 interface DimensionSlicerProps {
   posts: AirtableRecord[];
-  normalizers: ReachNormalizers;
 }
 
 /** Minimum fill-rate (0-1) below which an option is considered unusable. */
@@ -216,20 +214,19 @@ function computeDimAvailability(
 function computeMetricAvailability(
   posts: AirtableRecord[],
   options: typeof METRIC_OPTIONS,
-  normalizers: ReachNormalizers,
 ): boolean[] {
   if (posts.length === 0) return options.map(() => false);
   return options.map((opt) => {
     let filled = 0;
     for (const r of posts) {
-      const v = opt.getMetric(r, normalizers);
+      const v = opt.getMetric(r);
       if (v !== undefined && Number.isFinite(v) && v !== 0) filled++;
     }
     return filled / posts.length >= MIN_FILL_RATE;
   });
 }
 
-export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerProps) {
+export default function DimensionSlicer({ posts }: DimensionSlicerProps) {
   const { colors, defaultOptions } = useChartTheme();
   const [dimIndex, setDimIndex] = useState(0);
   const [metricIndex, setMetricIndex] = useState(0);
@@ -243,8 +240,8 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
     [posts],
   );
   const metricAvailable = useMemo(
-    () => computeMetricAvailability(posts, METRIC_OPTIONS, normalizers),
-    [posts, normalizers],
+    () => computeMetricAvailability(posts, METRIC_OPTIONS),
+    [posts],
   );
 
   // Auto-fall-back to a populated option if the current selection became empty
@@ -280,7 +277,7 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
     const grouped = groupByDimension(
       posts,
       dim.getKey,
-      (r) => metric.getMetric(r, normalizers),
+      (r) => metric.getMetric(r),
     ).filter((g) => g.label !== "untagged" && g.label !== "");
 
     return {
@@ -295,7 +292,7 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
         },
       ],
     };
-  }, [posts, dim, metric, normalizers, colors]);
+  }, [posts, dim, metric, colors]);
 
   // Bucket-label lookup (chart bar index → raw bucket key, since the chart
   // labels include the count suffix like "Question (49)").
@@ -303,10 +300,10 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
     const grouped = groupByDimension(
       posts,
       dim.getKey,
-      (r) => metric.getMetric(r, normalizers),
+      (r) => metric.getMetric(r),
     ).filter((g) => g.label !== "untagged" && g.label !== "");
     return grouped.map((g) => g.label);
-  }, [posts, dim, metric, normalizers]);
+  }, [posts, dim, metric]);
 
   // Per-group raw metric values. Used to detect outliers and surface the
   // "remove this one post and the average halves" callout. We deliberately
@@ -317,14 +314,14 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
     for (const r of posts) {
       const key = dim.getKey(r) || "untagged";
       if (key === "untagged" || key === "") continue;
-      const v = metric.getMetric(r, normalizers);
+      const v = metric.getMetric(r);
       if (v === undefined || !Number.isFinite(v)) continue;
       const arr = map.get(key) ?? [];
       arr.push(v);
       map.set(key, arr);
     }
     return map;
-  }, [posts, dim, metric, normalizers]);
+  }, [posts, dim, metric]);
 
   // Stats across the full population of metric values (all groups). Powers
   // the Stats panel — quick read of distribution shape without the user
@@ -459,7 +456,7 @@ export default function DimensionSlicer({ posts, normalizers }: DimensionSlicerP
           posts={drilldownPosts}
           bucketLabel={`${dim.label}: ${drilldownBucket}`}
           metricLabel={metric.label}
-          getMetricValue={(r) => metric.getMetric(r, normalizers)}
+          getMetricValue={(r) => metric.getMetric(r)}
           formatMetric={metric.format}
           onClose={() => setDrilldownBucket(null)}
         />

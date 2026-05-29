@@ -13,7 +13,6 @@ import {
   saveRate,
   shareRate,
   viewThroughRate,
-  type ReachNormalizers,
 } from "@/lib/derivedMetrics";
 import ChartCard from "./ChartCard";
 import StatsPanel from "./StatsPanel";
@@ -24,14 +23,7 @@ import type { AirtableRecord } from "@/lib/utils";
 interface BestTimeToPostProps {
   posts: AirtableRecord[];
   timezone: string;
-  normalizers?: ReachNormalizers;
 }
-
-const DEFAULT_NORMALIZERS: ReachNormalizers = {
-  maxVideoViews: 0,
-  maxImpressions: 0,
-  avgFollowers: 1,
-};
 
 interface MetricOption {
   label: string;
@@ -162,7 +154,6 @@ function intensityColor(intensity: number): string {
 export default function BestTimeToPost({
   posts,
   timezone,
-  normalizers = DEFAULT_NORMALIZERS,
 }: BestTimeToPostProps) {
   const [metricIdx, setMetricIdx] = useState(0);
   // Default to ≥5 posts per slot: any "best time" claim with sample n<5 is
@@ -175,7 +166,6 @@ export default function BestTimeToPost({
   } | null>(null);
 
   const metric = METRICS[metricIdx];
-  void normalizers; // reserved for derived metrics that need normalizers later
 
   const grid = useMemo(
     () => buildGrid(posts, timezone, metric),
