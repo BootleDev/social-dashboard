@@ -6,6 +6,8 @@ import "@/lib/chartSetup";
 import { useChartTheme } from "@/lib/useChartTheme";
 import { getPlatformConfig } from "@/lib/platforms";
 import ChartCard from "./ChartCard";
+import { toPost } from "@/lib/types";
+import { engagementScore, reachScore } from "@/lib/derivedMetrics";
 import {
   num,
   str,
@@ -14,6 +16,7 @@ import {
   avgField,
   sumField,
   sumReach,
+  recordReach,
   groupByPlatform,
   getPlatformKeys,
   buildUnifiedDates,
@@ -36,6 +39,34 @@ interface PlatformKPIs {
   avgShares: number;
   profileViews: number;
   webClicks: number;
+  // Expansion metrics
+  reachPerPost: number;
+  engagementPerPost: number;
+  avgEngScore: number | undefined;
+  avgReachScore: number | undefined;
+}
+
+/** Mean of defined composite scores across a platform's posts. */
+function avgScore(
+  records: AirtableRecord[],
+  fn: (p: ReturnType<typeof toPost>) => number | undefined,
+): number | undefined {
+  const vals = records
+    .map((r) => fn(toPost(r)))
+    .filter((v): v is number => v !== undefined);
+  if (vals.length === 0) return undefined;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+/** ISO-week (Sunday start, UTC) key for a post's Published At. "" if undated. */
+function weekKey(record: AirtableRecord): string {
+  const dateStr = str(record.fields["Published At"]);
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  const weekStart = new Date(d);
+  weekStart.setUTCDate(d.getUTCDate() - d.getUTCDay());
+  return weekStart.toISOString().split("T")[0];
 }
 
 function PlatformCard({
@@ -49,11 +80,21 @@ function PlatformCard({
 
   const rows = [
     { label: "Followers", value: formatNumber(kpis.followers) },
+    { label: "Posts", value: String(kpis.posts) },
     { label: "Avg ER", value: formatPercent(kpis.avgER) },
     { label: "Total Reach", value: formatNumber(kpis.totalReach) },
-    { label: "Posts", value: String(kpis.posts) },
-    { label: "Profile Views", value: formatNumber(kpis.profileViews) },
+    { label: "Impressions", value: formatNumber(kpis.totalImpressions) },
     { label: "Web Clicks", value: formatNumber(kpis.webClicks) },
+    { label: "Reach / Post", value: formatNumber(kpis.reachPerPost) },
+    { label: "Eng / Post", value: formatNumber(kpis.engagementPerPost) },
+    { label: "Profile Views", value: formatNumber(kpis.profileViews) },
+  ];
+
+  // Per-post benchmark scores, shown as a compact 0–100 pair so channels are
+  // comparable on the same scale (50 = on par for that platform).
+  const scorePills = [
+    { label: "Eng Score", value: kpis.avgEngScore },
+    { label: "Reach Score", value: kpis.avgReachScore },
   ];
 
   return (
@@ -77,6 +118,28 @@ function PlatformCard({
               {row.label}
             </p>
             <p className="text-lg font-bold">{row.value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2 pt-1">
+        {scorePills.map((s) => (
+          <div
+            key={s.label}
+            className="flex-1 rounded-lg px-2 py-1.5"
+            style={{ background: "var(--bg-secondary)" }}
+          >
+            <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>
+              {s.label}
+            </p>
+            <p className="text-sm font-bold" style={{ color: config.color }}>
+              {s.value !== undefined ? s.value.toFixed(0) : "—"}
+              <span
+                className="text-[10px] font-normal ml-0.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                /100
+              </span>
+            </p>
           </div>
         ))}
       </div>
@@ -110,54 +173,49 @@ export default function PlatformCompare({
       const metrics = metricsMap.get(key) ?? [];
       const platformPosts = postsMap.get(key) ?? [];
       const latest = metrics[0];
+      const n = platformPosts.length;
+
+      const totalReach = sumReach(metrics);
+      // Per-post reach uses the posts' own reach (Pinterest-substituted), not
+      // the daily-metrics total, so it reflects what each post actually pulled.
+      const postReachTotal = platformPosts.reduce(
+        (s, p) => s + recordReach(p),
+        0,
+      );
+      const postEngagementTotal = platformPosts.reduce(
+        (s, p) =>
+          s +
+          num(p.fields["Likes"]) +
+          num(p.fields["Comments"]) +
+          num(p.fields["Saves"]) +
+          num(p.fields["Shares"]),
+        0,
+      );
 
       result[key] = {
         followers: latest ? num(latest.fields["Followers"]) : 0,
         avgER: avgField(platformPosts, "Engagement Rate") * 100,
-        totalReach: sumReach(metrics),
+        totalReach,
         totalImpressions: sumField(metrics, "Impressions"),
-        posts: platformPosts.length,
-        avgSaves:
-          platformPosts.length > 0
-            ? sumField(platformPosts, "Saves") / platformPosts.length
-            : 0,
-        avgShares:
-          platformPosts.length > 0
-            ? sumField(platformPosts, "Shares") / platformPosts.length
-            : 0,
+        posts: n,
+        avgSaves: n > 0 ? sumField(platformPosts, "Saves") / n : 0,
+        avgShares: n > 0 ? sumField(platformPosts, "Shares") / n : 0,
         profileViews: sumField(metrics, "Profile Views"),
         webClicks: sumField(metrics, "Website Clicks"),
+        reachPerPost: n > 0 ? postReachTotal / n : 0,
+        engagementPerPost: n > 0 ? postEngagementTotal / n : 0,
+        avgEngScore: avgScore(platformPosts, engagementScore),
+        avgReachScore: avgScore(platformPosts, reachScore),
       };
     }
 
     return result;
   }, [platformKeys, metricsMap, postsMap]);
 
-  // Bar comparison chart
-  const comparisonData = useMemo(
-    () => ({
-      labels: ["Avg ER %", "Avg Saves/Post", "Avg Shares/Post"],
-      datasets: platformKeys.map((key) => {
-        const config = getPlatformConfig(key);
-        const k = kpiMap[key];
-        return {
-          label: config.label,
-          data: [k.avgER, k.avgSaves, k.avgShares],
-          backgroundColor: config.color + "80",
-          borderColor: config.color,
-          borderWidth: 1,
-        };
-      }),
-    }),
-    [platformKeys, kpiMap],
-  );
-
   // Unified date array
   const allDates = useMemo(
     () =>
-      buildUnifiedDates(
-        ...platformKeys.map((k) => metricsMap.get(k) ?? []),
-      ),
+      buildUnifiedDates(...platformKeys.map((k) => metricsMap.get(k) ?? [])),
     [platformKeys, metricsMap],
   );
 
@@ -194,7 +252,11 @@ export default function PlatformCompare({
         const metrics = metricsMap.get(key) ?? [];
         return {
           label: `${config.label} Reach`,
-          data: alignToDateArray(metrics, allDates, key === "pinterest" ? "Impressions" : "Reach"),
+          data: alignToDateArray(
+            metrics,
+            allDates,
+            key === "pinterest" ? "Impressions" : "Reach",
+          ),
           borderColor: config.color,
           backgroundColor: config.colorFill,
           fill: true,
@@ -205,7 +267,114 @@ export default function PlatformCompare({
     };
   }, [platformKeys, metricsMap, allDates]);
 
-  // Post type breakdown per platform
+  // Posts by channel over time — stacked weekly cadence per platform.
+  const postsByWeekData = useMemo(() => {
+    // week -> platform -> count
+    const weeks = new Map<string, Map<string, number>>();
+    for (const key of platformKeys) {
+      for (const p of postsMap.get(key) ?? []) {
+        const w = weekKey(p);
+        if (!w) continue;
+        const row = weeks.get(w) ?? new Map<string, number>();
+        row.set(key, (row.get(key) ?? 0) + 1);
+        weeks.set(w, row);
+      }
+    }
+    const sortedWeeks = Array.from(weeks.keys()).sort((a, b) =>
+      a.localeCompare(b),
+    );
+    return {
+      labels: sortedWeeks.map((w) => w.slice(5)),
+      datasets: platformKeys.map((key) => {
+        const config = getPlatformConfig(key);
+        return {
+          label: config.label,
+          data: sortedWeeks.map((w) => weeks.get(w)?.get(key) ?? 0),
+          backgroundColor: config.color + "cc",
+          borderColor: config.color,
+          borderWidth: 1,
+          stack: "posts",
+        };
+      }),
+    };
+  }, [platformKeys, postsMap]);
+
+  const postsByWeekOptions = useMemo(
+    () => ({
+      ...defaultOptions,
+      scales: {
+        x: { ...defaultOptions.scales.x, stacked: true },
+        y: { ...defaultOptions.scales.y, stacked: true },
+      },
+    }),
+    [defaultOptions],
+  );
+
+  // Share of voice — one horizontal stacked bar = % of total output per channel.
+  const totalPosts = useMemo(
+    () => platformKeys.reduce((s, k) => s + (kpiMap[k]?.posts ?? 0), 0),
+    [platformKeys, kpiMap],
+  );
+
+  // Rate-based comparison (all %, internally consistent axis).
+  const rateComparison = useMemo(
+    () => ({
+      labels: ["Avg ER %", "Save Rate %", "Comment Rate %"],
+      datasets: platformKeys.map((key) => {
+        const config = getPlatformConfig(key);
+        const platformPosts = postsMap.get(key) ?? [];
+        const reachTotal = platformPosts.reduce(
+          (s, p) => s + recordReach(p),
+          0,
+        );
+        const saves = sumField(platformPosts, "Saves");
+        const comments = sumField(platformPosts, "Comments");
+        const saveRatePct = reachTotal > 0 ? (saves / reachTotal) * 100 : 0;
+        const commentRatePct =
+          reachTotal > 0 ? (comments / reachTotal) * 100 : 0;
+        return {
+          label: config.label,
+          data: [kpiMap[key].avgER, saveRatePct, commentRatePct],
+          backgroundColor: config.color + "80",
+          borderColor: config.color,
+          borderWidth: 1,
+        };
+      }),
+    }),
+    [platformKeys, postsMap, kpiMap],
+  );
+
+  // Score comparison (0–100, apples-to-apples across channels).
+  const scoreComparison = useMemo(
+    () => ({
+      labels: ["Engagement Score", "Reach Score"],
+      datasets: platformKeys.map((key) => {
+        const config = getPlatformConfig(key);
+        const k = kpiMap[key];
+        return {
+          label: config.label,
+          data: [k.avgEngScore ?? 0, k.avgReachScore ?? 0],
+          backgroundColor: config.color + "80",
+          borderColor: config.color,
+          borderWidth: 1,
+        };
+      }),
+    }),
+    [platformKeys, kpiMap],
+  );
+
+  const scoreComparisonOptions = useMemo(
+    () => ({
+      ...defaultOptions,
+      scales: {
+        x: { ...defaultOptions.scales.x },
+        y: { ...defaultOptions.scales.y, min: 0, max: 100 },
+      },
+    }),
+    [defaultOptions],
+  );
+
+  // Content mix (post type) per platform — unchanged.
   const postTypeComparison = useMemo(() => {
     const typeMaps = new Map<string, Map<string, number>>();
     const allTypes = new Set<string>();
@@ -268,6 +437,63 @@ export default function PlatformCompare({
         ))}
       </div>
 
+      {/* Share of voice — where our output goes */}
+      {totalPosts > 0 && (
+        <div
+          className="rounded-xl p-5"
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <h3
+            className="text-base font-medium mb-3"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            Share of Voice ({totalPosts} posts)
+          </h3>
+          <div className="flex w-full h-6 rounded-md overflow-hidden">
+            {platformKeys.map((key) => {
+              const config = getPlatformConfig(key);
+              const pct = ((kpiMap[key]?.posts ?? 0) / totalPosts) * 100;
+              if (pct === 0) return null;
+              return (
+                <div
+                  key={key}
+                  style={{ width: `${pct}%`, background: config.color }}
+                  title={`${config.label}: ${kpiMap[key].posts} posts (${pct.toFixed(0)}%)`}
+                  className="flex items-center justify-center"
+                >
+                  {pct >= 8 && (
+                    <span className="text-[10px] font-semibold text-white">
+                      {pct.toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap gap-3 mt-2">
+            {platformKeys.map((key) => {
+              const config = getPlatformConfig(key);
+              return (
+                <span
+                  key={key}
+                  className="flex items-center gap-1 text-[10px]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  <span
+                    className="inline-block w-2 h-2 rounded-full"
+                    style={{ background: config.color }}
+                  />
+                  {config.label} · {kpiMap[key].posts}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Trend Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="Engagement Rate Comparison">
@@ -279,11 +505,29 @@ export default function PlatformCompare({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Performance Comparison">
-          <Bar data={comparisonData} options={defaultOptions} />
+        <ChartCard
+          title="Posts by Channel Over Time"
+          tooltip="Posts published per week, stacked by platform — posting cadence and channel mix over the selected period."
+        >
+          <Bar data={postsByWeekData} options={postsByWeekOptions} />
         </ChartCard>
         <ChartCard title="Content Mix by Platform">
           <Bar data={postTypeComparison} options={defaultOptions} />
+        </ChartCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ChartCard
+          title="Engagement Quality (rates)"
+          tooltip="Rate-based metrics on a single % axis — average engagement rate, save rate, and comment rate per platform."
+        >
+          <Bar data={rateComparison} options={defaultOptions} />
+        </ChartCard>
+        <ChartCard
+          title="Benchmark Scores by Platform"
+          tooltip="Per-post Engagement and Reach scores (0–100, benchmarked to each platform's norms; 50 = on par for that platform)."
+        >
+          <Bar data={scoreComparison} options={scoreComparisonOptions} />
         </ChartCard>
       </div>
     </div>
