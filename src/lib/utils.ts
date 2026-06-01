@@ -87,12 +87,40 @@ const DERIVED_ACCOUNT_METRIC_ER_TYPES = new Set([
 ]);
 
 /**
- * True when a Daily Account Metrics row's account-level Impressions/Reach is a
- * real same-day measurement (safe to sum into a headline total), false when it
- * was derived/backfilled and should be excluded. Rows with no ER Type are
- * treated as real (legacy rows predate the tagging).
+ * Per-metric provenance value (WEBDEV-146) marking a real same-day measurement,
+ * safe to sum into a per-day window total. `null` means no honest per-day value
+ * exists; `period_aggregate` is a labelled window total (never per-day);
+ * `pending`/`settled` track late-settling days. Only `daily_real` counts as
+ * real per-day volume.
+ */
+const DAILY_REAL_SOURCE = "daily_real";
+
+/** Source columns whose value decides whether a fact row carries real per-day volume. */
+const ACCOUNT_VOLUME_SOURCE_FIELDS = ["Reach Source", "Impressions Source"] as const;
+
+/**
+ * True when an account row's per-day Impressions/Reach is a real same-day
+ * measurement (safe to sum into a headline total), false otherwise.
+ *
+ * Two data shapes are supported during the WEBDEV-146 migration:
+ *  - Account Daily Facts rows carry explicit per-metric Source columns. These
+ *    are authoritative: the row has real volume iff at least one volume Source
+ *    is `daily_real`. A row whose volume Sources are all `null` is honestly
+ *    absent (e.g. IG has no per-day Impressions) and is excluded. `Period
+ *    Source`/`period_aggregate` is ignored here — it is a labelled window total,
+ *    never per-day volume.
+ *  - Legacy Daily Account Metrics rows have no Source columns; fall back to the
+ *    overloaded `ER Type` denylist. Rows with no ER Type are treated as real
+ *    (they predate the tagging).
  */
 export function hasRealAccountVolume(record: AirtableRecord): boolean {
+  const sources = ACCOUNT_VOLUME_SOURCE_FIELDS.map((f) =>
+    str(record.fields[f]).trim(),
+  ).filter((v) => v.length > 0);
+  if (sources.length > 0) {
+    return sources.some((s) => s === DAILY_REAL_SOURCE);
+  }
+
   const erType = str(record.fields["ER Type"]).trim();
   if (!erType) return true;
   return !DERIVED_ACCOUNT_METRIC_ER_TYPES.has(erType);

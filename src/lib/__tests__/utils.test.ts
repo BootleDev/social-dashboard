@@ -113,6 +113,56 @@ describe("hasRealAccountVolume", () => {
     expect(hasRealAccountVolume(makeRecord({ Impressions: 100 }))).toBe(true);
     expect(hasRealAccountVolume(makeRecord({ "ER Type": "" }))).toBe(true);
   });
+
+  // WEBDEV-146: daily-facts rows carry explicit per-metric Source columns
+  // instead of the overloaded ER Type. When a Source column is present it is
+  // authoritative; ER Type is only consulted for legacy Daily Account Metrics
+  // rows that have no Source columns.
+  it("counts a fact row as real when a volume Source is daily_real", () => {
+    expect(
+      hasRealAccountVolume(
+        makeRecord({ "Reach Source": "daily_real", "Impressions Source": "null" }),
+      ),
+    ).toBe(true);
+    expect(
+      hasRealAccountVolume(
+        makeRecord({ "Reach Source": "null", "Impressions Source": "daily_real" }),
+      ),
+    ).toBe(true);
+  });
+  it("excludes a fact row whose volume Sources are all null (honestly absent)", () => {
+    expect(
+      hasRealAccountVolume(
+        makeRecord({ "Reach Source": "null", "Impressions Source": "null" }),
+      ),
+    ).toBe(false);
+  });
+  it("ignores period_aggregate Sources when judging per-day volume", () => {
+    // A period_aggregate value is a labelled 30d total, never a per-day measure;
+    // it must not make a row count as real per-day volume.
+    expect(
+      hasRealAccountVolume(
+        makeRecord({
+          "Reach Source": "null",
+          "Impressions Source": "null",
+          "Period Source": "period_aggregate",
+        }),
+      ),
+    ).toBe(false);
+  });
+  it("prefers Source columns over ER Type when both are present", () => {
+    // A fact row that somehow also carries a legacy ER Type is judged by its
+    // Source columns, not the stale flag.
+    expect(
+      hasRealAccountVolume(
+        makeRecord({
+          "Reach Source": "daily_real",
+          "Impressions Source": "null",
+          "ER Type": "period_average",
+        }),
+      ),
+    ).toBe(true);
+  });
 });
 
 // --- str ---

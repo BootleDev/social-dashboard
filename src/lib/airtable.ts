@@ -12,6 +12,11 @@ export const TABLES = {
   PINTEREST_TRENDS_KEYWORDS: "tblZ4f4TXc92jakq8",
   PINTEREST_TOP_PINS: "tblEuz0kmposwh81J",
   SEASONAL_OPPORTUNITIES: "tbl5z2eAZakyz3ZZh",
+  // WEBDEV-146: append-only daily-facts model (one row per platform|date, with
+  // per-metric Source provenance). Source of truth that DAILY_ACCOUNT_METRICS
+  // becomes a derived rollup of. Populated by the Social Data Refresher.
+  ACCOUNT_DAILY_FACTS: "tblgKAMI1pF3FjQGo",
+  POST_DAILY_FACTS: "tblz1pSPb5ByXZMHe",
 } as const;
 
 interface AirtableRecord {
@@ -106,6 +111,19 @@ export async function getPosts(opts: { noCache?: boolean } = {}) {
 
 export async function getDailyAccountMetrics(opts: { noCache?: boolean } = {}) {
   return fetchAllRecords(TABLES.DAILY_ACCOUNT_METRICS, {
+    sort: [{ field: "Date", direction: "desc" }],
+    noCache: opts.noCache,
+  });
+}
+
+/**
+ * WEBDEV-146: account-level daily facts (one row per platform|date) with
+ * per-metric Source provenance columns. Sorted newest-first, like the legacy
+ * Daily Account Metrics. The dashboard will migrate window aggregation onto
+ * this table once the Refresher is populating it; until then it reads empty.
+ */
+export async function getAccountDailyFacts(opts: { noCache?: boolean } = {}) {
+  return fetchAllRecords(TABLES.ACCOUNT_DAILY_FACTS, {
     sort: [{ field: "Date", direction: "desc" }],
     noCache: opts.noCache,
   });
