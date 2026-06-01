@@ -1,4 +1,4 @@
-import { num, str, type AirtableRecord } from "./utils";
+import { num, str, count, type AirtableRecord } from "./utils";
 
 export interface Post {
   id: string;
@@ -62,20 +62,24 @@ export function toPost(r: AirtableRecord): Post {
     mediaUrl: str(r.fields["Media URL"]),
     hashtags: str(r.fields["Hashtags"]),
 
-    reach: num(r.fields["Reach"]),
-    impressions: num(r.fields["Impressions"]),
+    // Count fields → count(): non-negative integers; a negative or fractional
+    // tally is a data error and must not drag a reach/engagement total.
+    reach: count(r.fields["Reach"]),
+    impressions: count(r.fields["Impressions"]),
+    // Rates/durations stay num(): legitimately fractional, ER can't be negative
+    // but we keep it signed-tolerant and let consumers floor the denominator.
     engagementRate: num(r.fields["Engagement Rate"]),
-    likes: num(r.fields["Likes"]),
-    comments: num(r.fields["Comments"]),
-    saves: num(r.fields["Saves"]),
-    shares: num(r.fields["Shares"]),
-    videoViews: num(r.fields["Video Views"]),
-    linkClicks: num(r.fields["Link Clicks"]),
+    likes: count(r.fields["Likes"]),
+    comments: count(r.fields["Comments"]),
+    saves: count(r.fields["Saves"]),
+    shares: count(r.fields["Shares"]),
+    videoViews: count(r.fields["Video Views"]),
+    linkClicks: count(r.fields["Link Clicks"]),
     videoLengthSec: num(r.fields["Video Length (s)"]),
     avgWatchTimeSec: num(r.fields["Avg Watch Time (s)"]),
     skipRate: num(r.fields["Skip Rate"]),
     videoViewTotalTimeSec: num(r.fields["Video View Total Time"]),
-    reposts: num(r.fields["Reposts"]),
+    reposts: count(r.fields["Reposts"]),
 
     contentTheme: str(r.fields["Content Theme"]),
     hookPresent: Boolean(r.fields["Hook Present"]),

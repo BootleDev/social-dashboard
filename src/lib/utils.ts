@@ -8,10 +8,39 @@ export type AirtableRecord = {
   createdTime: string;
 };
 
+/**
+ * Parse an Airtable cell to a finite number, defaulting to 0.
+ *
+ * Rejects NaN and ±Infinity (returns 0) so a single corrupt value can't
+ * poison a downstream sum or average — `parseFloat("1e999")` is `Infinity`,
+ * `Number("Infinity")` is `Infinity`, and both would otherwise propagate
+ * through sumReach/avgField and read as an `Infinity` KPI. Negatives are
+ * passed through because some legitimate fields are signed (e.g. Followers
+ * Gained can be net-negative); count-style fields that must be non-negative
+ * should be read via `count()` instead.
+ */
 export function num(val: unknown): number {
-  if (typeof val === "number") return val;
-  if (typeof val === "string") return parseFloat(val) || 0;
+  if (typeof val === "number") return Number.isFinite(val) ? val : 0;
+  if (typeof val === "string") {
+    const parsed = parseFloat(val);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
   return 0;
+}
+
+/**
+ * Parse a count metric (reach, engagement, impressions, likes, saves, shares,
+ * comments, video views, link clicks, followers) to a non-negative integer.
+ *
+ * These are tallies — they cannot be fractional or negative. A negative value
+ * is a data error (bad upstream delta, sign flip) and clamps to 0 rather than
+ * dragging a sum down; a fractional value is floored. Built on `num()`, so it
+ * inherits the NaN/Infinity rejection. Use this for any field that feeds a
+ * reach or engagement total on the Pulse tab.
+ */
+export function count(val: unknown): number {
+  const n = num(val);
+  return n > 0 ? Math.floor(n) : 0;
 }
 
 export function str(val: unknown): string {
@@ -32,10 +61,41 @@ export function str(val: unknown): string {
 export function recordReach(record: AirtableRecord): number {
   const platform = str(record.fields["Platform"]).toLowerCase().trim();
   if (platform === "pinterest") {
-    const impressions = num(record.fields["Impressions"]);
-    return impressions > 0 ? impressions : num(record.fields["Reach"]);
+    const impressions = count(record.fields["Impressions"]);
+    return impressions > 0 ? impressions : count(record.fields["Reach"]);
   }
-  return num(record.fields["Reach"]);
+  return count(record.fields["Reach"]);
+}
+
+/**
+ * ER Type values on Daily Account Metrics rows whose account-level Impressions
+ * and Reach are SYNTHESIZED, not measured. Instagram retired the account-level
+ * impressions metric, so the Social Data Refresher backfills these rows by
+ * deriving from per-post data (`posts_derived_daily`) or carrying a period
+ * average (`period_average`). The derived account-level Impressions/Reach on
+ * such rows is a placeholder (observed: a flat 299 across consecutive IG days),
+ * so summing it into a Pulse KPI reports a fabricated total. Only rows tagged
+ * `daily` carry a genuine same-day account-level measurement.
+ *
+ * This does NOT taint Engagement Rate on these rows — the derived ER is the
+ * intended value. It only marks the volume counts (Impressions/Reach) as
+ * non-authoritative for headline totals.
+ */
+const DERIVED_ACCOUNT_METRIC_ER_TYPES = new Set([
+  "posts_derived_daily",
+  "period_average",
+]);
+
+/**
+ * True when a Daily Account Metrics row's account-level Impressions/Reach is a
+ * real same-day measurement (safe to sum into a headline total), false when it
+ * was derived/backfilled and should be excluded. Rows with no ER Type are
+ * treated as real (legacy rows predate the tagging).
+ */
+export function hasRealAccountVolume(record: AirtableRecord): boolean {
+  const erType = str(record.fields["ER Type"]).trim();
+  if (!erType) return true;
+  return !DERIVED_ACCOUNT_METRIC_ER_TYPES.has(erType);
 }
 
 export function formatNumber(value: number): string {

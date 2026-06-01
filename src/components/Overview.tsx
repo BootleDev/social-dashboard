@@ -20,6 +20,7 @@ import {
   sumField,
   recordReach,
   sumReach,
+  hasRealAccountVolume,
   avgField,
   groupByPlatform,
   getPlatformKeys,
@@ -99,6 +100,8 @@ interface OverviewProps {
   weeklySummaries: AirtableRecord[];
   prevPosts: AirtableRecord[];
   prevDailyMetrics: AirtableRecord[];
+  /** Open the post drilldown for a post-linked alert. */
+  onSelectPost: (post: AirtableRecord) => void;
 }
 
 export default function Overview({
@@ -108,6 +111,7 @@ export default function Overview({
   weeklySummaries,
   prevPosts,
   prevDailyMetrics,
+  onSelectPost,
 }: OverviewProps) {
   const { colors, defaultOptions, lineChartOptions } = useChartTheme();
 
@@ -138,11 +142,17 @@ export default function Overview({
     const avgER = avgField(posts, "Engagement Rate") * 100;
     const prevAvgER = avgField(prevPosts, "Engagement Rate") * 100;
 
-    const totalReach = sumReach(dailyMetrics);
-    const prevTotalReach = sumReach(prevDailyMetrics);
+    // Reach/Impressions totals exclude derived account-metric rows (IG
+    // posts_derived_daily / period_average), whose account-level volume is a
+    // synthetic placeholder — summing it fabricates the headline number.
+    const realVolumeMetrics = dailyMetrics.filter(hasRealAccountVolume);
+    const prevRealVolumeMetrics = prevDailyMetrics.filter(hasRealAccountVolume);
 
-    const totalImpressions = sumField(dailyMetrics, "Impressions");
-    const prevTotalImpressions = sumField(prevDailyMetrics, "Impressions");
+    const totalReach = sumReach(realVolumeMetrics);
+    const prevTotalReach = sumReach(prevRealVolumeMetrics);
+
+    const totalImpressions = sumField(realVolumeMetrics, "Impressions");
+    const prevTotalImpressions = sumField(prevRealVolumeMetrics, "Impressions");
 
     const totalProfileViews = sumField(dailyMetrics, "Profile Views");
 
@@ -218,12 +228,12 @@ export default function Overview({
     });
 
     const breakdownReach = platformKeys.map((k) => {
-      const m = platformMap.get(k) ?? [];
+      const m = (platformMap.get(k) ?? []).filter(hasRealAccountVolume);
       return { platform: k, value: formatNumber(sumReach(m)) };
     });
 
     const breakdownImpressions = platformKeys.map((k) => {
-      const m = platformMap.get(k) ?? [];
+      const m = (platformMap.get(k) ?? []).filter(hasRealAccountVolume);
       return { platform: k, value: formatNumber(sumField(m, "Impressions")) };
     });
 
@@ -470,7 +480,7 @@ export default function Overview({
           change={
             kpis.totalImpressions > 0 ? kpis.impressionsChange : undefined
           }
-          tooltip="Instagram retired the account-level impressions metric in 2024 (now reported as 'views'). Shows — until the Social Data Refresher is migrated to the views metric. Not a tracking gap on our end."
+          tooltip="Account-level impressions, summed only from days with a real same-day measurement. Instagram retired account-level impressions in 2024 (now 'views'), so IG days the refresher backfilled from per-post data (ER Type posts_derived_daily / period_average) are excluded rather than counted as a synthetic placeholder. Shows — when no real-measurement day exists in the window. Not a tracking gap on our end."
           breakdown={kpis.breakdownImpressions}
         />
         <KPICard
@@ -534,7 +544,11 @@ export default function Overview({
         <ChartCard title="Posts Per Week">
           <Bar data={postsPerWeekData} options={postsPerWeekOptions} />
         </ChartCard>
-        <AlertsFeed alerts={alerts} />
+        <AlertsFeed
+          alerts={alerts}
+          posts={posts}
+          onSelectPost={onSelectPost}
+        />
       </div>
 
       {/* Top 5 Posts */}

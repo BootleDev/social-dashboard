@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   num,
+  count,
+  hasRealAccountVolume,
   str,
   formatNumber,
   formatPercent,
@@ -53,6 +55,63 @@ describe("num", () => {
   });
   it("returns 0 for boolean", () => {
     expect(num(true)).toBe(0);
+  });
+  it("returns 0 for non-finite number (Infinity / NaN)", () => {
+    expect(num(Infinity)).toBe(0);
+    expect(num(-Infinity)).toBe(0);
+    expect(num(NaN)).toBe(0);
+  });
+  it("returns 0 for a string that parses to non-finite", () => {
+    expect(num("Infinity")).toBe(0);
+    expect(num("1e999")).toBe(0); // overflows to Infinity
+  });
+  it("passes negative values through (signed fields are legitimate)", () => {
+    expect(num(-5)).toBe(-5);
+    expect(num("-2.5")).toBe(-2.5);
+  });
+});
+
+// --- count (non-negative integer tallies: reach, engagement, impressions) ---
+describe("count", () => {
+  it("returns a positive integer unchanged", () => {
+    expect(count(371)).toBe(371);
+  });
+  it("floors a fractional value (tallies can't be fractional)", () => {
+    expect(count(12.9)).toBe(12);
+    expect(count("8.7")).toBe(8);
+  });
+  it("clamps negatives to 0 (a negative tally is a data error)", () => {
+    expect(count(-5)).toBe(0);
+    expect(count("-100")).toBe(0);
+  });
+  it("returns 0 for non-finite input", () => {
+    expect(count(Infinity)).toBe(0);
+    expect(count(NaN)).toBe(0);
+    expect(count("Infinity")).toBe(0);
+  });
+  it("returns 0 for null/undefined/non-numeric", () => {
+    expect(count(null)).toBe(0);
+    expect(count(undefined)).toBe(0);
+    expect(count("abc")).toBe(0);
+  });
+});
+
+// --- hasRealAccountVolume (provenance guard for derived IG daily rows) ---
+describe("hasRealAccountVolume", () => {
+  it("treats a real same-day measurement (ER Type 'daily') as real", () => {
+    expect(hasRealAccountVolume(makeRecord({ "ER Type": "daily" }))).toBe(true);
+  });
+  it("excludes derived rows (posts_derived_daily / period_average)", () => {
+    expect(
+      hasRealAccountVolume(makeRecord({ "ER Type": "posts_derived_daily" })),
+    ).toBe(false);
+    expect(
+      hasRealAccountVolume(makeRecord({ "ER Type": "period_average" })),
+    ).toBe(false);
+  });
+  it("treats a row with no ER Type as real (legacy rows predate tagging)", () => {
+    expect(hasRealAccountVolume(makeRecord({ Impressions: 100 }))).toBe(true);
+    expect(hasRealAccountVolume(makeRecord({ "ER Type": "" }))).toBe(true);
   });
 });
 
