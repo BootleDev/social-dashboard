@@ -20,6 +20,7 @@ import {
   getComparisonPeriod,
   hashtagFrequency,
   alignToDateArray,
+  alignToDateArrayNullable,
   groupByDimension,
   timeBucket,
   dayOfWeek,
@@ -713,6 +714,57 @@ describe("alignToDateArray", () => {
     const dates = ["2026-01-01"];
     const result = alignToDateArray(metrics, dates, "Reach", -1);
     expect(result).toEqual([-1]);
+  });
+});
+
+// --- alignToDateArrayNullable (gaps render as chart gaps, not zero dips) ---
+describe("alignToDateArrayNullable", () => {
+  it("returns null (not 0) for dates with no record", () => {
+    const metrics = [
+      makeRecord({ Date: "2026-01-01T00:00:00Z", Reach: 100 }),
+      makeRecord({ Date: "2026-01-03T00:00:00Z", Reach: 300 }),
+    ];
+    const dates = ["2026-01-01", "2026-01-02", "2026-01-03"];
+    expect(alignToDateArrayNullable(metrics, dates, "Reach")).toEqual([
+      100,
+      null,
+      300,
+    ]);
+  });
+
+  it("returns null when the field is present but empty/absent (honestly no value)", () => {
+    // IG account Impressions: the row exists for the day, but the field is
+    // empty — there is no honest per-day value. Must be a gap, not a 0 dip.
+    const metrics = [
+      makeRecord({ Date: "2026-01-01T00:00:00Z", Impressions: "" }),
+      makeRecord({ Date: "2026-01-02T00:00:00Z" }),
+    ];
+    const dates = ["2026-01-01", "2026-01-02"];
+    expect(alignToDateArrayNullable(metrics, dates, "Impressions")).toEqual([
+      null,
+      null,
+    ]);
+  });
+
+  it("preserves a real 0 as 0, distinct from a gap", () => {
+    // FB Engagement genuinely measured 0 — that is a real point, not a gap.
+    const metrics = [
+      makeRecord({ Date: "2026-01-01T00:00:00Z", Engagement: 0 }),
+    ];
+    const dates = ["2026-01-01", "2026-01-02"];
+    expect(alignToDateArrayNullable(metrics, dates, "Engagement")).toEqual([
+      0,
+      null,
+    ]);
+  });
+
+  it("passes through negative values (e.g. Follower Delta)", () => {
+    const metrics = [
+      makeRecord({ Date: "2026-01-01T00:00:00Z", "Follower Delta": -3 }),
+    ];
+    expect(
+      alignToDateArrayNullable(metrics, ["2026-01-01"], "Follower Delta"),
+    ).toEqual([-3]);
   });
 });
 

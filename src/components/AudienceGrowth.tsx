@@ -17,6 +17,7 @@ import {
   sumReach,
   buildUnifiedDates,
   alignToDateArray,
+  alignToDateArrayNullable,
   trimTrailingZeroDay,
 } from "@/lib/utils";
 import { describe } from "@/lib/stats";
@@ -158,10 +159,12 @@ export default function AudienceGrowth({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: `${config.label} Reach`,
-          data: alignToDateArray(metrics, allDates, key === "pinterest" ? "Impressions" : "Reach"),
+          // Nullable: FB Reach is empty every day — gap, not a flat-zero line.
+          data: alignToDateArrayNullable(metrics, allDates, key === "pinterest" ? "Impressions" : "Reach"),
           borderColor: config.color,
           tension: 0.3,
           pointRadius: 0,
+          spanGaps: false,
         };
       }),
     };
@@ -178,7 +181,9 @@ export default function AudienceGrowth({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: `${config.label} Profile Views`,
-          data: alignToDateArray(metrics, allDates, "Profile Views"),
+          // Nullable: IG has no honest per-day Profile Views (30d total only) —
+          // omit the bar rather than draw a row of zero bars.
+          data: alignToDateArrayNullable(metrics, allDates, "Profile Views"),
           backgroundColor: config.color + "60",
           borderColor: config.color,
           borderWidth: 1,

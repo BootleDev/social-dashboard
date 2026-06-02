@@ -26,6 +26,7 @@ import {
   getPlatformKeys,
   buildUnifiedDates,
   alignToDateArray,
+  alignToDateArrayNullable,
 } from "@/lib/utils";
 import { toPost } from "@/lib/types";
 import {
@@ -323,12 +324,14 @@ export default function Overview({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: config.label,
-          data: alignToDateArray(metrics, allDates, "Followers"),
+          // Nullable: a day with no Followers value is a gap, not a dip to 0.
+          data: alignToDateArrayNullable(metrics, allDates, "Followers"),
           borderColor: config.color,
           backgroundColor: config.colorFill,
           fill: false,
           tension: 0.3,
           pointRadius: 0,
+          spanGaps: false,
         };
       }),
     };
@@ -345,12 +348,14 @@ export default function Overview({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: `${config.label} ER`,
-          data: alignToDateArray(metrics, allDates, "Engagement Rate").map(
-            (v) => v * 100,
+          // Nullable: days with no ER stay gaps; null * 100 would be 0, so guard.
+          data: alignToDateArrayNullable(metrics, allDates, "Engagement Rate").map(
+            (v) => (v === null ? null : v * 100),
           ),
           borderColor: config.color,
           tension: 0.3,
           pointRadius: 0,
+          spanGaps: false,
         };
       }),
     };

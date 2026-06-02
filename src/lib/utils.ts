@@ -644,3 +644,36 @@ export function alignToDateArray(
   }
   return dates.map((d) => byDate.get(d) ?? defaultVal);
 }
+
+/**
+ * Like {@link alignToDateArray}, but missing/absent values become `null`
+ * instead of 0 — so a trend chart with `spanGaps: false` renders an honest gap
+ * rather than a dip to zero.
+ *
+ * The distinction matters now that the daily-facts model writes fields that are
+ * honestly absent on some days (e.g. IG account Impressions has no per-day
+ * value, so the cell is empty every day). Plotting those as 0 draws a false
+ * flat-zero line; plotting them as null draws nothing, which is the truth.
+ *
+ * A value is a gap (`null`) when no record exists for the date OR the field is
+ * empty/non-numeric on that record. A genuine measured 0 is preserved as 0 (a
+ * real point), distinct from a gap. Negative values pass through (`num`), so
+ * signed fields like Follower Delta are unaffected.
+ */
+export function alignToDateArrayNullable(
+  metrics: AirtableRecord[],
+  dates: string[],
+  field: string,
+): (number | null)[] {
+  const byDate = new Map<string, number>();
+  for (const r of metrics) {
+    const d = str(r.fields["Date"]).split("T")[0];
+    if (!d) continue;
+    const raw = r.fields[field];
+    // Empty / absent / non-numeric → leave as a gap (do not insert into map).
+    if (raw === null || raw === undefined || raw === "") continue;
+    if (typeof raw === "string" && !Number.isFinite(parseFloat(raw))) continue;
+    byDate.set(d, num(raw));
+  }
+  return dates.map((d) => (byDate.has(d) ? byDate.get(d)! : null));
+}
