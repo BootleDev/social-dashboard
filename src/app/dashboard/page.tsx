@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Overview from "@/components/Overview";
 import ContentAnalysis from "@/components/ContentAnalysis";
+import PostDrilldownPanel from "@/components/PostDrilldownPanel";
 import PlanningPanel from "@/components/PlanningPanel";
 import OpsPanel from "@/components/OpsPanel";
 import DateRangeFilter from "@/components/DateRangeFilter";
@@ -97,6 +98,8 @@ export default function DashboardPage() {
   const [competitorError, setCompetitorError] = useState("");
   const [competitorFetched, setCompetitorFetched] = useState(false);
   const [timezone, setTimezone] = useTimezone();
+  // Post opened from a Pulse alert click; rendered in PostDrilldownPanel.
+  const [selectedPost, setSelectedPost] = useState<AirtableRecord | null>(null);
 
   const fetchData = useCallback((force = false) => {
     // MARKETING-19 Fix 7: when force=true (Refresh button), bypass the 30-min
@@ -391,6 +394,7 @@ export default function DashboardPage() {
                   weeklySummaries={filteredSummaries}
                   prevPosts={comparisonPosts}
                   prevDailyMetrics={comparisonDaily}
+                  onSelectPost={setSelectedPost}
                 />
               )}
               {tab === "insights" && (
@@ -410,6 +414,7 @@ export default function DashboardPage() {
                   competitorLoading={competitorLoading}
                   competitorError={competitorError}
                   timezone={timezone}
+                  range={{ start: dateRange.start, end: dateRange.end }}
                 />
               )}
               {tab === "ops" && (
@@ -419,6 +424,14 @@ export default function DashboardPage() {
                 />
               )}
             </div>
+            {selectedPost && (
+              <PostDrilldownPanel
+                posts={[selectedPost]}
+                bucketLabel={`Alert: ${str(selectedPost.fields["Post Type"]) || "post"} on ${str(selectedPost.fields["Platform"])}`}
+                timezone={timezone}
+                onClose={() => setSelectedPost(null)}
+              />
+            )}
           </ErrorBoundary>
         )}
       </main>

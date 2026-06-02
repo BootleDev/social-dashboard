@@ -4,6 +4,7 @@ import BestTimeToPost from "./BestTimeToPost";
 import PinterestInsights from "./PinterestInsights";
 import CompetitorInsights from "./CompetitorInsights";
 import UpcomingWindows from "./UpcomingWindows";
+import PlanVsActual from "./PlanVsActual";
 import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -15,12 +16,15 @@ interface PlanningPanelProps {
   competitorLoading: boolean;
   competitorError: string;
   timezone: string;
+  /** Selected date range (nullable bounds = All Time). Used by Plan vs actual. */
+  range: { start: string | null; end: string | null };
 }
 
-type PlanningTab = "when" | "trends" | "seasonal" | "competitors";
+type PlanningTab = "when" | "plan" | "trends" | "seasonal" | "competitors";
 
 const SUBNAV_ITEMS: ReadonlyArray<SubNavItem<PlanningTab>> = [
   { key: "when", label: "When to post" },
+  { key: "plan", label: "Plan vs actual" },
   { key: "trends", label: "Pinterest trends" },
   { key: "seasonal", label: "Seasonal windows" },
   { key: "competitors", label: "Competitor signal" },
@@ -28,6 +32,7 @@ const SUBNAV_ITEMS: ReadonlyArray<SubNavItem<PlanningTab>> = [
 
 const VALID_KEYS: ReadonlyArray<PlanningTab> = [
   "when",
+  "plan",
   "trends",
   "seasonal",
   "competitors",
@@ -46,6 +51,7 @@ export default function PlanningPanel({
   competitorLoading,
   competitorError,
   timezone,
+  range,
 }: PlanningPanelProps) {
   const [subTab, setSubTab] = useSubNav<PlanningTab>(
     "planning",
@@ -71,6 +77,15 @@ export default function PlanningPanel({
             posts={posts}
             timezone={timezone}
           />
+        </Section>
+      )}
+
+      {subTab === "plan" && (
+        <Section
+          title="Plan vs actual"
+          subtitle="Shipped content measured against the rolling target plan (src/config/contentPlan.json). A slot is hit when a post of the same platform + post type ships in the same ISO week; pillar is a soft signal. Hit rate, weekly adherence, planned-vs-actual pillar mix, and the slots you miss most."
+        >
+          <PlanVsActual posts={posts} range={range} timezone={timezone} />
         </Section>
       )}
 
