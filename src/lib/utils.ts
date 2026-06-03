@@ -87,43 +87,68 @@ const DERIVED_ACCOUNT_METRIC_ER_TYPES = new Set([
 ]);
 
 /**
- * Per-metric provenance value (WEBDEV-146) marking a real same-day measurement,
- * safe to sum into a per-day window total. `null` means no honest per-day value
- * exists; `period_aggregate` is a labelled window total (never per-day);
- * `pending`/`settled` track late-settling days. Only `daily_real` counts as
- * real per-day volume.
+ * Per-metric Source values (WEBDEV-146) that mark a value safe to sum into a
+ * per-day window total:
+ *  - `daily_real`  — a real same-day platform measurement (Meta IG/FB).
+ *  - `pin_sum`     — Pinterest's account reach/impressions, defined as the sum
+ *                    of that day's pin impressions (MARKETING-35). Pinterest has
+ *                    no deduplicated account reach, so this IS its account
+ *                    distribution figure; it is tagged distinctly so it is never
+ *                    confused with a Meta-style measurement, but it is real and
+ *                    summable per day.
+ * Other Source values are NOT real per-day volume: `null` (honestly absent, e.g.
+ * IG has no per-day Impressions), `period_aggregate` (a labelled window total,
+ * never per-day), `pending`/`settled` (late-settling lifecycle markers).
  */
-const DAILY_REAL_SOURCE = "daily_real";
-
-/** Source columns whose value decides whether a fact row carries real per-day volume. */
-const ACCOUNT_VOLUME_SOURCE_FIELDS = ["Reach Source", "Impressions Source"] as const;
+const REAL_PER_DAY_VOLUME_SOURCES = new Set(["daily_real", "pin_sum"]);
 
 /**
- * True when an account row's per-day Impressions/Reach is a real same-day
- * measurement (safe to sum into a headline total), false otherwise.
+ * True when a SPECIFIC metric's per-day value on an account row is a real,
+ * summable measurement, false when it is honestly absent or a non-per-day total.
  *
- * Two data shapes are supported during the WEBDEV-146 migration:
- *  - Account Daily Facts rows carry explicit per-metric Source columns. These
- *    are authoritative: the row has real volume iff at least one volume Source
- *    is `daily_real`. A row whose volume Sources are all `null` is honestly
- *    absent (e.g. IG has no per-day Impressions) and is excluded. `Period
- *    Source`/`period_aggregate` is ignored here — it is a labelled window total,
- *    never per-day volume.
+ * Per-metric (not row-level): an Instagram fact row is real for Reach but absent
+ * for Impressions; a Facebook row is the reverse. Judging volume at the row
+ * level would let one real metric drag the other into a headline sum as 0.
+ *
+ * Two data shapes during the WEBDEV-146 migration:
+ *  - Account Daily Facts rows carry explicit per-metric Source columns; they are
+ *    authoritative. Real iff the named Source is in REAL_PER_DAY_VOLUME_SOURCES.
  *  - Legacy Daily Account Metrics rows have no Source columns; fall back to the
- *    overloaded `ER Type` denylist. Rows with no ER Type are treated as real
- *    (they predate the tagging).
+ *    overloaded `ER Type` denylist (rows with no ER Type predate tagging → real).
  */
-export function hasRealAccountVolume(record: AirtableRecord): boolean {
-  const sources = ACCOUNT_VOLUME_SOURCE_FIELDS.map((f) =>
-    str(record.fields[f]).trim(),
-  ).filter((v) => v.length > 0);
-  if (sources.length > 0) {
-    return sources.some((s) => s === DAILY_REAL_SOURCE);
+function hasRealMetricSource(
+  record: AirtableRecord,
+  sourceField: "Reach Source" | "Impressions Source",
+): boolean {
+  const source = str(record.fields[sourceField]).trim();
+  if (source.length > 0) {
+    return REAL_PER_DAY_VOLUME_SOURCES.has(source);
   }
 
   const erType = str(record.fields["ER Type"]).trim();
   if (!erType) return true;
   return !DERIVED_ACCOUNT_METRIC_ER_TYPES.has(erType);
+}
+
+/** True when this row's per-day Reach is a real, summable measurement. */
+export function hasRealReach(record: AirtableRecord): boolean {
+  return hasRealMetricSource(record, "Reach Source");
+}
+
+/** True when this row's per-day Impressions is a real, summable measurement. */
+export function hasRealImpressions(record: AirtableRecord): boolean {
+  return hasRealMetricSource(record, "Impressions Source");
+}
+
+/**
+ * True when an account row carries real per-day volume for AT LEAST ONE of
+ * Reach/Impressions. Kept for callers that only need a coarse row-level check;
+ * per-metric pills and headline sums use {@link hasRealReach} /
+ * {@link hasRealImpressions} so a metric absent on a platform is omitted rather
+ * than summed as 0.
+ */
+export function hasRealAccountVolume(record: AirtableRecord): boolean {
+  return hasRealReach(record) || hasRealImpressions(record);
 }
 
 export function formatNumber(value: number): string {

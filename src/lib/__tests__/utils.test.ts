@@ -3,6 +3,8 @@ import {
   num,
   count,
   hasRealAccountVolume,
+  hasRealReach,
+  hasRealImpressions,
   str,
   formatNumber,
   formatPercent,
@@ -163,6 +165,71 @@ describe("hasRealAccountVolume", () => {
         }),
       ),
     ).toBe(true);
+  });
+});
+
+// --- hasRealReach / hasRealImpressions (per-metric provenance, WEBDEV-146) ---
+// These judge a SPECIFIC metric, so a platform real for one volume metric and
+// absent for the other (IG: reach yes / impressions no; FB: the reverse) is
+// handled correctly instead of one metric dragging the other into a sum.
+describe("hasRealReach / hasRealImpressions", () => {
+  it("an Instagram-shaped row is real for reach, absent for impressions", () => {
+    const ig = makeRecord({
+      "Reach Source": "daily_real",
+      "Impressions Source": "null",
+    });
+    expect(hasRealReach(ig)).toBe(true);
+    expect(hasRealImpressions(ig)).toBe(false);
+  });
+  it("a Facebook-shaped row is absent for reach, real for impressions", () => {
+    const fb = makeRecord({
+      "Reach Source": "null",
+      "Impressions Source": "daily_real",
+    });
+    expect(hasRealReach(fb)).toBe(false);
+    expect(hasRealImpressions(fb)).toBe(true);
+  });
+  it("treats Pinterest pin_sum as real, summable per-day volume", () => {
+    // Pinterest account reach/impressions is a deliberate pin-impression sum
+    // (MARKETING-35), tagged pin_sum — distinct from a Meta measurement, but
+    // real and summable.
+    const pin = makeRecord({
+      "Reach Source": "pin_sum",
+      "Impressions Source": "pin_sum",
+    });
+    expect(hasRealReach(pin)).toBe(true);
+    expect(hasRealImpressions(pin)).toBe(true);
+  });
+  it("excludes period_aggregate (a labelled window total, not per-day)", () => {
+    const row = makeRecord({
+      "Reach Source": "period_aggregate",
+      "Impressions Source": "period_aggregate",
+    });
+    expect(hasRealReach(row)).toBe(false);
+    expect(hasRealImpressions(row)).toBe(false);
+  });
+  it("falls back to legacy ER Type when a Source column is absent", () => {
+    // Legacy Daily Account Metrics rows have no Source columns.
+    expect(hasRealReach(makeRecord({ "ER Type": "daily" }))).toBe(true);
+    expect(
+      hasRealReach(makeRecord({ "ER Type": "posts_derived_daily" })),
+    ).toBe(false);
+    // No ER Type at all → real (predates tagging).
+    expect(hasRealImpressions(makeRecord({ Impressions: 100 }))).toBe(true);
+  });
+  it("hasRealAccountVolume is true if either metric is real", () => {
+    // IG row: reach real, impressions absent → still has real volume overall.
+    expect(
+      hasRealAccountVolume(
+        makeRecord({ "Reach Source": "daily_real", "Impressions Source": "null" }),
+      ),
+    ).toBe(true);
+    // Both absent → no real volume.
+    expect(
+      hasRealAccountVolume(
+        makeRecord({ "Reach Source": "null", "Impressions Source": "null" }),
+      ),
+    ).toBe(false);
   });
 });
 

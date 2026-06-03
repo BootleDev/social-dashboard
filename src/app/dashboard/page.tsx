@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import Link from "next/link";
 import Overview from "@/components/Overview";
 import ContentAnalysis from "@/components/ContentAnalysis";
 import PostDrilldownPanel from "@/components/PostDrilldownPanel";
@@ -34,7 +35,12 @@ type Tab = "pulse" | "insights" | "planning" | "ops";
 
 interface DashboardData {
   posts: AirtableRecord[];
+  // Legacy account table. Retired as the source of account-grain KPIs
+  // (WEBDEV-146) — kept on the payload only for any non-KPI legacy reader.
   dailyMetrics: AirtableRecord[];
+  // Sole source for account-grain KPIs (Followers, Reach, Impressions, ER).
+  // Optional so a mid-deploy cached payload without this key doesn't break the UI.
+  accountDailyFacts?: AirtableRecord[];
   weeklySummaries: AirtableRecord[];
   alerts: AirtableRecord[];
   // Per-channel feeds (added 2026-05-26). Optional so older API responses
@@ -161,6 +167,32 @@ export default function DashboardPage() {
         : [],
     [data, dateRange, selectedPlatforms],
   );
+  // Account-grain KPI source (WEBDEV-146). Same date+platform filtering as the
+  // legacy feed, but read from Account Daily Facts. This replaces filteredDaily
+  // as the account-KPI input to Overview.
+  const filteredAccountFacts = useMemo(
+    () =>
+      data
+        ? filterByPlatform(
+            filterByDateRange(
+              data.accountDailyFacts ?? [],
+              "Date",
+              dateRange,
+            ),
+            selectedPlatforms,
+          )
+        : [],
+    [data, dateRange, selectedPlatforms],
+  );
+  // Unfiltered account facts (platform filter only, NO date range) — the IG
+  // 30-day period figures live on the latest row and must not be date-gated.
+  const accountFactsAllDates = useMemo(
+    () =>
+      data
+        ? filterByPlatform(data.accountDailyFacts ?? [], selectedPlatforms)
+        : [],
+    [data, selectedPlatforms],
+  );
   const filteredAlerts = useMemo(
     () =>
       data
@@ -208,6 +240,21 @@ export default function DashboardPage() {
     if (!comp) return [];
     return filterByPlatform(
       filterByDateRange(data.posts, "Published At", {
+        start: comp.compStart,
+        end: comp.compEnd,
+        label: "",
+      }),
+      selectedPlatforms,
+    );
+  }, [data, dateRange, selectedPlatforms]);
+
+  // Prior-period account facts, for period-over-period change on account KPIs.
+  const comparisonAccountFacts = useMemo(() => {
+    if (!data) return [];
+    const comp = getComparisonPeriod(dateRange.start, dateRange.end);
+    if (!comp) return [];
+    return filterByPlatform(
+      filterByDateRange(data.accountDailyFacts ?? [], "Date", {
         start: comp.compStart,
         end: comp.compEnd,
         label: "",
@@ -312,6 +359,14 @@ export default function DashboardPage() {
                 Refresh
               </button>
             )}
+            <Link
+              href="/dashboard/methodology"
+              className="text-[10px] px-1.5 py-0.5 rounded transition-colors hover:bg-white/10 cursor-pointer"
+              style={{ color: "var(--text-secondary)" }}
+              title="How these numbers are sourced"
+            >
+              Methodology
+            </Link>
           </div>
         </div>
 
@@ -389,11 +444,14 @@ export default function DashboardPage() {
               {tab === "pulse" && (
                 <Overview
                   posts={filteredPosts}
-                  dailyMetrics={filteredDaily}
+                  // Account-grain KPIs read from Account Daily Facts (WEBDEV-146),
+                  // not the legacy Daily Account Metrics table.
+                  dailyMetrics={filteredAccountFacts}
+                  periodFacts={accountFactsAllDates}
                   alerts={filteredAlerts}
                   weeklySummaries={filteredSummaries}
                   prevPosts={comparisonPosts}
-                  prevDailyMetrics={comparisonDaily}
+                  prevDailyMetrics={comparisonAccountFacts}
                   onSelectPost={setSelectedPost}
                 />
               )}

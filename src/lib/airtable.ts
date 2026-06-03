@@ -1,5 +1,32 @@
 const BASE_URL = "https://api.airtable.com/v0";
 
+/**
+ * Per-grain data-source model (WEBDEV-146, decided 2026-06-02). Read this before
+ * changing where the dashboard sources account-level KPIs.
+ *
+ *  - ACCOUNT-grain KPIs (Followers, Reach, Impressions, ER) come ONLY from
+ *    `Account Daily Facts` (ACCOUNT_DAILY_FACTS). The legacy `Daily Account
+ *    Metrics` table (DAILY_ACCOUNT_METRICS) is retired for account KPIs — it is
+ *    no longer read by the Overview/Pulse aggregation. It remains in TABLES only
+ *    for any non-KPI legacy reader.
+ *  - POST/PIN-grain metrics come from the Posts table (and, once populated,
+ *    `Post Daily Facts`). For IG/FB these are NEVER summed into an account
+ *    headline — a post-sum over-counts deduplicated account reach.
+ *  - PINTEREST account reach/impressions: Pinterest exposes no deduplicated
+ *    account reach, so its account row in `Account Daily Facts` carries a
+ *    deliberate pin-impression SUM, tagged with a distinct Source value
+ *    (`pin_sum`) so it is never mistaken for a Meta-style measurement. That
+ *    write is MARKETING-35; until it lands, `Account Daily Facts` has no
+ *    Pinterest rows, so Pinterest account reach/impressions are simply absent
+ *    on the dashboard (intentional single-source behaviour, not a bug).
+ *  - Structurally-absent cells (FB account Reach, IG account Impressions) are
+ *    omitted, never shown as 0 or a synthetic substitute — the platform APIs
+ *    don't report them.
+ *
+ * The in-app Methodology page explains this for dashboard readers; this comment
+ * is the dev-facing copy of the same model.
+ */
+
 export const TABLES = {
   POSTS: "tbljDi7YY46pQkQGH",
   DAILY_ACCOUNT_METRICS: "tblGnvjSCdr1zttJe",
@@ -119,8 +146,9 @@ export async function getDailyAccountMetrics(opts: { noCache?: boolean } = {}) {
 /**
  * WEBDEV-146: account-level daily facts (one row per platform|date) with
  * per-metric Source provenance columns. Sorted newest-first, like the legacy
- * Daily Account Metrics. The dashboard will migrate window aggregation onto
- * this table once the Refresher is populating it; until then it reads empty.
+ * Daily Account Metrics. This is the SOLE source for account-grain KPIs (see the
+ * per-grain source model comment at the top of this file). Populated for IG/FB
+ * by the Meta Social Data Refresher; Pinterest rows arrive with MARKETING-35.
  */
 export async function getAccountDailyFacts(opts: { noCache?: boolean } = {}) {
   return fetchAllRecords(TABLES.ACCOUNT_DAILY_FACTS, {
@@ -222,6 +250,7 @@ export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
   const [
     posts,
     dailyMetrics,
+    accountDailyFacts,
     weeklySummaries,
     alerts,
     instagramAudience,
@@ -230,7 +259,11 @@ export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
     seasonalOpportunities,
   ] = await Promise.all([
     getPosts(opts),
+    // Legacy table: still fetched for any non-KPI legacy reader, but NOT the
+    // source of account-grain KPIs anymore (see top-of-file source model).
     getDailyAccountMetrics(opts),
+    // Sole source for account-grain KPIs (WEBDEV-146).
+    getAccountDailyFacts(opts),
     getWeeklySummaries(opts),
     getSocialAlerts(opts),
     getInstagramAudience(opts),
@@ -242,6 +275,7 @@ export async function getAllDashboardData(opts: { noCache?: boolean } = {}) {
   return {
     posts,
     dailyMetrics,
+    accountDailyFacts,
     weeklySummaries,
     alerts,
     instagramAudience,

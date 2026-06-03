@@ -7,6 +7,7 @@ import { useChartTheme } from "@/lib/useChartTheme";
 import { getPlatformConfig, platformSortOrder } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
+import InfoTooltip from "./InfoTooltip";
 import { glossaryFor } from "@/lib/metricGlossary";
 import AlertsFeed from "./AlertsFeed";
 import WeeklySummary from "./WeeklySummary";
@@ -20,7 +21,8 @@ import {
   sumField,
   recordReach,
   sumReach,
-  hasRealAccountVolume,
+  hasRealReach,
+  hasRealImpressions,
   avgField,
   groupByPlatform,
   getPlatformKeys,
@@ -96,7 +98,14 @@ function buildScoreTooltip(
 
 interface OverviewProps {
   posts: AirtableRecord[];
+  /** Account-grain daily facts, date+platform filtered. Source for window KPIs. */
   dailyMetrics: AirtableRecord[];
+  /**
+   * Account facts WITHOUT date filtering (platform filter only). Used to read
+   * the Instagram 30-day period figures off the latest period_aggregate row —
+   * those are rolling platform totals and must never be date-gated or summed.
+   */
+  periodFacts?: AirtableRecord[];
   alerts: AirtableRecord[];
   weeklySummaries: AirtableRecord[];
   prevPosts: AirtableRecord[];
@@ -108,6 +117,7 @@ interface OverviewProps {
 export default function Overview({
   posts,
   dailyMetrics,
+  periodFacts = [],
   alerts,
   weeklySummaries,
   prevPosts,
@@ -143,17 +153,21 @@ export default function Overview({
     const avgER = avgField(posts, "Engagement Rate") * 100;
     const prevAvgER = avgField(prevPosts, "Engagement Rate") * 100;
 
-    // Reach/Impressions totals exclude derived account-metric rows (IG
-    // posts_derived_daily / period_average), whose account-level volume is a
-    // synthetic placeholder — summing it fabricates the headline number.
-    const realVolumeMetrics = dailyMetrics.filter(hasRealAccountVolume);
-    const prevRealVolumeMetrics = prevDailyMetrics.filter(hasRealAccountVolume);
+    // Reach and Impressions are summed PER METRIC from only the rows that carry
+    // a real measurement for that specific metric. An Instagram row is real for
+    // Reach but absent for Impressions (and Facebook the reverse), so a coarse
+    // row-level guard would let one metric's absence sum as 0. hasRealReach /
+    // hasRealImpressions judge each metric independently.
+    const realReachMetrics = dailyMetrics.filter(hasRealReach);
+    const realImprMetrics = dailyMetrics.filter(hasRealImpressions);
+    const prevRealReachMetrics = prevDailyMetrics.filter(hasRealReach);
+    const prevRealImprMetrics = prevDailyMetrics.filter(hasRealImpressions);
 
-    const totalReach = sumReach(realVolumeMetrics);
-    const prevTotalReach = sumReach(prevRealVolumeMetrics);
+    const totalReach = sumReach(realReachMetrics);
+    const prevTotalReach = sumReach(prevRealReachMetrics);
 
-    const totalImpressions = sumField(realVolumeMetrics, "Impressions");
-    const prevTotalImpressions = sumField(prevRealVolumeMetrics, "Impressions");
+    const totalImpressions = sumField(realImprMetrics, "Impressions");
+    const prevTotalImpressions = sumField(prevRealImprMetrics, "Impressions");
 
     const totalProfileViews = sumField(dailyMetrics, "Profile Views");
 
@@ -228,14 +242,24 @@ export default function Overview({
       };
     });
 
-    const breakdownReach = platformKeys.map((k) => {
-      const m = (platformMap.get(k) ?? []).filter(hasRealAccountVolume);
-      return { platform: k, value: formatNumber(sumReach(m)) };
+    // Per-platform pills are built ONLY from platforms that have a real
+    // measurement for that specific metric. A platform the source doesn't report
+    // for a metric contributes NO entry (the pill is omitted), rather than a
+    // misleading 0 or a synthetic substitute. Result with current data:
+    // Reach = Instagram (+ Pinterest once MARKETING-35 lands); Impressions =
+    // Facebook (+ Pinterest). Facebook has no account Reach (Graph v22.0);
+    // Instagram has no account Impressions (retired 2024). See the Methodology
+    // page / airtable.ts source-model comment.
+    const breakdownReach = platformKeys.flatMap((k) => {
+      const m = (platformMap.get(k) ?? []).filter(hasRealReach);
+      if (m.length === 0) return [];
+      return [{ platform: k, value: formatNumber(sumReach(m)) }];
     });
 
-    const breakdownImpressions = platformKeys.map((k) => {
-      const m = (platformMap.get(k) ?? []).filter(hasRealAccountVolume);
-      return { platform: k, value: formatNumber(sumField(m, "Impressions")) };
+    const breakdownImpressions = platformKeys.flatMap((k) => {
+      const m = (platformMap.get(k) ?? []).filter(hasRealImpressions);
+      if (m.length === 0) return [];
+      return [{ platform: k, value: formatNumber(sumField(m, "Impressions")) }];
     });
 
     const breakdownPosts = Array.from(postsByPlatform.entries()).map(
@@ -305,6 +329,42 @@ export default function Overview({
     prevPosts,
     prevDailyMetrics,
   ]);
+
+  // Instagram 30-day period figures. These are rolling platform totals that
+  // Instagram reports on the latest snapshot (Period Source = period_aggregate),
+  // NOT a sum of the days in the selected range — so they are read off the
+  // newest period row from the UN-date-filtered facts and never summed or
+  // date-gated. Only columns that are actually populated render (Views is
+  // currently absent upstream — see Methodology / WEBDEV-146 Part D).
+  const igPeriodTiles = useMemo(() => {
+    const igRows = periodFacts
+      .filter(
+        (r) => str(r.fields["Platform"]).toLowerCase().trim() === "instagram",
+      )
+      .filter(
+        (r) =>
+          str(r.fields["Period Source"]).trim() === "period_aggregate",
+      );
+    if (igRows.length === 0) return [];
+    // Newest period row wins (facts are sorted newest-first, but sort defensively
+    // by Date so we don't depend on upstream ordering).
+    const latest = [...igRows].sort((a, b) =>
+      str(b.fields["Date"]).localeCompare(str(a.fields["Date"])),
+    )[0];
+
+    const cols: { field: string; label: string }[] = [
+      { field: "Profile Views (30d)", label: "Profile Views" },
+      { field: "Accounts Engaged (30d)", label: "Accounts Engaged" },
+      { field: "Interactions (30d)", label: "Interactions" },
+      { field: "Profile Links Taps (30d)", label: "Link Taps" },
+    ];
+    return cols.flatMap(({ field, label }) => {
+      const raw = latest.fields[field];
+      // Omit a tile whose column is empty/absent rather than show a fake 0.
+      if (raw === null || raw === undefined || raw === "") return [];
+      return [{ label, value: formatNumber(num(raw)) }];
+    });
+  }, [periodFacts]);
 
   // Unified date array from all platforms
   const allDates = useMemo(
@@ -472,7 +532,7 @@ export default function Overview({
           title="Total Reach"
           value={formatNumber(kpis.totalReach)}
           change={kpis.reachChange}
-          tooltip={glossaryFor("Reach")}
+          tooltip={`${glossaryFor("Reach")} Account reach is summed per platform from real-measurement days. Instagram reports it; Facebook's API (v22.0) does not, so Facebook has no reach pill here — an honest absence, not a gap. Pinterest account reach arrives with the Pinterest daily-facts work. See the Methodology page.`}
           breakdown={kpis.breakdownReach}
         />
         <KPICard
@@ -485,7 +545,7 @@ export default function Overview({
           change={
             kpis.totalImpressions > 0 ? kpis.impressionsChange : undefined
           }
-          tooltip="Account-level impressions, summed only from days with a real same-day measurement. Instagram retired account-level impressions in 2024 (now 'views'), so IG days the refresher backfilled from per-post data (ER Type posts_derived_daily / period_average) are excluded rather than counted as a synthetic placeholder. Shows — when no real-measurement day exists in the window. Not a tracking gap on our end."
+          tooltip="Account-level impressions, summed per platform only from days that carry a real measurement. Facebook reports account impressions; Instagram does not (it retired account impressions in 2024, now 'views'), so Instagram has no impressions pill here — that absence is correct, not a tracking gap. Shows — when no platform reports impressions in the window. See the Methodology page for how each platform's numbers are sourced."
           breakdown={kpis.breakdownImpressions}
         />
         <KPICard
@@ -531,6 +591,46 @@ export default function Overview({
           tooltip={kpis.reachScoreTooltip}
         />
       </div>
+
+      {/* Instagram 30-day period figures. Rolling platform totals reported by
+          Instagram, NOT a sum of the selected range — shown separately and never
+          summed/date-filtered. Renders only when populated. */}
+      {igPeriodTiles.length > 0 && (
+        <div
+          className="rounded-xl p-4"
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <div className="flex items-center gap-1.5 mb-3">
+            <span
+              className="text-xs font-medium"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Instagram · last 30 days
+            </span>
+            <InfoTooltip
+              text="Instagram-reported rolling 30-day totals, read from the latest snapshot. These are platform period figures, NOT a sum of the days in your selected date range, so they do not change when you change the range and are never added across days."
+              label="What are the Instagram 30-day figures?"
+            />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {igPeriodTiles.map((t) => (
+              <div key={t.label} className="flex flex-col gap-0.5">
+                <span
+                  className="text-[11px]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {t.label}{" "}
+                  <span style={{ opacity: 0.7 }}>(30d)</span>
+                </span>
+                <span className="text-xl font-bold">{t.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Weekly Summary */}
       <WeeklySummary summaries={weeklySummaries} />
