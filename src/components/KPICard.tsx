@@ -14,6 +14,9 @@ interface KPICardProps {
   title: string;
   value: string;
   change?: number;
+  /** True when the prior period was 0 and current is positive — shows "new"
+   *  instead of a blank/"no prior data", so genuine from-zero growth is visible. */
+  isNew?: boolean;
   subtitle?: string;
   tooltip?: string;
   invertChange?: boolean;
@@ -26,6 +29,7 @@ export default function KPICard({
   title,
   value,
   change,
+  isNew,
   subtitle,
   tooltip,
   invertChange,
@@ -75,6 +79,8 @@ export default function KPICard({
           <span className={`text-xs font-medium ${changeColor}`}>
             {arrow} {Math.abs(change).toFixed(1)}%
           </span>
+        ) : isNew ? (
+          <span className="text-xs font-medium text-success">↑ new</span>
         ) : (
           <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
             no prior data

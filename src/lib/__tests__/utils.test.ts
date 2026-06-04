@@ -30,6 +30,11 @@ import {
   sumByDimensionStacked,
   recordReach,
   sumReach,
+  weightedEngagementRate,
+  latestFollowers,
+  weightedERByDimension,
+  MIN_RANK_SAMPLE,
+  postEngagement,
 } from "../utils";
 import type { AirtableRecord } from "../utils";
 
@@ -351,13 +356,30 @@ describe("avgERByTheme", () => {
 });
 
 // --- avgERByDimensionStacked ---
-describe("avgERByDimensionStacked", () => {
+describe("avgERByDimensionStacked (reach-weighted)", () => {
+  // Cell ER is now Σengagement ÷ Σreach (engagement = likes+comments+saves+shares),
+  // NOT a mean of per-post Engagement Rate values.
+  const post = (
+    type: string,
+    theme: string,
+    reach: number,
+    likes: number,
+  ) =>
+    makeRecord({
+      "Post Type": type,
+      "Content Theme": theme,
+      Platform: "instagram",
+      Reach: reach,
+      Likes: likes,
+    });
+
   const posts = [
-    makeRecord({ "Post Type": "reel", "Content Theme": "Lifestyle", "Engagement Rate": 4 }),
-    makeRecord({ "Post Type": "reel", "Content Theme": "Lifestyle", "Engagement Rate": 6 }),
-    makeRecord({ "Post Type": "reel", "Content Theme": "Product", "Engagement Rate": 2 }),
-    makeRecord({ "Post Type": "image", "Content Theme": "Lifestyle", "Engagement Rate": 1 }),
-    makeRecord({ "Post Type": "image", "Content Theme": "Education", "Engagement Rate": 3 }),
+    // reel/Lifestyle: eng 100+50=150 over reach 1000+200=1200 -> 12.5%? as fraction 0.125
+    post("reel", "Lifestyle", 1000, 100),
+    post("reel", "Lifestyle", 200, 50),
+    post("reel", "Product", 500, 10), // 0.02
+    post("image", "Lifestyle", 100, 5), // 0.05
+    post("image", "Education", 300, 30), // 0.10
   ];
 
   const result = avgERByDimensionStacked(
@@ -366,7 +388,7 @@ describe("avgERByDimensionStacked", () => {
     (p) => str(p.fields["Content Theme"]),
   );
 
-  it("returns primaries sorted by total metric desc", () => {
+  it("returns primaries sorted by post volume desc", () => {
     expect(result.primaries.map((p) => p.label)).toEqual(["reel", "image"]);
   });
 
@@ -374,15 +396,27 @@ describe("avgERByDimensionStacked", () => {
     expect(result.segments[0]).toBe("Lifestyle");
   });
 
-  it("computes avg per (primary, segment) cell", () => {
-    expect(result.matrix.reel.Lifestyle.avg).toBe(5);
+  it("computes REACH-WEIGHTED ER per cell (Σengagement ÷ Σreach), not a mean of rates", () => {
+    // reel/Lifestyle: (100+50) / (1000+200) = 150/1200 = 0.125 — note a naive
+    // mean of per-post rates would give (0.10 + 0.25)/2 = 0.175, so this proves weighting.
+    expect(result.matrix.reel.Lifestyle.avg).toBeCloseTo(0.125, 6);
     expect(result.matrix.reel.Lifestyle.count).toBe(2);
-    expect(result.matrix.reel.Product.avg).toBe(2);
-    expect(result.matrix.image.Education.avg).toBe(3);
+    expect(result.matrix.reel.Product.avg).toBeCloseTo(0.02, 6);
+    expect(result.matrix.image.Education.avg).toBeCloseTo(0.1, 6);
   });
 
   it("fills missing cells with zeros", () => {
     expect(result.matrix.image.Product).toEqual({ avg: 0, count: 0 });
+  });
+
+  it("a cell with no reach has avg 0 but retains its post count", () => {
+    const zero = avgERByDimensionStacked(
+      [post("reel", "X", 0, 99)],
+      (p) => str(p.fields["Post Type"]),
+      (p) => str(p.fields["Content Theme"]),
+    );
+    expect(zero.matrix.reel.X.avg).toBe(0);
+    expect(zero.matrix.reel.X.count).toBe(1);
   });
 
   it("handles empty posts", () => {
@@ -396,11 +430,8 @@ describe("avgERByDimensionStacked", () => {
   });
 
   it("uses 'untagged' for missing keys", () => {
-    const p = [
-      makeRecord({ "Engagement Rate": 5 }),
-    ];
     const r = avgERByDimensionStacked(
-      p,
+      [post("", "", 100, 5)],
       (x) => str(x.fields["Post Type"]),
       (x) => str(x.fields["Content Theme"]),
     );
@@ -924,5 +955,120 @@ describe("dayOfWeek", () => {
   });
   it("returns Unknown for invalid date", () => {
     expect(dayOfWeek("bad")).toBe("Unknown");
+  });
+});
+
+// --- weightedEngagementRate ---
+describe("weightedEngagementRate", () => {
+  const post = (reach: number, eng: { Likes?: number; Comments?: number; Saves?: number; Shares?: number }, platform = "instagram") =>
+    makeRecord({ Platform: platform, Reach: reach, ...eng });
+
+  it("returns total engagement ÷ total reach (reach-weighted, not a mean of rates)", () => {
+    // Post A: reach 5000, 100 eng -> 2%. Post B: reach 50, 25 eng -> 50%.
+    // Unweighted mean would be 26%; reach-weighted is 125/5050 ≈ 2.475%.
+    const posts = [post(5000, { Likes: 100 }), post(50, { Likes: 25 })];
+    expect(weightedEngagementRate(posts)).toBeCloseTo(125 / 5050, 6);
+  });
+
+  it("sums likes+comments+saves+shares as engagement", () => {
+    const posts = [post(100, { Likes: 2, Comments: 3, Saves: 4, Shares: 1 })];
+    expect(weightedEngagementRate(posts)).toBeCloseTo(10 / 100, 6);
+  });
+
+  it("excludes zero-reach posts from both numerator and denominator", () => {
+    const posts = [post(100, { Likes: 10 }), post(0, { Likes: 999 })];
+    expect(weightedEngagementRate(posts)).toBeCloseTo(10 / 100, 6);
+  });
+
+  it("uses Pinterest impressions as reach (recordReach substitution)", () => {
+    const pin = makeRecord({ Platform: "pinterest", Impressions: 200, Reach: 0, Likes: 4 });
+    expect(weightedEngagementRate([pin])).toBeCloseTo(4 / 200, 6);
+  });
+
+  it("returns 0 for empty or all-zero-reach input", () => {
+    expect(weightedEngagementRate([])).toBe(0);
+    expect(weightedEngagementRate([post(0, { Likes: 5 })])).toBe(0);
+  });
+});
+
+// --- latestFollowers ---
+describe("latestFollowers", () => {
+  // Records arrive sorted Date desc, so index 0 is newest.
+  it("returns the newest non-empty Followers value", () => {
+    const rows = [
+      makeRecord({ Date: "2026-06-03", Followers: 711 }),
+      makeRecord({ Date: "2026-06-02", Followers: 709 }),
+    ];
+    expect(latestFollowers(rows)).toBe(711);
+  });
+
+  it("skips a newest row whose Followers cell is empty (partial-day guard)", () => {
+    const rows = [
+      makeRecord({ Date: "2026-06-03", Followers: "" }),
+      makeRecord({ Date: "2026-06-02", Followers: 709 }),
+    ];
+    expect(latestFollowers(rows)).toBe(709);
+  });
+
+  it("returns null when no row has a Followers value", () => {
+    const rows = [makeRecord({ Date: "2026-06-03" })];
+    expect(latestFollowers(rows)).toBeNull();
+  });
+
+  it("returns null for empty input", () => {
+    expect(latestFollowers([])).toBeNull();
+  });
+});
+
+// --- weightedERByDimension + MIN_RANK_SAMPLE ---
+describe("weightedERByDimension", () => {
+  const p = (theme: string, reach: number, likes: number) =>
+    makeRecord({ "Content Theme": theme, Platform: "instagram", Reach: reach, Likes: likes });
+
+  it("computes reach-weighted ER per bucket (Σengagement ÷ Σreach)", () => {
+    const rows = weightedERByDimension(
+      [p("A", 1000, 100), p("A", 200, 50), p("B", 500, 10)],
+      (r) => str(r.fields["Content Theme"]),
+    );
+    const a = rows.find((r) => r.label === "A")!;
+    const b = rows.find((r) => r.label === "B")!;
+    expect(a.er).toBeCloseTo(150 / 1200, 6);
+    expect(b.er).toBeCloseTo(10 / 500, 6);
+  });
+
+  it("marks buckets below MIN_RANK_SAMPLE as not rankable and sorts them last", () => {
+    // Bucket BIG: 3 posts, modest ER. Bucket TINY: 1 fluke post, huge ER.
+    const rows = weightedERByDimension(
+      [
+        p("BIG", 1000, 20),
+        p("BIG", 1000, 20),
+        p("BIG", 1000, 20),
+        p("TINY", 10, 9), // 90% ER off a single post
+      ],
+      (r) => str(r.fields["Content Theme"]),
+    );
+    expect(MIN_RANK_SAMPLE).toBe(3);
+    // Despite TINY's higher ER, BIG (rankable) sorts first; TINY is last + not rankable.
+    expect(rows[0].label).toBe("BIG");
+    expect(rows[0].rankable).toBe(true);
+    expect(rows[rows.length - 1].label).toBe("TINY");
+    expect(rows[rows.length - 1].rankable).toBe(false);
+  });
+
+  it("counts every post in the bucket even if reach is 0", () => {
+    const rows = weightedERByDimension(
+      [p("Z", 0, 5), p("Z", 0, 5)],
+      (r) => str(r.fields["Content Theme"]),
+    );
+    expect(rows[0].count).toBe(2);
+    expect(rows[0].er).toBe(0);
+  });
+});
+
+describe("postEngagement", () => {
+  it("sums likes + comments + saves + shares", () => {
+    expect(
+      postEngagement(makeRecord({ Likes: 1, Comments: 2, Saves: 3, Shares: 4 })),
+    ).toBe(10);
   });
 });

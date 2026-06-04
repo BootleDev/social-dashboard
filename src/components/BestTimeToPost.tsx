@@ -9,11 +9,8 @@ import {
   formatLocalDate,
 } from "@/lib/utils";
 import { toPost } from "@/lib/types";
-import {
-  saveRate,
-  shareRate,
-  viewThroughRate,
-} from "@/lib/derivedMetrics";
+import { postEngagement, recordReach } from "@/lib/utils";
+import { effectiveReach } from "@/lib/derivedMetrics";
 import ChartCard from "./ChartCard";
 import StatsPanel from "./StatsPanel";
 import PostDrilldownPanel from "./PostDrilldownPanel";
@@ -30,25 +27,64 @@ interface BestTimeToPostProps {
 interface MetricOption {
   label: string;
   short: string;
-  getMetric: (r: AirtableRecord) => number | undefined;
+  /**
+   * Aggregate a bucket of posts into the metric value (or null if N/A).
+   * Rate metrics are REACH-WEIGHTED — Σnumerator ÷ Σreach across the bucket,
+   * not a mean of per-post rates — so one tiny-reach post can't swing a slot.
+   * Returns a percentage for rates, an absolute for Reach.
+   */
+  aggregate: (posts: AirtableRecord[]) => number | null;
+  /** Single-post value for the drilldown column (a post's own rate/value). */
+  perPost: (r: AirtableRecord) => number | undefined;
   format: (v: number) => string;
+}
+
+/** Σnumerator ÷ Σ effectiveReach across a bucket, as a percent. null if no reach. */
+function weightedRatePct(
+  posts: AirtableRecord[],
+  numerator: (p: AirtableRecord) => number,
+): number | null {
+  let num_ = 0;
+  let reach = 0;
+  for (const r of posts) {
+    const er = effectiveReach(toPost(r));
+    if (er > 0) {
+      num_ += numerator(r);
+      reach += er;
+    }
+  }
+  return reach > 0 ? (num_ / reach) * 100 : null;
+}
+
+/** A single post's rate as a percent: numerator ÷ that post's reach. */
+function perPostRatePct(
+  r: AirtableRecord,
+  numerator: (p: AirtableRecord) => number,
+): number | undefined {
+  const er = effectiveReach(toPost(r));
+  return er > 0 ? (numerator(r) / er) * 100 : undefined;
 }
 
 const METRICS: MetricOption[] = [
   {
     label: "Engagement Rate",
     short: "ER",
-    getMetric: (r) => {
-      const v = num(r.fields["Engagement Rate"]);
-      return v > 0 ? v * 100 : undefined;
-    },
+    aggregate: (ps) => weightedRatePct(ps, (r) => postEngagement(r)),
+    perPost: (r) => perPostRatePct(r, (p) => postEngagement(p)),
     format: (v) => `${v.toFixed(2)}%`,
   },
   {
     label: "Reach",
     short: "Reach",
-    getMetric: (r) => {
-      const v = num(r.fields["Reach"]);
+    // Mean reach per post in the slot (absolute volume, not a rate).
+    aggregate: (ps) => {
+      const vals = ps.map((r) => recordReach(r)).filter((v) => v > 0);
+      return vals.length > 0
+        ? vals.reduce((s, v) => s + v, 0) / vals.length
+        : null;
+    },
+    perPost: (r) => {
+      const v = recordReach(r);
       return v > 0 ? v : undefined;
     },
     format: (v) => v.toFixed(0),
@@ -56,31 +92,22 @@ const METRICS: MetricOption[] = [
   {
     label: "Save Rate",
     short: "Save%",
-    getMetric: (r) => {
-      const p = toPost(r);
-      const v = saveRate(p);
-      return v !== undefined ? v * 100 : undefined;
-    },
+    aggregate: (ps) => weightedRatePct(ps, (r) => num(r.fields["Saves"])),
+    perPost: (r) => perPostRatePct(r, (p) => num(p.fields["Saves"])),
     format: (v) => `${v.toFixed(2)}%`,
   },
   {
     label: "Share Rate",
     short: "Share%",
-    getMetric: (r) => {
-      const p = toPost(r);
-      const v = shareRate(p);
-      return v !== undefined ? v * 100 : undefined;
-    },
+    aggregate: (ps) => weightedRatePct(ps, (r) => num(r.fields["Shares"])),
+    perPost: (r) => perPostRatePct(r, (p) => num(p.fields["Shares"])),
     format: (v) => `${v.toFixed(2)}%`,
   },
   {
     label: "View-Through Rate",
     short: "VTR",
-    getMetric: (r) => {
-      const p = toPost(r);
-      const v = viewThroughRate(p);
-      return v !== undefined ? v * 100 : undefined;
-    },
+    aggregate: (ps) => weightedRatePct(ps, (r) => num(r.fields["Video Views"])),
+    perPost: (r) => perPostRatePct(r, (p) => num(p.fields["Video Views"])),
     format: (v) => `${v.toFixed(1)}%`,
   },
 ];
@@ -118,16 +145,9 @@ function buildGrid(
     for (let h = 0; h < 24; h++) {
       const cell = grid[d][h];
       if (cell.posts.length === 0) continue;
-      let sum = 0;
-      let n = 0;
-      for (const r of cell.posts) {
-        const v = metric.getMetric(r);
-        if (v !== undefined && Number.isFinite(v)) {
-          sum += v;
-          n++;
-        }
-      }
-      cell.avg = n > 0 ? sum / n : null;
+      // Reach-weighted aggregate over the slot's posts (see MetricOption).
+      const v = metric.aggregate(cell.posts);
+      cell.avg = v !== null && Number.isFinite(v) ? v : null;
     }
   }
 
@@ -489,7 +509,7 @@ export default function BestTimeToPost({
           posts={drilldown.posts}
           bucketLabel={drilldown.label}
           metricLabel={metric.label}
-          getMetricValue={metric.getMetric}
+          getMetricValue={metric.perPost}
           formatMetric={metric.format}
           onClose={() => setDrilldown(null)}
         />

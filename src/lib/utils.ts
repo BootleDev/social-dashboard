@@ -355,37 +355,44 @@ export function avgERByDimensionStacked(
   posts: AirtableRecord[],
   getPrimary: (p: AirtableRecord) => string,
   getSegment: (p: AirtableRecord) => string,
-  getMetric: (p: AirtableRecord) => number | undefined = (p) =>
-    num(p.fields["Engagement Rate"]),
 ): {
   primaries: Array<{ label: string; total: number; count: number }>;
   segments: string[];
-  /** primary -> segment -> { avg, count } */
+  /** primary -> segment -> { avg, count } - avg is reach-weighted ER (0-1). */
   matrix: Record<string, Record<string, { avg: number; count: number }>>;
 } {
-  const cell = new Map<string, { total: number; count: number }>();
-  const primaryTotals = new Map<string, { total: number; count: number }>();
+  // Each cell accumulates engagement + reach, so ER = sum(engagement) / sum(reach)
+  // (reach-weighted), NOT a mean of per-post rates a single fluke post could
+  // dominate. recordReach applies the Pinterest substitution; a post with no
+  // reach still counts toward the cell's post count but not its rate.
+  const cell = new Map<string, { eng: number; reach: number; count: number }>();
+  const primaryTotals = new Map<string, { count: number }>();
   const segmentTotals = new Map<string, number>();
 
   for (const p of posts) {
     const primary = getPrimary(p) || "untagged";
     const segment = getSegment(p) || "untagged";
-    const metric = getMetric(p);
-    if (metric === undefined) continue;
+    const reach = recordReach(p);
 
-    const key = `${primary} ${segment}`;
-    const c = cell.get(key) ?? { total: 0, count: 0 };
-    cell.set(key, { total: c.total + metric, count: c.count + 1 });
+    const key = `${primary} ${segment}`;
+    const c = cell.get(key) ?? { eng: 0, reach: 0, count: 0 };
+    c.count += 1;
+    if (reach > 0) {
+      c.eng += postEngagement(p);
+      c.reach += reach;
+    }
+    cell.set(key, c);
 
-    const pt = primaryTotals.get(primary) ?? { total: 0, count: 0 };
-    primaryTotals.set(primary, { total: pt.total + metric, count: pt.count + 1 });
-
+    const pt = primaryTotals.get(primary) ?? { count: 0 };
+    primaryTotals.set(primary, { count: pt.count + 1 });
     segmentTotals.set(segment, (segmentTotals.get(segment) ?? 0) + 1);
   }
 
+  // Primaries sorted by post volume so the busiest themes lead (a rate sort
+  // here would resurface the fluke-bucket problem at the row level).
   const primaries = Array.from(primaryTotals.entries())
-    .map(([label, { total, count }]) => ({ label, total, count }))
-    .sort((a, b) => b.total - a.total);
+    .map(([label, { count }]) => ({ label, total: count, count }))
+    .sort((a, b) => b.count - a.count);
 
   const segments = Array.from(segmentTotals.entries())
     .sort((a, b) => b[1] - a[1])
@@ -395,9 +402,9 @@ export function avgERByDimensionStacked(
   for (const { label: primary } of primaries) {
     matrix[primary] = {};
     for (const segment of segments) {
-      const c = cell.get(`${primary} ${segment}`);
+      const c = cell.get(`${primary} ${segment}`);
       matrix[primary][segment] = c
-        ? { avg: c.count > 0 ? c.total / c.count : 0, count: c.count }
+        ? { avg: c.reach > 0 ? c.eng / c.reach : 0, count: c.count }
         : { avg: 0, count: 0 };
     }
   }
@@ -574,6 +581,100 @@ export function sumReach(records: AirtableRecord[]): number {
 export function avgField(records: AirtableRecord[], field: string): number {
   if (records.length === 0) return 0;
   return sumField(records, field) / records.length;
+}
+
+/**
+ * Reach-weighted engagement rate across posts: total engagement ÷ total reach.
+ * Engagement = likes + comments + saves + shares; reach uses recordReach (so
+ * Pinterest's impressions substitute applies). Returns a fraction (0-1) to match
+ * the stored per-post "Engagement Rate" scale; multiply by 100 for a percent.
+ *
+ * This is the statistically correct headline ER: a post that reached 5,000 at 2%
+ * carries far more weight than one that reached 30 at 8%. Prefer this over
+ * avgField(posts, "Engagement Rate"), which is an unweighted mean of per-post
+ * ratios and lets tiny-reach posts dominate. Mirrors how save/comment rates are
+ * already computed (sum ÷ reach) so all rate metrics are consistent.
+ */
+/** Engagement of a single post = likes + comments + saves + shares. */
+export function postEngagement(r: AirtableRecord): number {
+  return (
+    num(r.fields["Likes"]) +
+    num(r.fields["Comments"]) +
+    num(r.fields["Saves"]) +
+    num(r.fields["Shares"])
+  );
+}
+
+export function weightedEngagementRate(records: AirtableRecord[]): number {
+  const withReach = records.filter((r) => recordReach(r) > 0);
+  if (withReach.length === 0) return 0;
+  const engagement = withReach.reduce((s, r) => s + postEngagement(r), 0);
+  const reach = withReach.reduce((s, r) => s + recordReach(r), 0);
+  return reach > 0 ? engagement / reach : 0;
+}
+
+/**
+ * Minimum posts a dimension bucket needs before it may be RANKED as a "best"
+ * theme / time / hashtag. Buckets below this still display, but must not top a
+ * ranking on the strength of one or two fluke posts. (rankable=false below it.)
+ */
+export const MIN_RANK_SAMPLE = 3;
+
+/**
+ * Reach-weighted engagement rate per dimension bucket: within each bucket,
+ * total engagement ÷ total reach (recordReach, so Pinterest's impressions
+ * substitute applies). Replaces the unweighted mean-of-per-post-rates that let
+ * a single fluke post dominate a bucket and top a ranking.
+ *
+ * Returns buckets with: er (fraction 0-1), count, and rankable (count >=
+ * MIN_RANK_SAMPLE). Sorted so rankable buckets lead, by er desc; sub-sample
+ * buckets follow (still visible, never ranked #1). Use `rankable` to grey out
+ * or annotate "best" callouts.
+ */
+export function weightedERByDimension(
+  records: AirtableRecord[],
+  getKey: (r: AirtableRecord) => string,
+): Array<{ label: string; er: number; count: number; rankable: boolean }> {
+  const groups = new Map<string, { eng: number; reach: number; count: number }>();
+  for (const r of records) {
+    const key = getKey(r) || "untagged";
+    const reach = recordReach(r);
+    const g = groups.get(key) ?? { eng: 0, reach: 0, count: 0 };
+    // count every post in the bucket; only reach>0 posts contribute to the rate.
+    g.count += 1;
+    if (reach > 0) {
+      g.eng += postEngagement(r);
+      g.reach += reach;
+    }
+    groups.set(key, g);
+  }
+  return Array.from(groups.entries())
+    .map(([label, { eng, reach, count }]) => ({
+      label,
+      er: reach > 0 ? eng / reach : 0,
+      count,
+      rankable: count >= MIN_RANK_SAMPLE,
+    }))
+    .sort((a, b) => {
+      // Rankable buckets first, then by ER desc; sub-sample buckets after.
+      if (a.rankable !== b.rankable) return a.rankable ? -1 : 1;
+      return b.er - a.er;
+    });
+}
+
+/**
+ * Latest real Followers value from a platform's rows (sorted Date desc, so the
+ * first non-empty cell is the most recent measurement). Returns null when no row
+ * carries a value. Use this instead of records[0].fields["Followers"]: the newest
+ * row can have an empty Followers cell (Meta partial-day), which would otherwise
+ * read as 0 and produce a spurious follower count and a wild negative delta.
+ */
+export function latestFollowers(records: AirtableRecord[]): number | null {
+  for (const r of records) {
+    const v = r.fields["Followers"];
+    if (v !== undefined && v !== null && v !== "") return num(v);
+  }
+  return null;
 }
 
 /** Build unified date labels from multiple platform metric arrays, sorted ascending. */

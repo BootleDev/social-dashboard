@@ -23,7 +23,8 @@ import {
   sumReach,
   hasRealReach,
   hasRealImpressions,
-  avgField,
+  weightedEngagementRate,
+  latestFollowers,
   groupByPlatform,
   getPlatformKeys,
   buildUnifiedDates,
@@ -139,35 +140,54 @@ export default function Overview({
   const kpis = useMemo(() => {
     const totalFollowers = platformKeys.reduce((sum, key) => {
       const metrics = platformMap.get(key) ?? [];
-      const latest = metrics[0];
-      return sum + (latest ? num(latest.fields["Followers"]) : 0);
+      return sum + (latestFollowers(metrics) ?? 0);
     }, 0);
 
     const prevMap = groupByPlatform(prevDailyMetrics);
     const prevFollowers = platformKeys.reduce((sum, key) => {
       const metrics = prevMap.get(key) ?? [];
-      const latest = metrics[0];
-      return sum + (latest ? num(latest.fields["Followers"]) : 0);
+      return sum + (latestFollowers(metrics) ?? 0);
     }, 0);
 
-    const avgER = avgField(posts, "Engagement Rate") * 100;
-    const prevAvgER = avgField(prevPosts, "Engagement Rate") * 100;
+    // Reach-weighted ER (total engagement ÷ total reach), not an unweighted mean
+    // of per-post rates — so a viral post counts more than a tiny one, and this
+    // matches how save/comment rates are computed elsewhere.
+    const avgER = weightedEngagementRate(posts) * 100;
+    const prevAvgER = weightedEngagementRate(prevPosts) * 100;
 
-    // Reach and Impressions are summed PER METRIC from only the rows that carry
-    // a real measurement for that specific metric. An Instagram row is real for
-    // Reach but absent for Impressions (and Facebook the reverse), so a coarse
-    // row-level guard would let one metric's absence sum as 0. hasRealReach /
-    // hasRealImpressions judge each metric independently.
-    const realReachMetrics = dailyMetrics.filter(hasRealReach);
-    const realImprMetrics = dailyMetrics.filter(hasRealImpressions);
-    const prevRealReachMetrics = prevDailyMetrics.filter(hasRealReach);
-    const prevRealImprMetrics = prevDailyMetrics.filter(hasRealImpressions);
+    // Account-level reach/impressions are summed PER METRIC, per platform, from
+    // only the rows that carry a real measurement for that metric (hasRealReach /
+    // hasRealImpressions). They are presented per platform in the account
+    // scorecards below — not as a cross-platform total — because each platform
+    // reports a different subset (IG reach, FB impressions, Pinterest pin-sum).
 
-    const totalReach = sumReach(realReachMetrics);
-    const prevTotalReach = sumReach(prevRealReachMetrics);
-
-    const totalImpressions = sumField(realImprMetrics, "Impressions");
-    const prevTotalImpressions = sumField(prevRealImprMetrics, "Impressions");
+    // Post-level cross-platform volume. Unlike the account-level Reach/Impressions
+    // above (which each platform reports differently or not at all), EVERY platform
+    // reports impressions, reach and engagement at the POST level — so these sums
+    // are genuinely comparable across IG/FB/Pinterest and make a useful headline.
+    // recordReach() applies the Pinterest impressions-as-reach substitution.
+    const postImpressions = sumField(posts, "Impressions");
+    const prevPostImpressions = sumField(prevPosts, "Impressions");
+    const postReach = posts.reduce((s, p) => s + recordReach(p), 0);
+    const prevPostReach = prevPosts.reduce((s, p) => s + recordReach(p), 0);
+    const postEngagement = posts.reduce(
+      (s, p) =>
+        s +
+        num(p.fields["Likes"]) +
+        num(p.fields["Comments"]) +
+        num(p.fields["Saves"]) +
+        num(p.fields["Shares"]),
+      0,
+    );
+    const prevPostEngagement = prevPosts.reduce(
+      (s, p) =>
+        s +
+        num(p.fields["Likes"]) +
+        num(p.fields["Comments"]) +
+        num(p.fields["Saves"]) +
+        num(p.fields["Shares"]),
+      0,
+    );
 
     const totalProfileViews = sumField(dailyMetrics, "Profile Views");
 
@@ -235,41 +255,62 @@ export default function Overview({
 
     const breakdownFollowers = platformKeys.map((k) => {
       const m = platformMap.get(k) ?? [];
-      const latest = m[0];
       return {
         platform: k,
-        value: formatNumber(latest ? num(latest.fields["Followers"]) : 0),
+        value: formatNumber(latestFollowers(m) ?? 0),
       };
-    });
-
-    // Per-platform pills are built ONLY from platforms that have a real
-    // measurement for that specific metric. A platform the source doesn't report
-    // for a metric contributes NO entry (the pill is omitted), rather than a
-    // misleading 0 or a synthetic substitute. Result with current data:
-    // Reach = Instagram (+ Pinterest once MARKETING-35 lands); Impressions =
-    // Facebook (+ Pinterest). Facebook has no account Reach (Graph v22.0);
-    // Instagram has no account Impressions (retired 2024). See the Methodology
-    // page / airtable.ts source-model comment.
-    const breakdownReach = platformKeys.flatMap((k) => {
-      const m = (platformMap.get(k) ?? []).filter(hasRealReach);
-      if (m.length === 0) return [];
-      return [{ platform: k, value: formatNumber(sumReach(m)) }];
-    });
-
-    const breakdownImpressions = platformKeys.flatMap((k) => {
-      const m = (platformMap.get(k) ?? []).filter(hasRealImpressions);
-      if (m.length === 0) return [];
-      return [{ platform: k, value: formatNumber(sumField(m, "Impressions")) }];
     });
 
     const breakdownPosts = Array.from(postsByPlatform.entries()).map(
       ([platform, ps]) => ({ platform, value: String(ps.length) }),
     );
 
+    // Post-level metric pills — every platform contributes (all report these per post).
+    const postEngOf = (ps: typeof posts) =>
+      ps.reduce(
+        (s, p) =>
+          s +
+          num(p.fields["Likes"]) +
+          num(p.fields["Comments"]) +
+          num(p.fields["Saves"]) +
+          num(p.fields["Shares"]),
+        0,
+      );
+    const breakdownPostImpressions = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({ platform, value: formatNumber(sumField(ps, "Impressions")) }),
+    );
+    const breakdownPostReach = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({
+        platform,
+        value: formatNumber(ps.reduce((s, p) => s + recordReach(p), 0)),
+      }),
+    );
+    const breakdownPostEngagement = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({ platform, value: formatNumber(postEngOf(ps)) }),
+    );
+
+    // Per-platform account scorecards. Each platform shows ONLY its own real
+    // account metrics (the account-level volume figure it actually reports, plus
+    // followers), so single-platform availability reads as honest per-platform
+    // truth instead of a half-empty cross-platform total. Reach: IG real, FB
+    // absent, Pinterest pin_sum. Impressions: FB real, IG absent, Pinterest pin_sum.
+    const accountScorecards = platformKeys.map((k) => {
+      const m = platformMap.get(k) ?? [];
+      const realReach = m.filter(hasRealReach);
+      const realImpr = m.filter(hasRealImpressions);
+      return {
+        platform: k,
+        followers: latestFollowers(m),
+        reach: realReach.length > 0 ? sumReach(realReach) : null,
+        impressions:
+          realImpr.length > 0 ? sumField(realImpr, "Impressions") : null,
+      };
+    });
+
     const breakdownER = Array.from(postsByPlatform.entries()).map(
       ([platform, ps]) => ({
         platform,
-        value: `${(avgField(ps, "Engagement Rate") * 100).toFixed(1)}%`,
+        value: `${(weightedEngagementRate(ps) * 100).toFixed(1)}%`,
       }),
     );
 
@@ -291,16 +332,30 @@ export default function Overview({
         prevFollowers > 0
           ? pctChange(totalFollowers, prevFollowers)
           : undefined,
+      followersNew: prevFollowers === 0 && totalFollowers > 0,
       avgER,
       erChange: prevAvgER > 0 ? pctChange(avgER, prevAvgER) : undefined,
-      totalReach,
-      reachChange:
-        prevTotalReach > 0 ? pctChange(totalReach, prevTotalReach) : undefined,
-      totalImpressions,
-      impressionsChange:
-        prevTotalImpressions > 0
-          ? pctChange(totalImpressions, prevTotalImpressions)
+      erNew: prevAvgER === 0 && avgER > 0,
+      postImpressions,
+      postImpressionsChange:
+        prevPostImpressions > 0
+          ? pctChange(postImpressions, prevPostImpressions)
           : undefined,
+      postImpressionsNew: prevPostImpressions === 0 && postImpressions > 0,
+      postReach,
+      postReachChange:
+        prevPostReach > 0 ? pctChange(postReach, prevPostReach) : undefined,
+      postReachNew: prevPostReach === 0 && postReach > 0,
+      postEngagement,
+      postEngagementChange:
+        prevPostEngagement > 0
+          ? pctChange(postEngagement, prevPostEngagement)
+          : undefined,
+      postEngagementNew: prevPostEngagement === 0 && postEngagement > 0,
+      breakdownPostImpressions,
+      breakdownPostReach,
+      breakdownPostEngagement,
+      accountScorecards,
       postsPublished: posts.length,
       avgSaveRate,
       totalProfileViews,
@@ -315,8 +370,6 @@ export default function Overview({
       engScoreTooltip,
       reachScoreTooltip,
       breakdownFollowers,
-      breakdownReach,
-      breakdownImpressions,
       breakdownPosts,
       breakdownER,
       breakdownSaveRate,
@@ -352,11 +405,15 @@ export default function Overview({
       str(b.fields["Date"]).localeCompare(str(a.fields["Date"])),
     )[0];
 
+    // "Profile Links Taps" dropped 2026-06-04: Meta's profile_links_taps counts
+    // only contact-button taps (address/call/email/text), which this account has
+    // none of (verified 0 via live API probe). It is NOT bio/website-link taps
+    // (that was website_clicks, deprecated in v22.0). Real bio-link/outbound-click
+    // tracking will come from GA4 referral data (separate ticket).
     const cols: { field: string; label: string }[] = [
       { field: "Profile Views (30d)", label: "Profile Views" },
       { field: "Accounts Engaged (30d)", label: "Accounts Engaged" },
       { field: "Interactions (30d)", label: "Interactions" },
-      { field: "Profile Links Taps (30d)", label: "Link Taps" },
     ];
     return cols.flatMap(({ field, label }) => {
       const raw = latest.fields[field];
@@ -519,34 +576,46 @@ export default function Overview({
 
   return (
     <div className="space-y-6">
-      {/* KPI Row 1 — volume */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
+      {/* KPI Row 1 — cross-platform headline (POST-LEVEL volume + followers).
+          Post-level reach/impressions/engagement are reported by every platform,
+          so these totals are genuinely comparable across IG/FB/Pinterest — unlike
+          account-level Reach/Impressions, which each platform reports differently
+          or not at all (those live in the per-platform scorecards below). */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
         <KPICard
           title="Total Followers"
           value={formatNumber(kpis.totalFollowers)}
           change={kpis.followersChange}
-          tooltip={`Combined ${platformCountLabel} followers`}
+          isNew={kpis.followersNew}
+          tooltip={`Combined ${platformCountLabel} followers (account-level).`}
           breakdown={kpis.breakdownFollowers}
         />
         <KPICard
-          title="Total Reach"
-          value={formatNumber(kpis.totalReach)}
-          change={kpis.reachChange}
-          tooltip={`${glossaryFor("Reach")} Account reach is summed per platform from real-measurement days. Instagram reports it; Facebook's API (v22.0) does not, so Facebook has no reach pill here — an honest absence, not a gap. Pinterest account reach arrives with the Pinterest daily-facts work. See the Methodology page.`}
-          breakdown={kpis.breakdownReach}
+          title="Post Reach"
+          value={formatNumber(kpis.postReach)}
+          change={kpis.postReachChange}
+          isNew={kpis.postReachNew}
+          subtitle="Across all posts"
+          tooltip={`${glossaryFor("Reach")} Summed across every post in the window, all platforms. Pinterest uses post impressions as its reach proxy. This is post-level reach (comparable across platforms), distinct from account-level reach shown per platform below.`}
+          breakdown={kpis.breakdownPostReach}
         />
         <KPICard
-          title="Impressions"
-          value={
-            kpis.totalImpressions > 0
-              ? formatNumber(kpis.totalImpressions)
-              : "—"
-          }
-          change={
-            kpis.totalImpressions > 0 ? kpis.impressionsChange : undefined
-          }
-          tooltip="Account-level impressions, summed per platform only from days that carry a real measurement. Facebook reports account impressions; Instagram does not (it retired account impressions in 2024, now 'views'), so Instagram has no impressions pill here — that absence is correct, not a tracking gap. Shows — when no platform reports impressions in the window. See the Methodology page for how each platform's numbers are sourced."
-          breakdown={kpis.breakdownImpressions}
+          title="Post Impressions"
+          value={formatNumber(kpis.postImpressions)}
+          change={kpis.postImpressionsChange}
+          isNew={kpis.postImpressionsNew}
+          subtitle="Across all posts"
+          tooltip="Total impressions summed across every post in the window, all platforms. Every platform reports impressions at the post level, so this is comparable cross-platform — unlike account-level impressions, which only some platforms report."
+          breakdown={kpis.breakdownPostImpressions}
+        />
+        <KPICard
+          title="Total Engagement"
+          value={formatNumber(kpis.postEngagement)}
+          change={kpis.postEngagementChange}
+          isNew={kpis.postEngagementNew}
+          subtitle="Likes + comments + saves + shares"
+          tooltip="Sum of likes, comments, saves and shares across every post in the window, all platforms."
+          breakdown={kpis.breakdownPostEngagement}
         />
         <KPICard
           title="Posts Published"
@@ -555,13 +624,88 @@ export default function Overview({
         />
       </div>
 
+      {/* Per-platform account scorecards — each platform's OWN real account-level
+          metrics side by side. Account reach/impressions differ by platform
+          (IG reports reach not impressions; FB the reverse; Pinterest a pin-sum
+          of both), so this is where account-level volume lives honestly, rather
+          than forced into a half-empty cross-platform total. */}
+      <div
+        className="rounded-xl p-4"
+        style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
+      >
+        <div className="flex items-center gap-1.5 mb-3">
+          <span
+            className="text-xs font-medium"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            Account metrics by platform
+          </span>
+          <InfoTooltip
+            text="Account-level reach, impressions and followers as each platform reports them. A blank means the platform does not publish that metric at the account level (e.g. Facebook has no account reach; Instagram retired account impressions) — not a tracking gap. Pinterest reach/impressions are a pin-sum. See the Methodology page."
+            label="Why do platforms show different account metrics?"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {kpis.accountScorecards.map((sc) => {
+            const cfg = getPlatformConfig(sc.platform);
+            return (
+              <div
+                key={sc.platform}
+                className="rounded-lg p-3"
+                style={{
+                  background: "var(--bg-secondary)",
+                  borderLeft: `3px solid ${cfg.color}`,
+                  border: "1px solid var(--border)",
+                  borderLeftWidth: "3px",
+                  borderLeftColor: cfg.color,
+                }}
+              >
+                <span
+                  className="text-[11px] px-1.5 py-0.5 rounded font-semibold"
+                  style={{ background: cfg.colorBg, color: cfg.color }}
+                >
+                  {cfg.label}
+                </span>
+                <div className="grid grid-cols-3 gap-2 mt-2.5">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                      Reach
+                    </span>
+                    <span className="text-base font-bold">
+                      {sc.reach !== null ? formatNumber(sc.reach) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                      Impressions
+                    </span>
+                    <span className="text-base font-bold">
+                      {sc.impressions !== null ? formatNumber(sc.impressions) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                      Followers
+                    </span>
+                    <span className="text-base font-bold">
+                      {sc.followers !== null ? formatNumber(sc.followers) : "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* KPI Row 2 — quality */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
         <KPICard
           title="Avg Engagement Rate"
           value={formatPercent(kpis.avgER)}
           change={kpis.erChange}
-          tooltip={glossaryFor("Engagement Rate")}
+          isNew={kpis.erNew}
+          tooltip={`${glossaryFor("Engagement Rate")} Reach-weighted: total engagement ÷ total reach across posts, so larger posts count more (not an unweighted average of per-post rates).`}
           breakdown={kpis.breakdownER}
         />
         <KPICard

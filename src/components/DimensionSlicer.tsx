@@ -8,7 +8,16 @@ import { useChartTheme } from "@/lib/useChartTheme";
 import ChartCard from "./ChartCard";
 import StatsPanel from "./StatsPanel";
 import PostDrilldownPanel from "./PostDrilldownPanel";
-import { groupByDimension, timeBucket, dayOfWeek, str, num } from "@/lib/utils";
+import {
+  groupByDimension,
+  timeBucket,
+  dayOfWeek,
+  str,
+  num,
+  recordReach,
+  postEngagement,
+  MIN_RANK_SAMPLE,
+} from "@/lib/utils";
 import { describe } from "@/lib/stats";
 import {
   saveRate,
@@ -19,6 +28,7 @@ import {
   watchTimePct,
   engagementScore,
   reachScore,
+  effectiveReach,
 } from "@/lib/derivedMetrics";
 import { toPost } from "@/lib/types";
 import type { AirtableRecord } from "@/lib/utils";
@@ -30,9 +40,21 @@ interface DimensionOption {
   getKey: (r: AirtableRecord) => string;
 }
 
+// How a metric aggregates over a bucket of posts:
+//  "weighted-rate" — Σnumerator ÷ Σreach (reach-weighted, the correct way to
+//      aggregate a ratio; a tiny-reach post can't swing the bucket).
+//  "mean" — simple mean per post (for absolute volumes like Reach, Reposts).
+//  "score-mean" — mean of per-post composite scores (0-100 scores are designed
+//      to be averaged, not reach-weighted).
+type MetricKind = "weighted-rate" | "mean" | "score-mean";
+
 interface MetricOption {
   label: string;
+  kind: MetricKind;
+  /** Per-post value for the chart-less paths (availability, drilldown, outliers). */
   getMetric: (r: AirtableRecord) => number | undefined;
+  /** For weighted-rate metrics: the numerator summed over the bucket (× reach denom). */
+  numerator?: (r: AirtableRecord) => number;
   format: (v: number) => string;
   yLabel: string;
 }
@@ -65,52 +87,63 @@ const DIMENSION_OPTIONS: DimensionOption[] = [
 const METRIC_OPTIONS: MetricOption[] = [
   {
     label: "Engagement Rate",
+    kind: "weighted-rate",
     getMetric: (r) => num(r.fields["Engagement Rate"]) * 100,
+    numerator: (r) => postEngagement(r),
     format: (v) => `${v.toFixed(2)}%`,
     yLabel: "ER %",
   },
   {
     label: "Save Rate",
+    kind: "weighted-rate",
     getMetric: (r) => {
       const p = toPost(r);
       const v = saveRate(p);
       return v !== undefined ? v * 100 : undefined;
     },
+    numerator: (r) => num(r.fields["Saves"]),
     format: (v) => `${v.toFixed(2)}%`,
     yLabel: "Save Rate %",
   },
   {
     label: "Share Rate",
+    kind: "weighted-rate",
     getMetric: (r) => {
       const p = toPost(r);
       const v = shareRate(p);
       return v !== undefined ? v * 100 : undefined;
     },
+    numerator: (r) => num(r.fields["Shares"]),
     format: (v) => `${v.toFixed(2)}%`,
     yLabel: "Share Rate %",
   },
   {
     label: "Comment Rate",
+    kind: "weighted-rate",
     getMetric: (r) => {
       const p = toPost(r);
       const v = commentRate(p);
       return v !== undefined ? v * 100 : undefined;
     },
+    numerator: (r) => num(r.fields["Comments"]),
     format: (v) => `${v.toFixed(2)}%`,
     yLabel: "Comment Rate %",
   },
   {
     label: "View-Through Rate",
+    kind: "weighted-rate",
     getMetric: (r) => {
       const p = toPost(r);
       const v = viewThroughRate(p);
       return v !== undefined ? v * 100 : undefined;
     },
+    numerator: (r) => num(r.fields["Video Views"]),
     format: (v) => `${v.toFixed(1)}%`,
     yLabel: "VTR %",
   },
   {
     label: "Watch Time %",
+    kind: "score-mean",
     getMetric: (r) => {
       const p = toPost(r);
       const v = watchTimePct(p);
@@ -121,12 +154,14 @@ const METRIC_OPTIONS: MetricOption[] = [
   },
   {
     label: "Reach",
+    kind: "mean",
     getMetric: (r) => num(r.fields["Reach"]),
     format: (v) => v.toFixed(0),
     yLabel: "Avg Reach",
   },
   {
     label: "Engagement Score",
+    kind: "score-mean",
     getMetric: (r) => {
       const p = toPost(r);
       return engagementScore(p);
@@ -136,6 +171,7 @@ const METRIC_OPTIONS: MetricOption[] = [
   },
   {
     label: "Reach Score",
+    kind: "score-mean",
     getMetric: (r) => {
       const p = toPost(r);
       return reachScore(p);
@@ -148,6 +184,9 @@ const METRIC_OPTIONS: MetricOption[] = [
   // primarily Pinterest. Empty buckets are filtered by the chart at render time.
   {
     label: "Skip Rate (Reels)",
+    // Stored as a per-post % with no clean reach denominator to re-weight by;
+    // average the per-post values (excluding 0 = no data).
+    kind: "score-mean",
     getMetric: (r) => {
       const v = num(r.fields["Skip Rate"]);
       // 0 means "no data" not "perfect retention" — return undefined so the
@@ -159,22 +198,26 @@ const METRIC_OPTIONS: MetricOption[] = [
   },
   {
     label: "Repost Rate",
+    kind: "weighted-rate",
     getMetric: (r) => {
       const p = toPost(r);
       const v = repostRate(p);
       return v !== undefined ? v * 100 : undefined;
     },
+    numerator: (r) => num(r.fields["Reposts"]),
     format: (v) => `${v.toFixed(2)}%`,
     yLabel: "Repost Rate %",
   },
   {
     label: "Reposts (total)",
+    kind: "mean",
     getMetric: (r) => num(r.fields["Reposts"]),
     format: (v) => v.toFixed(1),
     yLabel: "Avg Reposts",
   },
   {
     label: "Outbound Clicks (Pinterest)",
+    kind: "mean",
     getMetric: (r) => {
       // Pinterest pin records store outbound clicks in Link Clicks (per the
       // Pinterest Data Refresher's posts.push mapping).
@@ -189,6 +232,68 @@ const METRIC_OPTIONS: MetricOption[] = [
 
 interface DimensionSlicerProps {
   posts: AirtableRecord[];
+}
+
+interface DimBucket {
+  label: string;
+  value: number;
+  count: number;
+  rankable: boolean;
+}
+
+/**
+ * Aggregate posts into dimension buckets using the metric's aggregation kind:
+ * weighted-rate buckets are Σnumerator ÷ Σreach (×100); mean/score-mean buckets
+ * average the per-post values. Buckets below MIN_RANK_SAMPLE are marked
+ * rankable=false and sorted last so a 1-2 post fluke can't top the chart.
+ */
+function bucketsForMetric(
+  posts: AirtableRecord[],
+  getKey: (r: AirtableRecord) => string,
+  metric: MetricOption,
+): DimBucket[] {
+  const groups = new Map<
+    string,
+    { num: number; reach: number; sum: number; n: number; count: number }
+  >();
+  for (const r of posts) {
+    const key = getKey(r) || "untagged";
+    const g =
+      groups.get(key) ?? { num: 0, reach: 0, sum: 0, n: 0, count: 0 };
+    g.count += 1;
+    if (metric.kind === "weighted-rate" && metric.numerator) {
+      const reach = effectiveReach(toPost(r));
+      if (reach > 0) {
+        g.num += metric.numerator(r);
+        g.reach += reach;
+      }
+    } else {
+      const v = metric.getMetric(r);
+      if (v !== undefined && Number.isFinite(v)) {
+        g.sum += v;
+        g.n += 1;
+      }
+    }
+    groups.set(key, g);
+  }
+  return Array.from(groups.entries())
+    .map(([label, g]) => ({
+      label,
+      value:
+        metric.kind === "weighted-rate"
+          ? g.reach > 0
+            ? (g.num / g.reach) * 100
+            : 0
+          : g.n > 0
+            ? g.sum / g.n
+            : 0,
+      count: g.count,
+      rankable: g.count >= MIN_RANK_SAMPLE,
+    }))
+    .sort((a, b) => {
+      if (a.rankable !== b.rankable) return a.rankable ? -1 : 1;
+      return b.value - a.value;
+    });
 }
 
 /** Minimum fill-rate (0-1) below which an option is considered unusable. */
@@ -275,37 +380,42 @@ export default function DimensionSlicer({ posts }: DimensionSlicerProps) {
     });
   }, [drilldownBucket, posts, dim]);
 
-  const chartData = useMemo(() => {
-    const grouped = groupByDimension(
-      posts,
-      dim.getKey,
-      (r) => metric.getMetric(r),
-    ).filter((g) => g.label !== "untagged" && g.label !== "");
+  // Buckets aggregated by the metric's kind (weighted-rate / mean / score-mean),
+  // with sub-MIN_RANK_SAMPLE buckets marked rankable=false and sorted last.
+  const buckets = useMemo(
+    () =>
+      bucketsForMetric(posts, dim.getKey, metric).filter(
+        (g) => g.label !== "untagged" && g.label !== "",
+      ),
+    [posts, dim, metric],
+  );
 
+  const chartData = useMemo(() => {
     return {
-      labels: grouped.map((g) => `${g.label} (${g.count})`),
+      labels: buckets.map(
+        (g) => `${g.label} (${g.count})${g.rankable ? "" : " *"}`,
+      ),
       datasets: [
         {
           label: metric.label,
-          data: grouped.map((g) => g.avg),
-          backgroundColor: colors.series[0] + "80",
-          borderColor: colors.series[0],
+          data: buckets.map((g) => g.value),
+          // Sub-sample buckets (rankable=false) are dimmed so they read as
+          // "not enough data to rank", never as a confident winner.
+          backgroundColor: buckets.map((g) =>
+            g.rankable ? colors.series[0] + "80" : colors.series[0] + "26",
+          ),
+          borderColor: buckets.map((g) =>
+            g.rankable ? colors.series[0] : colors.series[0] + "55",
+          ),
           borderWidth: 1,
         },
       ],
     };
-  }, [posts, dim, metric, colors]);
+  }, [buckets, metric, colors]);
 
   // Bucket-label lookup (chart bar index → raw bucket key, since the chart
   // labels include the count suffix like "Question (49)").
-  const bucketKeys = useMemo(() => {
-    const grouped = groupByDimension(
-      posts,
-      dim.getKey,
-      (r) => metric.getMetric(r),
-    ).filter((g) => g.label !== "untagged" && g.label !== "");
-    return grouped.map((g) => g.label);
-  }, [posts, dim, metric]);
+  const bucketKeys = useMemo(() => buckets.map((g) => g.label), [buckets]);
 
   // Per-group raw metric values. Used to detect outliers and surface the
   // "remove this one post and the average halves" callout. We deliberately

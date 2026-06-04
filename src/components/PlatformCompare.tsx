@@ -13,10 +13,12 @@ import {
   str,
   formatNumber,
   formatPercent,
-  avgField,
+  weightedEngagementRate,
   sumField,
   sumReach,
   recordReach,
+  hasRealReach,
+  hasRealImpressions,
   groupByPlatform,
   getPlatformKeys,
   buildUnifiedDates,
@@ -39,7 +41,6 @@ interface PlatformKPIs {
   avgSaves: number;
   avgShares: number;
   profileViews: number;
-  webClicks: number;
   // Expansion metrics
   reachPerPost: number;
   engagementPerPost: number;
@@ -85,7 +86,6 @@ function PlatformCard({
     { label: "Avg ER", value: formatPercent(kpis.avgER) },
     { label: "Total Reach", value: formatNumber(kpis.totalReach) },
     { label: "Impressions", value: formatNumber(kpis.totalImpressions) },
-    { label: "Web Clicks", value: formatNumber(kpis.webClicks) },
     { label: "Reach / Post", value: formatNumber(kpis.reachPerPost) },
     { label: "Eng / Post", value: formatNumber(kpis.engagementPerPost) },
     { label: "Profile Views", value: formatNumber(kpis.profileViews) },
@@ -176,7 +176,10 @@ export default function PlatformCompare({
       const latest = metrics[0];
       const n = platformPosts.length;
 
-      const totalReach = sumReach(metrics);
+      // Account-grain volume is summed PER METRIC only from rows that carry a
+      // real measurement for that metric (WEBDEV-146), matching Overview — so
+      // one metric's absence never sums as a false 0. Source: Account Daily Facts.
+      const totalReach = sumReach(metrics.filter(hasRealReach));
       // Per-post reach uses the posts' own reach (Pinterest-substituted), not
       // the daily-metrics total, so it reflects what each post actually pulled.
       const postReachTotal = platformPosts.reduce(
@@ -195,14 +198,13 @@ export default function PlatformCompare({
 
       result[key] = {
         followers: latest ? num(latest.fields["Followers"]) : 0,
-        avgER: avgField(platformPosts, "Engagement Rate") * 100,
+        avgER: weightedEngagementRate(platformPosts) * 100,
         totalReach,
-        totalImpressions: sumField(metrics, "Impressions"),
+        totalImpressions: sumField(metrics.filter(hasRealImpressions), "Impressions"),
         posts: n,
         avgSaves: n > 0 ? sumField(platformPosts, "Saves") / n : 0,
         avgShares: n > 0 ? sumField(platformPosts, "Shares") / n : 0,
         profileViews: sumField(metrics, "Profile Views"),
-        webClicks: sumField(metrics, "Website Clicks"),
         reachPerPost: n > 0 ? postReachTotal / n : 0,
         engagementPerPost: n > 0 ? postEngagementTotal / n : 0,
         avgEngScore: avgScore(platformPosts, engagementScore),

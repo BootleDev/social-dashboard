@@ -157,19 +157,10 @@ export default function DashboardPage() {
         : [],
     [data, dateRange, selectedPlatforms],
   );
-  const filteredDaily = useMemo(
-    () =>
-      data
-        ? filterByPlatform(
-            filterByDateRange(data.dailyMetrics, "Date", dateRange),
-            selectedPlatforms,
-          )
-        : [],
-    [data, dateRange, selectedPlatforms],
-  );
-  // Account-grain KPI source (WEBDEV-146). Same date+platform filtering as the
-  // legacy feed, but read from Account Daily Facts. This replaces filteredDaily
-  // as the account-KPI input to Overview.
+  // Account-grain KPI source (WEBDEV-146). Date+platform filtered, read from
+  // Account Daily Facts. This is the account-KPI input to both Overview and the
+  // Ops-tab Platform Compare (the legacy Daily Account Metrics feed is retired
+  // for account KPIs).
   const filteredAccountFacts = useMemo(
     () =>
       data
@@ -219,21 +210,11 @@ export default function DashboardPage() {
     );
   }, [data]);
 
-  // Comparison period metrics (same duration, immediately before selected range)
-  const comparisonDaily = useMemo(() => {
-    if (!data) return [];
-    const comp = getComparisonPeriod(dateRange.start, dateRange.end);
-    if (!comp) return [];
-    return filterByPlatform(
-      filterByDateRange(data.dailyMetrics, "Date", {
-        start: comp.compStart,
-        end: comp.compEnd,
-        label: "",
-      }),
-      selectedPlatforms,
-    );
-  }, [data, dateRange, selectedPlatforms]);
-
+  // Comparison period posts (same duration, immediately before selected range).
+  // Account-level prior-period comparison uses comparisonAccountFacts below
+  // (Account Daily Facts), NOT the retired Daily Account Metrics table — the old
+  // comparisonDaily built from data.dailyMetrics was removed 2026-06-04 as a
+  // dead legacy-table trap (WEBDEV-146).
   const comparisonPosts = useMemo(() => {
     if (!data) return [];
     const comp = getComparisonPeriod(dateRange.start, dateRange.end);
@@ -478,7 +459,7 @@ export default function DashboardPage() {
               {tab === "ops" && (
                 <OpsPanel
                   posts={filteredPosts}
-                  dailyMetrics={filteredDaily}
+                  dailyMetrics={filteredAccountFacts}
                 />
               )}
             </div>
