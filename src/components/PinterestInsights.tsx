@@ -335,7 +335,7 @@ export function formatGrowthDisplay(value: number): {
     return { label: "breakout", kind: "breakout" };
   return {
     label: `${value > 0 ? "+" : ""}${value}%`,
-    kind: value >= 10 ? "up" : value < 0 ? "down" : "up",
+    kind: value < 0 ? "down" : "up",
   };
 }
 

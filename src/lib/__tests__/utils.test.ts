@@ -401,6 +401,10 @@ describe("dayPartOfHour", () => {
     expect(dayPartOfHour(-1)).toBeNull();
     expect(dayPartOfHour(25)).toBeNull();
   });
+
+  it("returns null (not a mis-bucket) for NaN", () => {
+    expect(dayPartOfHour(NaN)).toBeNull();
+  });
 });
 
 // --- hashtagsForERRanking ---

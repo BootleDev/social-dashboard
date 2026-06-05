@@ -225,6 +225,8 @@ export function windowReachChange(
 ): number | undefined {
   const { minDays = 5, maxCoverageRatio = 3, minRelMove = 5 } = opts;
   if (curDays < minDays || prevDays < minDays) return undefined;
+  // Guard the per-day division even if a caller passes minDays: 0.
+  if (curDays <= 0 || prevDays <= 0) return undefined;
 
   const coverageRatio =
     Math.max(curDays, prevDays) / Math.min(curDays, prevDays);
@@ -398,6 +400,7 @@ export type DayPart = (typeof DAY_PARTS)[number];
  * skip it rather than mis-bucket.
  */
 export function dayPartOfHour(hour: number): DayPart | null {
+  if (!Number.isFinite(hour)) return null;
   const h = hour === 24 ? 0 : hour;
   if (h < 0 || h > 23) return null;
   if (h <= 5) return "Night"; // 00:00-05:59
