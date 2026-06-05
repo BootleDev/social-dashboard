@@ -404,13 +404,18 @@ export default function ContentAnalysis({
 
   return (
     <div className="space-y-4">
-      <TopFindings posts={posts} />
+      {/* "Top findings" is a window-level summary, not per-sub-tab content. It
+          used to render above the SubNav so it repeated on all five Insights
+          sub-tabs (WEBDEV-182 item 12). Scope it to the entry/landing sub-tab
+          ("performance") so it shows once. */}
       <SubNav
         storageKey="insights"
         items={SUBNAV_ITEMS}
         value={subTab}
         onChange={setSubTab}
       />
+
+      {subTab === "performance" && <TopFindings posts={posts} />}
 
       {subTab === "loop" &&
         (posts.length === 0 ? (
