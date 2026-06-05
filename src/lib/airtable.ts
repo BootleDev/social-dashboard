@@ -1,4 +1,17 @@
+import { createTtlCache } from "./ttlCache";
+
 const BASE_URL = "https://api.airtable.com/v0";
+
+/**
+ * Result cache for table reads. Caches the PARSED records, not the raw HTTP
+ * responses — Next.js's per-fetch Data Cache caps a single entry at 2 MB and
+ * the Pinterest-trends / Instagram-audience feeds now exceed that, which made
+ * the cached fetch path throw and 500 the dashboard on normal loads. A 30-min
+ * in-process TTL here preserves the old caching behaviour without the size cap.
+ * The Refresh button (noCache) forces a refresh that writes through.
+ */
+const TABLE_CACHE_TTL_MS = 1800_000; // 30 minutes, matching the prior revalidate.
+const tableCache = createTtlCache({ ttlMs: TABLE_CACHE_TTL_MS });
 
 /**
  * Per-grain data-source model (WEBDEV-146, decided 2026-06-02). Read this before
@@ -68,15 +81,34 @@ function getCredentials(): { baseId: string; apiKey: string } {
   return { baseId, apiKey };
 }
 
-async function fetchAllRecords(
+interface FetchOptions {
+  filterByFormula?: string;
+  sort?: Array<{ field: string; direction: "asc" | "desc" }>;
+  fields?: string[];
+  maxRecords?: number;
+  noCache?: boolean;
+}
+
+/** Stable cache key for a table read: anything that changes the result set. */
+function cacheKeyFor(tableId: string, options: FetchOptions): string {
+  return JSON.stringify({
+    tableId,
+    filterByFormula: options.filterByFormula ?? null,
+    sort: options.sort ?? null,
+    fields: options.fields ?? null,
+    maxRecords: options.maxRecords ?? null,
+  });
+}
+
+/**
+ * Read every record from a table, paging through Airtable's offset cursor.
+ * Always fetches `no-store`; result caching is handled one level up by the
+ * in-process TTL cache (see fetchAllRecords), which avoids Next's 2 MB
+ * per-fetch Data Cache cap that the largest feeds now exceed.
+ */
+async function fetchAllRecordsUncached(
   tableId: string,
-  options: {
-    filterByFormula?: string;
-    sort?: Array<{ field: string; direction: "asc" | "desc" }>;
-    fields?: string[];
-    maxRecords?: number;
-    noCache?: boolean;
-  } = {},
+  options: FetchOptions,
 ): Promise<AirtableRecord[]> {
   const { baseId, apiKey } = getCredentials();
   const allRecords: AirtableRecord[] = [];
@@ -102,19 +134,10 @@ async function fetchAllRecords(
     }
 
     const url = `${BASE_URL}/${baseId}/${tableId}?${params.toString()}`;
-    // MARKETING-19 Fix 7: when noCache is set (Refresh button path), bypass
-    // the 30-min Next.js fetch cache by setting cache: 'no-store'. Default
-    // behaviour keeps the 30-min revalidate window for normal dashboard loads.
-    const fetchOptions: RequestInit = options.noCache
-      ? {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          cache: "no-store",
-        }
-      : {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          next: { revalidate: 1800 },
-        };
-    const res = await fetch(url, fetchOptions);
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: "no-store",
+    });
 
     if (!res.ok) {
       const err = await res.text();
@@ -127,6 +150,23 @@ async function fetchAllRecords(
   } while (offset);
 
   return allRecords;
+}
+
+/**
+ * Cached table read. Serves a parsed result from the 30-min in-process TTL
+ * cache; `noCache` (the Refresh button) forces a fresh read that writes
+ * through. This replaces the previous `next: { revalidate }` per-fetch caching,
+ * which 500'd once a feed's response exceeded Next's 2 MB cached-entry cap.
+ */
+async function fetchAllRecords(
+  tableId: string,
+  options: FetchOptions = {},
+): Promise<AirtableRecord[]> {
+  return tableCache.get(
+    cacheKeyFor(tableId, options),
+    () => fetchAllRecordsUncached(tableId, options),
+    { forceRefresh: options.noCache },
+  );
 }
 
 export async function getPosts(opts: { noCache?: boolean } = {}) {
