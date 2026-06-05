@@ -170,6 +170,75 @@ export function pctChange(
 }
 
 /**
+ * A percentage change that is only returned when it is statistically
+ * meaningful — i.e. the prior-period base is large enough to be a trustworthy
+ * denominator AND the absolute swing is large enough to matter. Otherwise
+ * returns undefined.
+ *
+ * This guards the "X% vs prior period" lines (e.g. the "Needs attention"
+ * biggest-mover) against small-denominator artifacts: a window that went from
+ * 15 to 545 reach is +3533%, which is mathematically real but analytically
+ * noise — the prior base is too small to anchor a percentage. Callers should
+ * treat undefined as "no significant move to report" rather than "no data".
+ *
+ * Floors default to a conservative reach-scale base; pass `opts` to tune for a
+ * different metric. A change still returns undefined when previous is 0 (no
+ * denominator), matching pctChange.
+ */
+export function significantPctChange(
+  current: number,
+  previous: number,
+  opts: { minBase?: number; minAbsDelta?: number } = {},
+): number | undefined {
+  const { minBase = 50, minAbsDelta = 50 } = opts;
+  if (previous < minBase) return undefined;
+  if (Math.abs(current - previous) < minAbsDelta) return undefined;
+  return pctChange(current, previous);
+}
+
+/**
+ * Period-over-period reach change that is robust to differing window coverage.
+ *
+ * Comparing a current-window reach SUM to a prior-window reach SUM is only
+ * valid when both windows cover a comparable number of days. When the prior
+ * window is sparse (e.g. account-fact rows only exist for 2 of its 30 days), a
+ * sum-vs-sum ratio invents an explosive percentage (the real "Instagram reach
+ * up 3545%" bug: 26 measured days vs 2). The honest comparison is per-day
+ * AVERAGE reach, with two guards:
+ *   - both windows must have at least `minDays` measured days, and
+ *   - their coverage must not be more lopsided than `maxCoverageRatio`,
+ * so we never compare a dense window against a near-empty one.
+ *
+ * Returns the percent change in average daily reach, or undefined when the
+ * comparison is not trustworthy or the move is below `minRelMove` (relative).
+ */
+export function windowReachChange(
+  curSum: number,
+  curDays: number,
+  prevSum: number,
+  prevDays: number,
+  opts: {
+    minDays?: number;
+    maxCoverageRatio?: number;
+    minRelMove?: number;
+  } = {},
+): number | undefined {
+  const { minDays = 5, maxCoverageRatio = 3, minRelMove = 5 } = opts;
+  if (curDays < minDays || prevDays < minDays) return undefined;
+
+  const coverageRatio =
+    Math.max(curDays, prevDays) / Math.min(curDays, prevDays);
+  if (coverageRatio > maxCoverageRatio) return undefined;
+
+  const curAvg = curSum / curDays;
+  const prevAvg = prevSum / prevDays;
+  const change = pctChange(curAvg, prevAvg);
+  if (change === undefined) return undefined;
+  if (Math.abs(change) < minRelMove) return undefined;
+  return change;
+}
+
+/**
  * Generic aggregator: groups records by a key extractor and averages a metric.
  * Returns results sorted descending by avg, skipping records where getMetric
  * returns undefined (missing data).

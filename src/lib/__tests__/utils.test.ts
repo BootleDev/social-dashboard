@@ -9,6 +9,8 @@ import {
   formatNumber,
   formatPercent,
   pctChange,
+  significantPctChange,
+  windowReachChange,
   avgERByPostType,
   avgERByTheme,
   postingHeatmap,
@@ -297,6 +299,80 @@ describe("pctChange", () => {
   });
   it("returns 0 when values are equal", () => {
     expect(pctChange(100, 100)).toBe(0);
+  });
+});
+
+// --- significantPctChange ---
+describe("significantPctChange", () => {
+  it("returns the percent change for a meaningful base and delta", () => {
+    // 5.6K -> 4.9K is a real -12% move on a solid base.
+    expect(significantPctChange(4900, 5600)).toBeCloseTo(-12.5, 1);
+  });
+
+  it("suppresses an explosive move off a near-zero base", () => {
+    // 15 -> 545 is +3533% — a small-denominator artifact, not signal.
+    expect(significantPctChange(545, 15)).toBeUndefined();
+  });
+
+  it("returns undefined when previous is 0 (matches pctChange)", () => {
+    expect(significantPctChange(100, 0)).toBeUndefined();
+  });
+
+  it("suppresses a move whose absolute delta is below the floor", () => {
+    // Both bases are above the prior-base floor, but the swing itself is tiny:
+    // 210 -> 240 is +14% but only a 30-unit move, below the abs-delta floor.
+    expect(
+      significantPctChange(240, 210, { minBase: 100, minAbsDelta: 100 }),
+    ).toBeUndefined();
+  });
+
+  it("honors a custom minBase floor", () => {
+    // prev=60 is below a 100 base floor -> suppressed even though delta is large.
+    expect(significantPctChange(600, 60, { minBase: 100 })).toBeUndefined();
+    // prev=120 clears the floor -> real change returned.
+    expect(significantPctChange(240, 120, { minBase: 100 })).toBe(100);
+  });
+
+  it("passes a large move when BOTH base and delta clear their floors", () => {
+    // 1000 -> 5000 on a 1000 base, 4000 delta: a real 400% move, kept.
+    expect(
+      significantPctChange(5000, 1000, { minBase: 500, minAbsDelta: 100 }),
+    ).toBe(400);
+  });
+});
+
+// --- windowReachChange ---
+describe("windowReachChange", () => {
+  it("compares per-day averages so lopsided coverage can't fake a huge move", () => {
+    // The real 3545% bug: current = 26 days summing 4900 (avg ~188/day),
+    // prior = only 2 days summing 134 (avg ~67/day). The sum-vs-sum ratio is
+    // ~3500%, but the honest per-day comparison is ~+180%.
+    const result = windowReachChange(4900, 26, 134, 2);
+    // Coverage is too lopsided (2 days vs 26) — suppressed entirely.
+    expect(result).toBeUndefined();
+  });
+
+  it("returns a per-day-average change when coverage is comparable", () => {
+    // 30 days avg 100/day now vs 30 days avg 80/day prior = +25%.
+    expect(windowReachChange(3000, 30, 2400, 30)).toBe(25);
+  });
+
+  it("suppresses when the prior window has too few days to anchor", () => {
+    expect(windowReachChange(3000, 30, 100, 1)).toBeUndefined();
+  });
+
+  it("suppresses when the current window has too few days", () => {
+    expect(windowReachChange(100, 1, 2400, 30)).toBeUndefined();
+  });
+
+  it("suppresses a trivial per-day move even with full coverage", () => {
+    // avg 100/day vs 98/day — real but not worth a 'needs attention' line.
+    expect(windowReachChange(3000, 30, 2940, 30)).toBeUndefined();
+  });
+
+  it("returns undefined when either window is empty", () => {
+    expect(windowReachChange(0, 0, 2400, 30)).toBeUndefined();
+    expect(windowReachChange(3000, 30, 0, 0)).toBeUndefined();
   });
 });
 

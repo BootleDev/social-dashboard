@@ -238,16 +238,18 @@ export default function Overview({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <NorthStarCard
           label="Total Reach"
+          grainNote="post-level · summed across this window"
           value={formatNumber(model.totalReach)}
           change={model.reachChange}
           isNew={model.reachNew}
           series={model.reachSeries}
           tooltip={`${glossaryFor(
             "Reach",
-          )} Summed across every post in the window, all platforms. Pinterest uses post impressions as its reach proxy.`}
+          )} Summed across every post in the window, all platforms. Pinterest uses post impressions as its reach proxy. This is a POST-level total and intentionally differs from the account-level reach in the per-platform panel below — they measure different things and are not meant to match.`}
         />
         <NorthStarCard
           label="Total Engagement"
+          grainNote="post-level · summed across this window"
           value={formatNumber(model.totalEngagement)}
           change={model.engagementChange}
           isNew={model.engagementNew}
@@ -273,7 +275,7 @@ export default function Overview({
           isNew={model.postReachNew}
           tooltip={`${glossaryFor(
             "Reach",
-          )} Summed across every post in the window, all platforms. Pinterest uses post impressions as its reach proxy.`}
+          )} Summed across every post in the window, all platforms (post-level). Pinterest uses post impressions as its reach proxy. Differs from the account-level reach in the per-platform panel — different grain, not an error.`}
           breakdown={model.breakdownPostReach}
         />
         <KPICard
@@ -309,7 +311,7 @@ export default function Overview({
             border: "1px solid var(--border)",
           }}
         >
-          <div className="flex items-center gap-1.5 mb-3">
+          <div className="flex items-center gap-1.5 mb-0.5">
             <span
               className="text-xs font-medium"
               style={{ color: "var(--text-secondary)" }}
@@ -317,9 +319,16 @@ export default function Overview({
               Account metrics by platform
             </span>
             <InfoTooltip
-              text="Account-level reach, impressions and followers as each platform reports them. A blank (—) means the platform does not publish that metric at the account level (e.g. Facebook has no account reach; Instagram retired account impressions) — not a tracking gap. Pinterest reach/impressions are a pin-sum. See the Methodology page."
+              text="Account-level reach, impressions and followers as each platform reports them. This is ACCOUNT-level data and intentionally differs from the post-level Total Reach above — that one sums every post; this one is what the platform reports for the account. A blank (—) means the platform does not publish that metric at the account level (e.g. Facebook has no account reach; Instagram retired account impressions) — not a tracking gap. Pinterest reach/impressions are a pin-sum. See the Methodology page."
               label="Why do platforms show different account metrics?"
             />
+          </div>
+          <div
+            className="text-[10px] mb-3"
+            style={{ color: "var(--text-secondary)", opacity: 0.75 }}
+          >
+            account-level · as each platform reports — does not match the
+            post-level totals above
           </div>
           <div className="space-y-3">
             {model.accountScorecards.map((sc) => {
@@ -397,6 +406,8 @@ function ScoreCell({ label, value }: { label: string; value: string }) {
 
 interface NorthStarCardProps {
   label: string;
+  /** Short grain/window caption shown under the label (e.g. "post-level · this window"). */
+  grainNote?: string;
   value: string;
   change?: number;
   isNew?: boolean;
@@ -411,6 +422,7 @@ interface NorthStarCardProps {
  */
 function NorthStarCard({
   label,
+  grainNote,
   value,
   change,
   isNew,
@@ -436,7 +448,7 @@ function NorthStarCard({
         border: "1px solid var(--border)",
       }}
     >
-      <div className="flex items-center gap-1.5 mb-1">
+      <div className="flex items-center gap-1.5 mb-0.5">
         <span
           className="text-xs font-medium"
           style={{ color: "var(--text-secondary)" }}
@@ -445,6 +457,14 @@ function NorthStarCard({
         </span>
         <InfoTooltip text={tooltip} label={`What is ${label}?`} />
       </div>
+      {grainNote ? (
+        <div
+          className="text-[10px] mb-1"
+          style={{ color: "var(--text-secondary)", opacity: 0.75 }}
+        >
+          {grainNote}
+        </div>
+      ) : null}
 
       <div className="flex items-end justify-between gap-4">
         <div className="min-w-0">

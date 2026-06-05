@@ -7,7 +7,7 @@ import {
   formatNumber,
   recordReach,
   topPosts,
-  pctChange,
+  windowReachChange,
   sumReach,
   hasRealReach,
   groupByPlatform,
@@ -78,7 +78,9 @@ function alertSeverity(raw: string): Severity {
  * Largest account-reach swing across platforms vs the prior period. Only
  * platforms that report real account reach are eligible (FB has none; Pinterest
  * is a pin-sum, IG is real) — so this never invents a mover from a structural
- * blank. Returns the single biggest absolute %-move, up or down.
+ * blank. Returns the single biggest absolute %-move, up or down. Moves off a
+ * near-zero prior base (small-denominator artifacts) are excluded via
+ * significantPctChange, so a tiny prior window can't surface as a huge percent.
  */
 function biggestMover(
   dailyMetrics: AirtableRecord[],
@@ -96,7 +98,16 @@ function biggestMover(
 
     const curReach = sumReach(curRows);
     const prevReach = sumReach(prevRows);
-    const change = pctChange(curReach, prevReach);
+    // Compare per-day AVERAGE reach with coverage guards, not raw window sums.
+    // curRows/prevRows are per-day fact rows, so their lengths are the measured
+    // day-counts. This is what stops a sparse prior window (e.g. 2 measured
+    // days vs 26) from inventing an explosive percentage like "up 3545%".
+    const change = windowReachChange(
+      curReach,
+      curRows.length,
+      prevReach,
+      prevRows.length,
+    );
     if (change === undefined) continue;
 
     if (best === null || Math.abs(change) > Math.abs(best.change)) {
