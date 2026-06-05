@@ -85,7 +85,7 @@ export default function PlanningPanel({
       {subTab === "when" && (
         <Section
           title="When to post"
-          subtitle="Day-of-week × hour-of-day heatmap in your selected timezone. The top-ranked slots panel above explicitly answers 'best time.' Click any cell for the contributing posts."
+          subtitle="Day-of-week × day-part heatmap in your selected timezone (switch to hourly via the Granularity control once you have the post volume). The top-ranked slots panel above explicitly answers 'best time.' Click any cell for the contributing posts."
         >
           <BestTimeToPost
             posts={posts}

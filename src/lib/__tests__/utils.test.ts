@@ -12,6 +12,7 @@ import {
   significantPctChange,
   windowReachChange,
   hashtagsForERRanking,
+  dayPartOfHour,
   avgERByPostType,
   avgERByTheme,
   postingHeatmap,
@@ -374,6 +375,31 @@ describe("windowReachChange", () => {
   it("returns undefined when either window is empty", () => {
     expect(windowReachChange(0, 0, 2400, 30)).toBeUndefined();
     expect(windowReachChange(3000, 30, 0, 0)).toBeUndefined();
+  });
+});
+
+// --- dayPartOfHour ---
+describe("dayPartOfHour", () => {
+  it("maps hours to the five day-parts", () => {
+    expect(dayPartOfHour(0)).toBe("Night"); // 0-5
+    expect(dayPartOfHour(5)).toBe("Night");
+    expect(dayPartOfHour(6)).toBe("Morning"); // 6-10
+    expect(dayPartOfHour(10)).toBe("Morning");
+    expect(dayPartOfHour(11)).toBe("Midday"); // 11-13
+    expect(dayPartOfHour(13)).toBe("Midday");
+    expect(dayPartOfHour(14)).toBe("Afternoon"); // 14-17
+    expect(dayPartOfHour(17)).toBe("Afternoon");
+    expect(dayPartOfHour(18)).toBe("Evening"); // 18-23
+    expect(dayPartOfHour(23)).toBe("Evening");
+  });
+
+  it("normalizes a 24 (midnight rollover) back into Night", () => {
+    expect(dayPartOfHour(24)).toBe("Night");
+  });
+
+  it("returns null for an out-of-range hour", () => {
+    expect(dayPartOfHour(-1)).toBeNull();
+    expect(dayPartOfHour(25)).toBeNull();
   });
 });
 

@@ -6,6 +6,8 @@ import {
   str,
   dayOfWeekLocal,
   hourOfDayLocal,
+  dayPartOfHour,
+  DAY_PARTS,
   formatLocalDate,
 } from "@/lib/utils";
 import { toPost } from "@/lib/types";
@@ -145,6 +147,53 @@ const METRICS: MetricOption[] = [
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+/**
+ * Column granularity for the heatmap. "daypart" buckets the 24 hours into 5
+ * parts so a low-volume account still gets readable per-slot samples; "hour"
+ * is the original 24-column grid for accounts with enough volume to fill it.
+ */
+type Granularity = "daypart" | "hour";
+
+interface ColumnSpec {
+  /** Column keys, left to right. */
+  keys: string[];
+  /** Header label for a column key (hours show every 3rd, day-parts all). */
+  header: (key: string, index: number) => string;
+  /** Resolve a post's column key from its local hour, or null to skip. */
+  columnOf: (hour: number) => string | null;
+  /** Tooltip-friendly full label for a slot. */
+  slotLabel: (day: string, key: string) => string;
+  /** Display width class per cell. */
+  cellWidthClass: string;
+}
+
+function columnSpec(granularity: Granularity): ColumnSpec {
+  if (granularity === "daypart") {
+    const ranges: Record<string, string> = {
+      Night: "00:00–05:59",
+      Morning: "06:00–10:59",
+      Midday: "11:00–13:59",
+      Afternoon: "14:00–17:59",
+      Evening: "18:00–23:59",
+    };
+    return {
+      keys: [...DAY_PARTS],
+      header: (key) => key,
+      columnOf: (hour) => dayPartOfHour(hour),
+      slotLabel: (day, key) => `${day} ${key} (${ranges[key]})`,
+      cellWidthClass: "min-w-[72px]",
+    };
+  }
+  return {
+    keys: HOURS.map((h) => String(h)),
+    header: (key) =>
+      Number(key) % 3 === 0 ? key.padStart(2, "0") : "",
+    columnOf: (hour) => (hour >= 0 && hour <= 23 ? String(hour) : null),
+    slotLabel: (day, key) => `${day} ${key.padStart(2, "0")}:00`,
+    cellWidthClass: "w-7",
+  };
+}
+
 interface CellState {
   posts: AirtableRecord[];
   avg: number | null;
@@ -154,10 +203,12 @@ function buildGrid(
   posts: AirtableRecord[],
   timezone: string,
   metric: MetricOption,
+  spec: ColumnSpec,
 ): CellState[][] {
-  // grid[day][hour] = { posts, avg }
+  const colIndex = new Map(spec.keys.map((k, i) => [k, i]));
+  // grid[day][column] = { posts, avg }
   const grid: CellState[][] = DAYS.map(() =>
-    HOURS.map(() => ({ posts: [], avg: null })),
+    spec.keys.map(() => ({ posts: [], avg: null })),
   );
 
   for (const r of posts) {
@@ -167,13 +218,16 @@ function buildGrid(
     const dayIdx = DAYS.indexOf(dayLabel as (typeof DAYS)[number]);
     if (dayIdx < 0) continue;
     const hour = hourOfDayLocal(iso, timezone);
-    if (hour < 0 || hour > 23) continue;
-    grid[dayIdx][hour].posts.push(r);
+    const colKey = spec.columnOf(hour);
+    if (colKey === null) continue;
+    const colIdx = colIndex.get(colKey);
+    if (colIdx === undefined) continue;
+    grid[dayIdx][colIdx].posts.push(r);
   }
 
   for (let d = 0; d < DAYS.length; d++) {
-    for (let h = 0; h < 24; h++) {
-      const cell = grid[d][h];
+    for (let c = 0; c < spec.keys.length; c++) {
+      const cell = grid[d][c];
       if (cell.posts.length === 0) continue;
       // Reach-weighted aggregate over the slot's posts (see MetricOption).
       const v = metric.aggregate(cell.posts);
@@ -233,42 +287,50 @@ export default function BestTimeToPost({
   }, [posts, planSelection]);
 
   const [metricIdx, setMetricIdx] = useState(0);
-  // Default to ≥5 posts per slot: any "best time" claim with sample n<5 is
-  // statistical noise (one viral outlier swings the avg). User can lower it
-  // explicitly if they want exploratory slot scans.
-  const [minN, setMinN] = useState(5);
+  // Default to day-part columns: a 24-hour grid leaves almost every slot at
+  // n<2 for a low-volume account, so the heatmap reads as empty. Day-parts (5
+  // columns) accumulate enough posts per slot to surface a real signal. Power
+  // users with volume can switch to the full Hour grid.
+  const [granularity, setGranularity] = useState<Granularity>("daypart");
+  // Minimum posts per slot before a slot is eligible for the rankings/colour.
+  // Day-part slots are coarser, so a sample of ≥3 is a reasonable floor;
+  // hour slots default to ≥5. Reset when granularity changes (see effect).
+  const [minN, setMinN] = useState(3);
   const [drilldown, setDrilldown] = useState<{
     posts: AirtableRecord[];
     label: string;
   } | null>(null);
 
   const metric = METRICS[metricIdx];
+  const spec = useMemo(() => columnSpec(granularity), [granularity]);
 
   const grid = useMemo(
-    () => buildGrid(effectivePosts, timezone, metric),
-    [effectivePosts, timezone, metric],
+    () => buildGrid(effectivePosts, timezone, metric, spec),
+    [effectivePosts, timezone, metric, spec],
   );
 
-  // Rank all (day, hour) slots by metric, but only ones meeting the minimum
+  // Rank all (day, column) slots by metric, but only ones meeting the minimum
   // sample size — otherwise a single freak post dominates the "best time" list.
   const rankedSlots = useMemo(() => {
     const slots: Array<{
       day: string;
       dayIdx: number;
-      hour: number;
+      colKey: string;
+      colIdx: number;
       avg: number;
       n: number;
       posts: AirtableRecord[];
     }> = [];
     for (let d = 0; d < DAYS.length; d++) {
-      for (let h = 0; h < 24; h++) {
-        const cell = grid[d][h];
+      for (let c = 0; c < spec.keys.length; c++) {
+        const cell = grid[d][c];
         if (cell.avg === null) continue;
         if (cell.posts.length < minN) continue;
         slots.push({
           day: DAYS[d],
           dayIdx: d,
-          hour: h,
+          colKey: spec.keys[c],
+          colIdx: c,
           avg: cell.avg,
           n: cell.posts.length,
           posts: cell.posts,
@@ -277,7 +339,7 @@ export default function BestTimeToPost({
     }
     slots.sort((a, b) => b.avg - a.avg);
     return slots;
-  }, [grid, minN]);
+  }, [grid, minN, spec]);
 
   // Heatmap intensity is computed against the max of qualifying slots, so
   // sub-min-N noise doesn't peg the color scale.
@@ -289,7 +351,7 @@ export default function BestTimeToPost({
 
   const topSlotKey = useMemo(() => {
     if (rankedSlots.length === 0) return null;
-    return `${rankedSlots[0].dayIdx}-${rankedSlots[0].hour}`;
+    return `${rankedSlots[0].dayIdx}-${rankedSlots[0].colIdx}`;
   }, [rankedSlots]);
 
   const tzLabel = timezone || "browser local";
@@ -318,7 +380,7 @@ export default function BestTimeToPost({
   return (
     <ChartCard
       title="Best Time to Post"
-      tooltip={`Average ${metric.label} by day-of-week × hour-of-day in your selected timezone. Click a cell to see contributing posts.`}
+      tooltip={`Average ${metric.label} by day-of-week × ${granularity === "hour" ? "hour-of-day" : "day-part"} in your selected timezone. Day-part groups the 24 hours into 5 parts so low-volume accounts get readable samples per slot; switch to Hour once you have the volume. Click a cell to see contributing posts.`}
       height="auto"
       headerAction={
         <StatsPanel
@@ -433,6 +495,32 @@ export default function BestTimeToPost({
             className="text-xs ml-2"
             style={{ color: "var(--text-secondary)" }}
           >
+            Granularity
+          </label>
+          <select
+            value={granularity}
+            onChange={(e) => {
+              const g = e.target.value as Granularity;
+              setGranularity(g);
+              // Reset the per-slot floor to a sensible default for the grain.
+              setMinN(g === "daypart" ? 3 : 5);
+            }}
+            className="text-xs rounded px-2 py-1 border cursor-pointer outline-none"
+            style={{
+              background: "var(--bg-secondary)",
+              color: "var(--text-primary)",
+              borderColor: "var(--border)",
+            }}
+            aria-label="Heatmap granularity"
+            title="Day-part groups the 24 hours into 5 parts so low-volume accounts get readable samples per slot"
+          >
+            <option value="daypart">Day-part</option>
+            <option value="hour">Hour</option>
+          </select>
+          <label
+            className="text-xs ml-2"
+            style={{ color: "var(--text-secondary)" }}
+          >
             Min posts per slot
           </label>
           <select
@@ -480,20 +568,24 @@ export default function BestTimeToPost({
             {rankedSlots.slice(0, 5).map((s, i) => {
               const vsAvg =
                 overallAvg > 0 ? ((s.avg - overallAvg) / overallAvg) * 100 : 0;
+              const slotText =
+                granularity === "hour"
+                  ? `${s.day} ${s.colKey.padStart(2, "0")}:00`
+                  : `${s.day} ${s.colKey}`;
               return (
                 <button
-                  key={`${s.dayIdx}-${s.hour}`}
+                  key={`${s.dayIdx}-${s.colIdx}`}
                   onClick={() =>
                     setDrilldown({
                       posts: s.posts,
-                      label: `${s.day} ${s.hour.toString().padStart(2, "0")}:00 (${tzLabel})`,
+                      label: `${slotText} (${tzLabel})`,
                     })
                   }
                   className="text-left text-xs flex items-center justify-between hover:bg-white/5 rounded px-1.5 py-1 cursor-pointer"
                 >
                   <span style={{ color: "var(--text-primary)" }}>
                     <span className="opacity-50 mr-2">#{i + 1}</span>
-                    {s.day} {s.hour.toString().padStart(2, "0")}:00
+                    {slotText}
                     <span
                       className="ml-2 opacity-50"
                       style={{ color: "var(--text-secondary)" }}
@@ -524,6 +616,25 @@ export default function BestTimeToPost({
         </div>
       )}
 
+      {totalPostsCharted > 0 && rankedSlots.length === 0 && (
+        <div
+          className="mb-3 p-3 rounded text-xs"
+          style={{
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border)",
+            color: "var(--text-secondary)",
+          }}
+        >
+          Not enough posts per slot to call a best time yet. With{" "}
+          {totalPostsCharted} post{totalPostsCharted === 1 ? "" : "s"} in this
+          period, no {granularity === "hour" ? "hour" : "day-part"} slot reaches{" "}
+          {minN} posts.{" "}
+          {granularity === "hour"
+            ? "Switch Granularity to Day-part, or lower Min posts per slot, to see an early read."
+            : "Lower Min posts per slot for an exploratory read, or keep posting — the signal firms up as volume grows."}
+        </div>
+      )}
+
       {totalPostsCharted === 0 ? (
         <div
           className="text-xs text-center py-12"
@@ -537,13 +648,13 @@ export default function BestTimeToPost({
             <thead>
               <tr style={{ color: "var(--text-secondary)" }}>
                 <th className="text-right pr-2 font-normal">&nbsp;</th>
-                {HOURS.map((h) => (
+                {spec.keys.map((key, i) => (
                   <th
-                    key={h}
-                    className="text-center font-normal w-7"
-                    title={`${h.toString().padStart(2, "0")}:00`}
+                    key={key}
+                    className={`text-center font-normal ${spec.cellWidthClass}`}
+                    title={spec.slotLabel("", key).trim()}
                   >
-                    {h % 3 === 0 ? h.toString().padStart(2, "0") : ""}
+                    {spec.header(key, i)}
                   </th>
                 ))}
               </tr>
@@ -557,8 +668,8 @@ export default function BestTimeToPost({
                   >
                     {day}
                   </th>
-                  {HOURS.map((h) => {
-                    const cell = grid[dIdx][h];
+                  {spec.keys.map((key, cIdx) => {
+                    const cell = grid[dIdx][cIdx];
                     const qualifies = cell.posts.length >= minN;
                     const intensity =
                       cell.avg === null || max === 0 || !qualifies
@@ -566,20 +677,21 @@ export default function BestTimeToPost({
                         : cell.avg / max;
                     const bg = intensityColor(intensity);
                     const hasPosts = cell.posts.length > 0;
-                    const isTopSlot = `${dIdx}-${h}` === topSlotKey;
+                    const isTopSlot = `${dIdx}-${cIdx}` === topSlotKey;
+                    const slotLabel = spec.slotLabel(day, key);
                     const title = hasPosts
-                      ? `${day} ${h.toString().padStart(2, "0")}:00 · ${
+                      ? `${slotLabel} · ${
                           cell.posts.length
                         } post${cell.posts.length === 1 ? "" : "s"} · avg ${
                           metric.label
                         }: ${cell.avg !== null ? metric.format(cell.avg) : "—"}${
                           !qualifies ? " · below min-N threshold" : ""
                         }`
-                      : `${day} ${h.toString().padStart(2, "0")}:00 · no posts`;
+                      : `${slotLabel} · no posts`;
                     return (
                       <td
-                        key={h}
-                        className={`w-7 h-7 text-center align-middle ${
+                        key={key}
+                        className={`${spec.cellWidthClass} h-7 text-center align-middle ${
                           hasPosts ? "cursor-pointer" : ""
                         }`}
                         style={{
@@ -595,7 +707,7 @@ export default function BestTimeToPost({
                           if (!hasPosts) return;
                           setDrilldown({
                             posts: cell.posts,
-                            label: `${day} ${h.toString().padStart(2, "0")}:00 (${tzLabel})`,
+                            label: `${slotLabel} (${tzLabel})`,
                           });
                         }}
                       >

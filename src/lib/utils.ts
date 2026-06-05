@@ -377,6 +377,37 @@ export function hourOfDayLocal(iso: string, timezone?: string): number {
 }
 
 /**
+ * Day-parts, in chronological order, used as a coarse alternative to the 24
+ * hour-of-day columns in the posting heatmap. Bucketing into ~5 parts lets a
+ * low-volume account (e.g. 42 posts) accumulate enough posts per slot to read
+ * a "best time" signal, where a 24-column grid would leave every cell at n<2.
+ */
+export const DAY_PARTS = [
+  "Night",
+  "Morning",
+  "Midday",
+  "Afternoon",
+  "Evening",
+] as const;
+
+export type DayPart = (typeof DAY_PARTS)[number];
+
+/**
+ * Map a 0-23 hour to its day-part. Accepts 24 (a midnight rollover from some
+ * formatters) as Night. Returns null for an out-of-range hour so callers can
+ * skip it rather than mis-bucket.
+ */
+export function dayPartOfHour(hour: number): DayPart | null {
+  const h = hour === 24 ? 0 : hour;
+  if (h < 0 || h > 23) return null;
+  if (h <= 5) return "Night"; // 00:00-05:59
+  if (h <= 10) return "Morning"; // 06:00-10:59
+  if (h <= 13) return "Midday"; // 11:00-13:59
+  if (h <= 17) return "Afternoon"; // 14:00-17:59
+  return "Evening"; // 18:00-23:59
+}
+
+/**
  * List of presets shown in the timezone selector. Order matters — selector
  * renders them in this order.
  */
