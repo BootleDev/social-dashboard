@@ -109,7 +109,11 @@ interface TrendsPanelProps {
 }
 
 function TrendsPanel({ records, bootleAllowlist }: TrendsPanelProps) {
-  const [region, setRegion] = useState<TrendingKeyword["region"]>("GB+IE");
+  // Default to US: it is consistently the only region whose top trends carry
+  // Bootle-relevant gifting/wellness signal. GB+IE and DACH top-trending are
+  // dominated by entertainment/nail/anime search noise with near-zero relevant
+  // terms, so defaulting there showed an empty panel (WEBDEV-182 follow-up).
+  const [region, setRegion] = useState<TrendingKeyword["region"]>("US");
   const [trendType, setTrendType] =
     useState<TrendingKeyword["trendType"]>("growing");
   // Default ON — the global trends list is full of pop-culture noise that
