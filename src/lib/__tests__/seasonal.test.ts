@@ -262,4 +262,34 @@ describe("matchesBootleAllowlist", () => {
       true,
     );
   });
+
+  it("admits gift-giving OCCASIONS even without the literal word 'gift'", () => {
+    // The core-token set originally only knew the word "gift" plus a few named
+    // events, so it missed the occasions that IMPLY gifting — where drinkware
+    // is a natural present. These are real US Pinterest trends (2026-06-05)
+    // that were being rejected.
+    expect(matchesBootleAllowlist("mothers day gifts", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("happy mothers day", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("fathers day ideas", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("teacher appreciation gifts", allowlist)).toBe(
+      true,
+    );
+    expect(matchesBootleAllowlist("happy birthday", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("anniversary ideas", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("housewarming party", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("valentines day", allowlist)).toBe(true);
+  });
+
+  it("still rejects food/recipe noise after the occasion widening", () => {
+    // Widening occasions must NOT pull in lifestyle/food noise. "recipe" stays
+    // generic; these have no gifting/drinkware/wellness anchor.
+    expect(matchesBootleAllowlist("banana bread recipe", allowlist)).toBe(false);
+    expect(matchesBootleAllowlist("easy dinner recipes", allowlist)).toBe(false);
+    expect(matchesBootleAllowlist("rhubarb sauce recipes", allowlist)).toBe(
+      false,
+    );
+    expect(matchesBootleAllowlist("erdbeer spargel salat", allowlist)).toBe(
+      false,
+    );
+  });
 });

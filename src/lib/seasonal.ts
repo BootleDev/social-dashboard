@@ -482,6 +482,28 @@ const CORE_RELEVANCE_TOKENS: ReadonlySet<string> = new Set([
   "grad",
   "christmas",
   "weihnachtsgeschenk",
+  // gift-giving OCCASIONS — moments that imply a present even without the word
+  // "gift" (drinkware is a natural one). These were missing, so genuine US
+  // gifting trends like "mothers day gifts" / "teacher appreciation gifts" /
+  // "happy birthday" were rejected. Anchored to occasions specific enough that
+  // they don't pull in lifestyle/food noise (recipe terms stay generic).
+  "mothers",
+  "mother's",
+  "muttertag",
+  "fathers",
+  "father's",
+  "vatertag",
+  "birthday",
+  "geburtstag",
+  "anniversary",
+  "valentine",
+  "valentines",
+  "valentine's",
+  "housewarming",
+  "appreciation",
+  "easter",
+  "hanukkah",
+  "diwali",
 ]);
 
 /**
