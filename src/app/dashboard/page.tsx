@@ -476,6 +476,20 @@ export default function DashboardPage() {
                 <OpsPanel
                   posts={filteredPosts}
                   dailyMetrics={filteredAccountFacts}
+                  // Raw (unfiltered) feeds for the Pipeline Health freshness
+                  // view — it judges each feed's last-update date, so it must
+                  // see every record, not the date/platform-filtered subset.
+                  feeds={{
+                    posts: data.posts,
+                    accountDailyFacts: data.accountDailyFacts,
+                    dailyMetrics: data.dailyMetrics,
+                    alerts: data.alerts,
+                    weeklySummaries: data.weeklySummaries,
+                    instagramAudience: data.instagramAudience,
+                    pinterestTrends: data.pinterestTrends,
+                    pinterestTopPins: data.pinterestTopPins,
+                    seasonalOpportunities: data.seasonalOpportunities,
+                  }}
                 />
               )}
             </div>
