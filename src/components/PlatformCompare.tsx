@@ -36,17 +36,29 @@ interface PlatformCompareProps {
 interface PlatformKPIs {
   followers: number;
   avgER: number;
-  totalReach: number;
-  totalImpressions: number;
+  // null = the platform does not report this account metric (e.g. Facebook has
+  // no account reach; Instagram retired account impressions). Rendered as an
+  // em-dash, never as a real 0 — a structural blank is not a measured zero.
+  totalReach: number | null;
+  totalImpressions: number | null;
   posts: number;
   avgSaves: number;
   avgShares: number;
-  profileViews: number;
+  profileViews: number | null;
   // Expansion metrics
   reachPerPost: number;
   engagementPerPost: number;
   avgEngScore: number | undefined;
   avgReachScore: number | undefined;
+}
+
+/** Sum a real-metric field, or null when no row carries a real value for it. */
+function sumOrNull(
+  rows: AirtableRecord[],
+  field: string,
+  sumFn: (rows: AirtableRecord[]) => number,
+): number | null {
+  return rows.length > 0 ? sumFn(rows) : null;
 }
 
 /** Mean of defined composite scores across a platform's posts. */
@@ -81,15 +93,19 @@ function PlatformCard({
 }) {
   const config = getPlatformConfig(platformKey);
 
+  // A null structural metric (e.g. FB account reach, IG account impressions)
+  // renders as an em-dash — the platform doesn't report it, which is not a 0.
+  const fmtOrDash = (v: number | null) => (v === null ? "—" : formatNumber(v));
+
   const rows = [
     { label: "Followers", value: formatNumber(kpis.followers) },
     { label: "Posts", value: String(kpis.posts) },
     { label: "Avg ER", value: formatPercent(kpis.avgER) },
-    { label: "Total Reach", value: formatNumber(kpis.totalReach) },
-    { label: "Impressions", value: formatNumber(kpis.totalImpressions) },
+    { label: "Total Reach", value: fmtOrDash(kpis.totalReach) },
+    { label: "Impressions", value: fmtOrDash(kpis.totalImpressions) },
     { label: "Reach / Post", value: formatNumber(kpis.reachPerPost) },
     { label: "Eng / Post", value: formatNumber(kpis.engagementPerPost) },
-    { label: "Profile Views", value: formatNumber(kpis.profileViews) },
+    { label: "Profile Views", value: fmtOrDash(kpis.profileViews) },
   ];
 
   // Per-post benchmark scores, shown as a compact 0–100 pair so channels are
@@ -145,6 +161,11 @@ function PlatformCard({
           </div>
         ))}
       </div>
+      <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>
+        Scores are benchmarked to each platform&apos;s own norms (50 = on par for
+        that platform), so a low score means under-performing for that channel —
+        not that the channel is worse than another.
+      </p>
     </div>
   );
 }
@@ -179,8 +200,15 @@ export default function PlatformCompare({
 
       // Account-grain volume is summed PER METRIC only from rows that carry a
       // real measurement for that metric (WEBDEV-146), matching Overview — so
-      // one metric's absence never sums as a false 0. Source: Account Daily Facts.
-      const totalReach = sumReach(metrics.filter(hasRealReach));
+      // one metric's absence renders as an em-dash, never a false 0. A platform
+      // with zero real-reach rows (e.g. Facebook) gets null, not 0. Source:
+      // Account Daily Facts.
+      const realReachRows = metrics.filter(hasRealReach);
+      const realImprRows = metrics.filter(hasRealImpressions);
+      const profileViewRows = metrics.filter(
+        (m) => num(m.fields["Profile Views"]) > 0,
+      );
+      const totalReach = sumOrNull(realReachRows, "Reach", sumReach);
       // Per-post reach uses the posts' own reach (Pinterest-substituted), not
       // the daily-metrics total, so it reflects what each post actually pulled.
       const postReachTotal = platformPosts.reduce(
@@ -198,11 +226,15 @@ export default function PlatformCompare({
         followers: latest ? num(latest.fields["Followers"]) : 0,
         avgER: weightedEngagementRate(platformPosts) * 100,
         totalReach,
-        totalImpressions: sumField(metrics.filter(hasRealImpressions), "Impressions"),
+        totalImpressions: sumOrNull(realImprRows, "Impressions", (rows) =>
+          sumField(rows, "Impressions"),
+        ),
         posts: n,
         avgSaves: n > 0 ? sumField(platformPosts, "Saves") / n : 0,
         avgShares: n > 0 ? sumField(platformPosts, "Shares") / n : 0,
-        profileViews: sumField(metrics, "Profile Views"),
+        profileViews: sumOrNull(profileViewRows, "Profile Views", (rows) =>
+          sumField(rows, "Profile Views"),
+        ),
         reachPerPost: n > 0 ? postReachTotal / n : 0,
         engagementPerPost: n > 0 ? postEngagementTotal / n : 0,
         avgEngScore: avgScore(platformPosts, engagementScore),
@@ -529,7 +561,7 @@ export default function PlatformCompare({
         </ChartCard>
         <ChartCard
           title="Benchmark Scores by Platform"
-          tooltip="Per-post Engagement and Reach scores (0–100, benchmarked to each platform's norms; 50 = on par for that platform)."
+          tooltip="Per-post Engagement and Reach scores (0–100, benchmarked to EACH platform's own norms; 50 = on par for that platform). These are NOT a raw cross-platform comparison — a low Pinterest score means under-performing vs Pinterest norms, not that Pinterest is worse than Instagram. Pinterest engagement is also currently understated by a known data-completeness gap (per-pin metrics frozen/partial)."
         >
           <Bar data={scoreComparison} options={scoreComparisonOptions} />
         </ChartCard>
