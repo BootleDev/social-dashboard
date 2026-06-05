@@ -20,6 +20,7 @@ import OutOfRangeNotice from "@/components/OutOfRangeNotice";
 import { str, getComparisonPeriod, getPlatformKeys } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
+import type { PlanSelection } from "@/lib/planSelection";
 
 /**
  * Tab structure (2026-05-26 IA rewrite):
@@ -106,6 +107,16 @@ export default function DashboardPage() {
   const [timezone, setTimezone] = useTimezone();
   // Post opened from a Pulse alert click; rendered in PostDrilldownPanel.
   const [selectedPost, setSelectedPost] = useState<AirtableRecord | null>(null);
+  // Cross-tab carry from Insights ("what worked") to Planning ("when to post").
+  // Set by "Plan from this →" on a winning Theme × Post Type bar; consumed by
+  // the When-to-post heatmap. Switching tabs is part of the same action, so the
+  // setter below also routes the user to Planning.
+  const [planSelection, setPlanSelection] = useState<PlanSelection | null>(null);
+
+  const planFromSelection = useCallback((sel: PlanSelection) => {
+    setPlanSelection(sel);
+    setTab("planning");
+  }, []);
 
   const fetchData = useCallback((force = false) => {
     // MARKETING-19 Fix 7: when force=true (Refresh button), bypass the 30-min
@@ -442,6 +453,7 @@ export default function DashboardPage() {
                   timezone={timezone}
                   instagramAudience={data?.instagramAudience ?? []}
                   pinterestTopPins={data?.pinterestTopPins ?? []}
+                  onPlanFromSelection={planFromSelection}
                 />
               )}
               {tab === "planning" && (
@@ -454,6 +466,8 @@ export default function DashboardPage() {
                   competitorError={competitorError}
                   timezone={timezone}
                   range={{ start: dateRange.start, end: dateRange.end }}
+                  planSelection={planSelection}
+                  onClearPlanSelection={() => setPlanSelection(null)}
                 />
               )}
               {tab === "ops" && (

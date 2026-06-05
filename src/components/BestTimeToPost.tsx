@@ -18,11 +18,41 @@ import { describe } from "@/lib/stats";
 import type { AirtableRecord } from "@/lib/utils";
 import { glossaryFor } from "@/lib/metricGlossary";
 import InfoTooltip from "./InfoTooltip";
+import {
+  planSelectionLabel,
+  type PlanSelection,
+} from "@/lib/planSelection";
+import { getPlatformConfig } from "@/lib/platforms";
 
 interface BestTimeToPostProps {
   posts: AirtableRecord[];
   timezone: string;
+  /**
+   * Optional carry from Insights "Plan from this →". When set, the heatmap
+   * filters to posts whose Content Theme AND Post Type match the selection, so
+   * the operator sees "when did THIS kind of content do best?". Null = all posts.
+   */
+  planSelection?: PlanSelection | null;
+  /** Clear the active selection (shown on the context chip). */
+  onClearPlanSelection?: () => void;
 }
+
+/** Posts whose Content Theme AND Post Type match the selection (case-folded). */
+function filterToSelection(
+  posts: AirtableRecord[],
+  sel: PlanSelection,
+): AirtableRecord[] {
+  const theme = sel.theme.toLowerCase().trim();
+  const type = sel.postType.toLowerCase().trim();
+  return posts.filter((p) => {
+    const t = str(p.fields["Content Theme"]).toLowerCase().trim();
+    const pt = str(p.fields["Post Type"]).toLowerCase().trim();
+    return t === theme && pt === type;
+  });
+}
+
+/** Below this many matching posts, theme+format can't fill a day×hour grid. */
+const MIN_SELECTION_POSTS = 4;
 
 interface MetricOption {
   label: string;
@@ -176,7 +206,32 @@ function intensityColor(intensity: number): string {
 export default function BestTimeToPost({
   posts,
   timezone,
+  planSelection = null,
+  onClearPlanSelection,
 }: BestTimeToPostProps) {
+  // Apply the cross-tab selection if one is active and it yields enough posts
+  // to be meaningful. If the theme+format combination is too thin to fill a
+  // grid, fall back to all posts but tell the user why (so the heatmap isn't
+  // silently empty after they clicked "Plan from this →").
+  const { effectivePosts, selectionTooThin, matchCount } = useMemo(() => {
+    if (!planSelection) {
+      return { effectivePosts: posts, selectionTooThin: false, matchCount: 0 };
+    }
+    const matched = filterToSelection(posts, planSelection);
+    if (matched.length < MIN_SELECTION_POSTS) {
+      return {
+        effectivePosts: posts,
+        selectionTooThin: true,
+        matchCount: matched.length,
+      };
+    }
+    return {
+      effectivePosts: matched,
+      selectionTooThin: false,
+      matchCount: matched.length,
+    };
+  }, [posts, planSelection]);
+
   const [metricIdx, setMetricIdx] = useState(0);
   // Default to ≥5 posts per slot: any "best time" claim with sample n<5 is
   // statistical noise (one viral outlier swings the avg). User can lower it
@@ -190,8 +245,8 @@ export default function BestTimeToPost({
   const metric = METRICS[metricIdx];
 
   const grid = useMemo(
-    () => buildGrid(posts, timezone, metric),
-    [posts, timezone, metric],
+    () => buildGrid(effectivePosts, timezone, metric),
+    [effectivePosts, timezone, metric],
   );
 
   // Rank all (day, hour) slots by metric, but only ones meeting the minimum
@@ -283,6 +338,65 @@ export default function BestTimeToPost({
         Times shown in <strong style={{ color: "var(--text-primary)" }}>{tzLabel}</strong>
         {" "}· change via the timezone selector in the top toolbar
       </div>
+
+      {planSelection && (
+        <div
+          className="mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded"
+          style={{
+            background: "var(--brand-soft)",
+            border: "1px solid var(--brand)",
+          }}
+        >
+          <span
+            className="text-xs flex items-center gap-1.5 flex-wrap"
+            style={{ color: "var(--text-primary)" }}
+          >
+            <span className="font-medium">Planning from:</span>
+            {(() => {
+              const cfg = getPlatformConfig(
+                str(
+                  // colour the format chip by platform when the selection's posts
+                  // are single-platform; otherwise leave it brand-neutral.
+                  effectivePosts[0]?.fields["Platform"] ?? "",
+                ),
+              );
+              return (
+                <span
+                  className="px-1.5 py-0.5 rounded font-semibold"
+                  style={{ background: cfg.colorBg, color: cfg.color }}
+                >
+                  {planSelectionLabel(planSelection)}
+                </span>
+              );
+            })()}
+            {selectionTooThin ? (
+              <span style={{ color: "var(--warning)" }}>
+                only {matchCount} matching post
+                {matchCount === 1 ? "" : "s"} — showing all posts instead
+                (need ≥ {MIN_SELECTION_POSTS})
+              </span>
+            ) : (
+              <span style={{ color: "var(--text-secondary)" }}>
+                {matchCount} matching post{matchCount === 1 ? "" : "s"}
+              </span>
+            )}
+          </span>
+          {onClearPlanSelection && (
+            <button
+              type="button"
+              onClick={onClearPlanSelection}
+              className="text-xs px-2 py-0.5 rounded cursor-pointer shrink-0 transition-colors hover:brightness-110"
+              style={{
+                background: "var(--bg-secondary)",
+                color: "var(--text-secondary)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2 flex-wrap">

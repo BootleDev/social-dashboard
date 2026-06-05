@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import BestTimeToPost from "./BestTimeToPost";
 import PinterestInsights from "./PinterestInsights";
 import CompetitorInsights from "./CompetitorInsights";
@@ -7,6 +8,7 @@ import UpcomingWindows from "./UpcomingWindows";
 import PlanVsActual from "./PlanVsActual";
 import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
 import type { AirtableRecord } from "@/lib/utils";
+import type { PlanSelection } from "@/lib/planSelection";
 
 interface PlanningPanelProps {
   posts: AirtableRecord[];
@@ -18,6 +20,10 @@ interface PlanningPanelProps {
   timezone: string;
   /** Selected date range (nullable bounds = All Time). Used by Plan vs actual. */
   range: { start: string | null; end: string | null };
+  /** Active "Plan from this →" carry from Insights; drives the heatmap filter. */
+  planSelection?: PlanSelection | null;
+  /** Clear the active selection. */
+  onClearPlanSelection?: () => void;
 }
 
 type PlanningTab = "when" | "plan" | "trends" | "seasonal" | "competitors";
@@ -52,12 +58,20 @@ export default function PlanningPanel({
   competitorError,
   timezone,
   range,
+  planSelection = null,
+  onClearPlanSelection,
 }: PlanningPanelProps) {
   const [subTab, setSubTab] = useSubNav<PlanningTab>(
     "planning",
     "when",
     VALID_KEYS,
   );
+
+  // A "Plan from this →" carry is a request to look at WHEN this content works,
+  // so land the operator on the heatmap sub-tab when a fresh selection arrives.
+  useEffect(() => {
+    if (planSelection) setSubTab("when");
+  }, [planSelection, setSubTab]);
 
   return (
     <div className="space-y-4">
@@ -76,6 +90,8 @@ export default function PlanningPanel({
           <BestTimeToPost
             posts={posts}
             timezone={timezone}
+            planSelection={planSelection}
+            onClearPlanSelection={onClearPlanSelection}
           />
         </Section>
       )}

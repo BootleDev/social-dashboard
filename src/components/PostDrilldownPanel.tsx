@@ -22,6 +22,12 @@ interface PostDrilldownPanelProps {
   formatMetric?: (v: number) => string;
   /** IANA timezone for date display. Empty = browser local. */
   timezone?: string;
+  /**
+   * Optional action rendered in the panel header, left of Close. Lets a caller
+   * attach a context-specific affordance (e.g. Insights' "Plan from this →")
+   * without coupling this reusable panel to any one call site.
+   */
+  headerAction?: React.ReactNode;
   /** Called when the panel should close. */
   onClose: () => void;
 }
@@ -33,6 +39,7 @@ export default function PostDrilldownPanel({
   getMetricValue,
   formatMetric,
   timezone = "",
+  headerAction,
   onClose,
 }: PostDrilldownPanelProps) {
   // Local overlay for in-session tag edits. Keyed by record id then field
@@ -97,17 +104,20 @@ export default function PostDrilldownPanel({
               {metricLabel ? `, sorted by ${metricLabel}` : ""}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="text-xs rounded px-2 py-1 hover:bg-white/10"
-            style={{
-              border: "1px solid var(--border)",
-              color: "var(--text-secondary)",
-            }}
-          >
-            Close (Esc)
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {headerAction}
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="text-xs rounded px-2 py-1 hover:bg-white/10"
+              style={{
+                border: "1px solid var(--border)",
+                color: "var(--text-secondary)",
+              }}
+            >
+              Close (Esc)
+            </button>
+          </div>
         </div>
 
         {sorted.length === 0 ? (

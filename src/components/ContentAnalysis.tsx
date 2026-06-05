@@ -16,8 +16,11 @@ import {
   formatNumber,
   avgERByDimensionStacked,
   sumByDimensionStacked,
+  postEngagement,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
+import type { PlanSelection } from "@/lib/planSelection";
+import WhatWorkedToPlan from "./WhatWorkedToPlan";
 import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
 import AudienceDemographics from "./AudienceDemographics";
 import PinterestTopPins from "./PinterestTopPins";
@@ -32,9 +35,15 @@ interface ContentAnalysisExtraProps {
   pinterestTopPins?: AirtableRecord[];
 }
 
-type InsightsTab = "performance" | "audience" | "pinterest" | "hashtags";
+type InsightsTab =
+  | "loop"
+  | "performance"
+  | "audience"
+  | "pinterest"
+  | "hashtags";
 
 const SUBNAV_ITEMS: ReadonlyArray<SubNavItem<InsightsTab>> = [
+  { key: "loop", label: "What worked → plan" },
   { key: "performance", label: "Post performance" },
   { key: "audience", label: "Audience" },
   { key: "pinterest", label: "Pinterest pins" },
@@ -42,6 +51,7 @@ const SUBNAV_ITEMS: ReadonlyArray<SubNavItem<InsightsTab>> = [
 ];
 
 const VALID_KEYS: ReadonlyArray<InsightsTab> = [
+  "loop",
   "performance",
   "audience",
   "pinterest",
@@ -83,11 +93,10 @@ const METRICS: Record<MetricKey, MetricConfig> = {
 
 function metricGetter(key: MetricKey): (p: AirtableRecord) => number {
   if (key === "engagement") {
-    return (p) =>
-      num(p.fields["Likes"]) +
-      num(p.fields["Comments"]) +
-      num(p.fields["Saves"]) +
-      num(p.fields["Shares"]);
+    // Platform-reported engagement (Engagement field), not a component sum —
+    // see postEngagement: Meta includes Reposts, Pinterest includes PIN_CLICK,
+    // neither reconstructable from Likes/Comments/Saves/Shares.
+    return (p) => postEngagement(p);
   }
   if (key === "impressions") return (p) => num(p.fields["Impressions"]);
   return (p) => num(p.fields["Engagement Rate"]);
@@ -96,6 +105,11 @@ function metricGetter(key: MetricKey): (p: AirtableRecord) => number {
 interface ContentAnalysisProps extends ContentAnalysisExtraProps {
   posts: AirtableRecord[];
   timezone?: string;
+  /**
+   * Carry a winning Theme × Post Type into Planning's "when to post" heatmap.
+   * Wired to the "Plan from this →" action on the Theme × Type drilldown.
+   */
+  onPlanFromSelection?: (sel: PlanSelection) => void;
 }
 
 export default function ContentAnalysis({
@@ -103,6 +117,7 @@ export default function ContentAnalysis({
   timezone = "",
   instagramAudience = [],
   pinterestTopPins = [],
+  onPlanFromSelection,
 }: ContentAnalysisProps) {
   const { colors, defaultOptions } = useChartTheme();
   // Palette used to color stacked segments. Reused across both stacked charts
@@ -129,6 +144,12 @@ export default function ContentAnalysis({
     metricLabel: string;
     getMetricValue: (r: AirtableRecord) => number | undefined;
     formatMetric: (v: number) => string;
+    /**
+     * Present only for Theme × Post Type drilldowns — carries the exact theme +
+     * format so the panel can offer "Plan from this →". Other click sources
+     * (scatter, hashtags) leave this undefined and get no plan action.
+     */
+    planSelection?: PlanSelection;
   } | null>(null);
 
   // Precompute index by (Post Type, Content Theme) for fast drilldown lookup.
@@ -164,6 +185,8 @@ export default function ContentAnalysis({
         return v === undefined ? undefined : isRate ? v * 100 : v;
       },
       formatMetric: metric.formatter,
+      // cleanType is the Post Type / format; cleanTheme is the Content Theme.
+      planSelection: { theme: cleanTheme, postType: cleanType },
     });
   };
 
@@ -389,6 +412,17 @@ export default function ContentAnalysis({
         onChange={setSubTab}
       />
 
+      {subTab === "loop" &&
+        (posts.length === 0 ? (
+          emptyPostsBanner
+        ) : (
+          <WhatWorkedToPlan
+            posts={posts}
+            timezone={timezone}
+            onPlanFromSelection={onPlanFromSelection}
+          />
+        ))}
+
       {subTab === "performance" && posts.length === 0 && emptyPostsBanner}
       {subTab === "performance" && posts.length > 0 && (
         <div className="space-y-6">
@@ -497,6 +531,22 @@ export default function ContentAnalysis({
           getMetricValue={drilldown.getMetricValue}
           formatMetric={drilldown.formatMetric}
           timezone={timezone}
+          headerAction={
+            drilldown.planSelection && onPlanFromSelection ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onPlanFromSelection(drilldown.planSelection!);
+                  setDrilldown(null);
+                }}
+                className="text-xs font-medium rounded px-2.5 py-1 cursor-pointer transition-colors hover:brightness-110"
+                style={{ background: "var(--brand)", color: "#fff" }}
+                title="Carry this theme + format into Planning's When-to-post heatmap"
+              >
+                Plan from this →
+              </button>
+            ) : undefined
+          }
           onClose={() => setDrilldown(null)}
         />
       )}
