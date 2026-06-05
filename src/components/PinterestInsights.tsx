@@ -310,23 +310,53 @@ function TrendsPanel({ records, bootleAllowlist }: TrendsPanelProps) {
   );
 }
 
-/** Coloured growth-percentage cell. Caps display at "10000%+" (API max). */
+/**
+ * Above this growth %, the figure is almost always a low-base artifact — a
+ * keyword that barely existed in the comparison period. Pinterest also caps
+ * the value here. Rather than print a pseudo-precise "10000%+" (which reads as
+ * a measured 100x jump), we show a categorical "breakout" label.
+ */
+export const GROWTH_BREAKOUT_THRESHOLD = 1000;
+
+export type GrowthKind = "zero" | "breakout" | "up" | "down";
+
+/**
+ * Decide how a growth percentage should display. A value at or above the
+ * breakout threshold is treated as a near-zero-base artifact and labelled
+ * "breakout" instead of a pseudo-precise "10000%+", which would read as a
+ * measured 100x jump. Pure + exported so the rule is unit-testable.
+ */
+export function formatGrowthDisplay(value: number): {
+  label: string;
+  kind: GrowthKind;
+} {
+  if (!Number.isFinite(value) || value === 0) return { label: "0%", kind: "zero" };
+  if (value >= GROWTH_BREAKOUT_THRESHOLD)
+    return { label: "breakout", kind: "breakout" };
+  return {
+    label: `${value > 0 ? "+" : ""}${value}%`,
+    kind: value >= 10 ? "up" : value < 0 ? "down" : "up",
+  };
+}
+
+/** Coloured growth-percentage cell. Huge low-base values show as "breakout". */
 function GrowthCell({ value }: { value: number }) {
-  if (!Number.isFinite(value) || value === 0) {
+  const { label, kind } = formatGrowthDisplay(value);
+  if (kind === "zero") {
+    return <span style={{ color: "var(--text-secondary)" }}>{label}</span>;
+  }
+  if (kind === "breakout") {
     return (
-      <span style={{ color: "var(--text-secondary)" }}>0%</span>
+      <span
+        className="text-success"
+        title="Breakout from a near-zero base in the comparison period — the true multiple is not meaningful, only that the term went from almost nothing to trending."
+      >
+        {label}
+      </span>
     );
   }
-  const cls =
-    value >= 100
-      ? "text-success"
-      : value >= 10
-        ? "text-success"
-        : value < 0
-          ? "text-danger"
-          : "";
-  const display = value >= 10001 ? "10000%+" : `${value > 0 ? "+" : ""}${value}%`;
-  return <span className={cls}>{display}</span>;
+  const cls = kind === "down" ? "text-danger" : "text-success";
+  return <span className={cls}>{label}</span>;
 }
 
 export default function PinterestInsights({
