@@ -18,7 +18,6 @@ import {
   formatPercent,
   pctChange,
   topPosts,
-  sumField,
   recordReach,
   weightedEngagementRate,
   groupByPlatform,
@@ -26,6 +25,7 @@ import {
   buildUnifiedDates,
   alignToDateArrayNullable,
 } from "@/lib/utils";
+import { followerTrendSeries } from "@/lib/trendSeries";
 import { toPost } from "@/lib/types";
 import {
   saveRate,
@@ -239,26 +239,26 @@ export default function OverviewDeepDive({
     [platformKeys, platformMap],
   );
 
+  // Follower Growth chart — shaped by the shared trendSeries builder so this
+  // and the Pulse "Trends" panel can never diverge (WEBDEV-182 item 11). The
+  // builder returns per-platform label/colour + nullable (gap-honest) data; we
+  // only apply the chart.js line styling here.
   const followerChartData = useMemo(() => {
-    const labels = allDates.map((d) => d.slice(5));
+    const series = followerTrendSeries(dailyMetrics);
     return {
-      labels,
-      datasets: platformKeys.map((key) => {
-        const config = getPlatformConfig(key);
-        const metrics = platformMap.get(key) ?? [];
-        return {
-          label: config.label,
-          data: alignToDateArrayNullable(metrics, allDates, "Followers"),
-          borderColor: config.color,
-          backgroundColor: config.colorFill,
-          fill: false,
-          tension: 0.3,
-          pointRadius: 0,
-          spanGaps: false,
-        };
-      }),
+      labels: series.labels,
+      datasets: series.datasets.map((ds) => ({
+        label: ds.label,
+        data: ds.data,
+        borderColor: ds.color,
+        backgroundColor: ds.colorFill,
+        fill: false,
+        tension: 0.3,
+        pointRadius: 0,
+        spanGaps: false,
+      })),
     };
-  }, [platformKeys, platformMap, allDates]);
+  }, [dailyMetrics]);
 
   const erChartData = useMemo(() => {
     const labels = allDates.map((d) => d.slice(5));

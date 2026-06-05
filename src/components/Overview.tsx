@@ -5,6 +5,7 @@ import KPICard from "./KPICard";
 import InfoTooltip from "./InfoTooltip";
 import Sparkline from "./Sparkline";
 import NeedsAttention from "./NeedsAttention";
+import TrendCharts from "./TrendCharts";
 import { glossaryFor } from "@/lib/metricGlossary";
 import { getPlatformConfig } from "@/lib/platforms";
 import {
@@ -388,6 +389,13 @@ export default function Overview({
           onSelectPost={onSelectPost}
         />
       </div>
+
+      {/* ─── 4. TRENDS OVER TIME ──────────────────────────────────────────── */}
+      {/* The north-star cards show only an in-period sparkline; this block adds
+          the period-over-period trend context a leader was missing (WEBDEV-182
+          item 11). Chart shaping is shared with OverviewDeepDive via the pure
+          trendSeries builders. */}
+      <TrendCharts posts={posts} dailyMetrics={dailyMetrics} />
     </div>
   );
 }
