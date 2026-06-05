@@ -409,8 +409,10 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Content */}
-      <main className="p-6 max-w-[1400px] mx-auto">
+      {/* Content. Extra bottom padding on small screens so the last card clears
+          the fixed "Ask AI" FAB (bottom-6 + button height); on sm+ the FAB sits
+          in the side gutter so the normal padding is enough (WEBDEV-182 item 15). */}
+      <main className="p-6 pb-28 sm:pb-6 max-w-[1400px] mx-auto">
         {loading && <LoadingSkeleton />}
 
         {error && (
