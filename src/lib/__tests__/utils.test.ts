@@ -11,6 +11,7 @@ import {
   pctChange,
   significantPctChange,
   windowReachChange,
+  hashtagsForERRanking,
   avgERByPostType,
   avgERByTheme,
   postingHeatmap,
@@ -373,6 +374,44 @@ describe("windowReachChange", () => {
   it("returns undefined when either window is empty", () => {
     expect(windowReachChange(0, 0, 2400, 30)).toBeUndefined();
     expect(windowReachChange(3000, 30, 0, 0)).toBeUndefined();
+  });
+});
+
+// --- hashtagsForERRanking ---
+describe("hashtagsForERRanking", () => {
+  function postWith(tags: string, er: number): AirtableRecord {
+    return makeRecord({ Hashtags: tags, "Engagement Rate": er });
+  }
+
+  it("excludes hashtags used fewer than the minimum number of times", () => {
+    const posts = [
+      postWith("#a", 0.1), // a: n=1
+      postWith("#b,#a", 0.2), // a: n=2, b: n=1
+      postWith("#b", 0.3), // b: n=2
+      postWith("#b", 0.4), // b: n=3
+    ];
+    // With a floor of 3, only #b (n=3) qualifies; #a (n=2) is excluded.
+    const result = hashtagsForERRanking(posts, 3);
+    expect(result.map((h) => h.tag)).toEqual(["#b"]);
+    expect(result[0].count).toBe(3);
+  });
+
+  it("ranks qualifying hashtags by avg ER descending", () => {
+    const posts = [
+      postWith("#low", 0.01),
+      postWith("#low", 0.01),
+      postWith("#low", 0.01),
+      postWith("#high", 0.5),
+      postWith("#high", 0.5),
+      postWith("#high", 0.5),
+    ];
+    const result = hashtagsForERRanking(posts, 3);
+    expect(result.map((h) => h.tag)).toEqual(["#high", "#low"]);
+  });
+
+  it("returns an empty array when nothing clears the floor", () => {
+    const posts = [postWith("#a", 0.1), postWith("#b", 0.2)];
+    expect(hashtagsForERRanking(posts, 3)).toEqual([]);
   });
 });
 

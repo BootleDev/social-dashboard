@@ -849,6 +849,22 @@ export function hashtagFrequency(
     .sort((a, b) => b.count - a.count);
 }
 
+/**
+ * Hashtags eligible for an AVERAGE-engagement-rate ranking, sorted by avg ER
+ * descending. A hashtag's avg ER is only meaningful once it has been used
+ * enough times — a tag used once has an "average" of a single post, which is
+ * noise, not signal. Callers pass `minUses` (the sample-size floor) and should
+ * surface each tag's `count` so the reader can see the n behind the bar.
+ */
+export function hashtagsForERRanking(
+  posts: AirtableRecord[],
+  minUses: number,
+): Array<{ tag: string; count: number; avgER: number }> {
+  return hashtagFrequency(posts)
+    .filter((h) => h.count >= minUses)
+    .sort((a, b) => b.avgER - a.avgER);
+}
+
 /** Align metric values to a shared date array, filling gaps with a default. */
 export function alignToDateArray(
   metrics: AirtableRecord[],
