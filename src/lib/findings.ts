@@ -100,6 +100,11 @@ export function generateFindings(posts: AirtableRecord[]): Finding[] {
   // tracking-broken platforms (e.g. Pinterest returning 0 across the
   // board) don't inflate the lift artificially.
   const MIN_GROUP_N = 3;
+  // Below this many posts, a winning combo is an early read, not a proven
+  // strength — it stays surfaced but as a neutral "Note" with an explicit
+  // small-sample caveat, so the green "Strength" badge is reserved for combos
+  // we actually have the volume to trust.
+  const CONFIDENT_GROUP_N = 5;
   const themeFormat = groupBy(
     posts,
     (p) =>
@@ -124,17 +129,24 @@ export function generateFindings(posts: AirtableRecord[]): Finding[] {
         ? baseline.reduce((a, b) => a + b, 0) / baseline.length
         : 0;
     const lift = baselineAvg > 0 ? topPerPost / baselineAvg : 0;
+    // Confident enough to call a "Strength" only with sufficient volume.
+    const confident = top.posts.length >= CONFIDENT_GROUP_N;
+    const liftClause =
+      lift > 1.5
+        ? ` — ${lift.toFixed(1)}× the per-post average of other engaged combos (excludes zero-engagement groups).`
+        : ".";
+    const caveat = confident
+      ? ""
+      : ` Early read — only ${top.posts.length} posts, so treat as a lead to test, not a proven winner.`;
     findings.push({
       id: "top-combo",
-      severity: "positive",
-      headline: `${theme} × ${fmt} is your strongest combo`,
+      severity: confident ? "positive" : "neutral",
+      headline: confident
+        ? `${theme} × ${fmt} is your strongest combo`
+        : `${theme} × ${fmt} is an early front-runner`,
       detail: `${top.posts.length} posts averaging ${topPerPost.toFixed(
         1,
-      )} engagement each${
-        lift > 1.5
-          ? ` — ${lift.toFixed(1)}× the per-post average of other engaged combos (excludes zero-engagement groups).`
-          : "."
-      }`,
+      )} engagement each${liftClause}${caveat}`,
     });
   }
 
