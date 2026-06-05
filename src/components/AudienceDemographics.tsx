@@ -8,7 +8,15 @@ import ChartCard from "./ChartCard";
 import StatsPanel from "./StatsPanel";
 import { describe } from "@/lib/stats";
 import { toAudienceDemographic, type AudienceDemographic } from "@/lib/types";
+import { rollupCountries } from "@/lib/countryRollup";
 import type { AirtableRecord } from "@/lib/utils";
+
+/**
+ * Top markets to list individually before folding the long tail into a single
+ * "other" row (WEBDEV-182 item 13). The raw list runs to ~57 countries; past a
+ * dozen they are thin slices that bury the meaningful concentration.
+ */
+const COUNTRY_TOP_N = 12;
 
 interface AudienceDemographicsProps {
   records: AirtableRecord[];
@@ -370,6 +378,11 @@ function CountryView({ followers }: { followers: AudienceDemographic[] }) {
     [followers],
   );
   const max = ranked[0]?.value ?? 0;
+  // Cap the listed countries and fold the long tail into a single "other" row.
+  const { shown, other } = useMemo(
+    () => rollupCountries(followers, COUNTRY_TOP_N),
+    [followers],
+  );
 
   // Use Intl.DisplayNames (no dep) to render readable country names.
   const displayNames =
@@ -408,7 +421,7 @@ function CountryView({ followers }: { followers: AudienceDemographic[] }) {
         </span>
       </div>
       <div className="space-y-1.5">
-        {ranked.map((b, i) => {
+        {shown.map((b, i) => {
           const pct = total > 0 ? (b.value / total) * 100 : 0;
           const barWidth = max > 0 ? (b.value / max) * 100 : 0;
           return (
@@ -454,6 +467,48 @@ function CountryView({ followers }: { followers: AudienceDemographic[] }) {
             </div>
           );
         })}
+
+        {/* Folded long tail — one row standing in for every country past the
+            top N, with its follower total preserved (WEBDEV-182 item 13). */}
+        {other && (
+          <div
+            className="grid items-center gap-2 text-xs pt-1"
+            style={{
+              gridTemplateColumns: "20px 1fr 80px 60px",
+              borderTop: "1px solid var(--border)",
+            }}
+          >
+            <span />
+            <div
+              className="truncate italic"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Other ({other.countryCount} countries)
+            </div>
+            <div
+              className="relative h-2 rounded overflow-hidden"
+              style={{ background: "var(--bg-secondary)" }}
+            >
+              <div
+                className="absolute inset-y-0 left-0 rounded"
+                style={{
+                  width: `${max > 0 ? (other.value / max) * 100 : 0}%`,
+                  background: "var(--text-secondary)",
+                  opacity: 0.5,
+                }}
+              />
+            </div>
+            <div
+              className="text-right tabular-nums text-[11px]"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {other.value.toLocaleString()}{" "}
+              <span style={{ color: "var(--text-secondary)", opacity: 0.7 }}>
+                ({total > 0 ? ((other.value / total) * 100).toFixed(1) : "0"}%)
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
