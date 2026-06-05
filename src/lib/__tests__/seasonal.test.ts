@@ -181,40 +181,85 @@ describe("buildBootleKeywordAllowlist", () => {
 describe("matchesBootleAllowlist", () => {
   const allowlist = [
     "water bottle",
-    "summer essentials",
+    "hydration",
     "tea",
+    "matcha",
     "wedding gift",
     "graduation gift",
+    // generic aesthetic adjacencies — drinkware co-occurs with these, but they
+    // are NOT relevant on their own.
+    "outfit",
+    "aesthetic",
+    "essentials",
     "kitchen",
   ];
 
-  it("direct substring (allowlist inside keyword)", () => {
-    expect(matchesBootleAllowlist("Summer Essentials 2027", allowlist)).toBe(true);
+  it("matches on a strong (drinkware/wellness/gifting) signal", () => {
     expect(matchesBootleAllowlist("WATER BOTTLE", allowlist)).toBe(true);
-  });
-
-  it("reverse substring (keyword inside allowlist)", () => {
-    // "tea" allowlist matches single-word trending "tea" via direct hit;
-    // here we test the reverse direction explicitly.
+    expect(matchesBootleAllowlist("hydration tracker", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("matcha latte recipe", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("wedding gift ideas", allowlist)).toBe(true);
+    expect(matchesBootleAllowlist("graduation party ideas", allowlist)).toBe(
+      true,
+    );
     expect(matchesBootleAllowlist("wedding", allowlist)).toBe(true);
   });
 
-  it("token overlap matches partial real-world cases", () => {
-    // The bug that motivated this change: real 2026-05-27 GB+IE snapshot.
-    expect(matchesBootleAllowlist("graduation party ideas", allowlist)).toBe(true);
-    expect(matchesBootleAllowlist("wedding dresses", allowlist)).toBe(true);
-    expect(matchesBootleAllowlist("kitchen aesthetic", allowlist)).toBe(true);
+  it("matches a generic token ONLY when a strong signal co-occurs", () => {
+    // "water bottle aesthetic" — strong "water bottle" present.
+    expect(matchesBootleAllowlist("water bottle aesthetic", allowlist)).toBe(
+      true,
+    );
   });
 
-  it("ignores short common tokens to avoid false positives", () => {
-    const allow = ["it is a gift"];
-    // "it" appears in many keywords; should not match
-    expect(matchesBootleAllowlist("crypto memes", allow)).toBe(false);
+  it("rejects keywords that hit ONLY a generic aesthetic token (the bug)", () => {
+    // These are the real 2026-06-04 false positives: a single weak token
+    // ("outfit"/"aesthetic") let pop-culture and nail-art noise through.
+    expect(
+      matchesBootleAllowlist("harry styles concert outfit", allowlist),
+    ).toBe(false);
+    expect(matchesBootleAllowlist("michael jackson aesthetic", allowlist)).toBe(
+      false,
+    );
+    expect(matchesBootleAllowlist("summer outfits for men", allowlist)).toBe(
+      false,
+    );
+    expect(matchesBootleAllowlist("kitchen aesthetic", allowlist)).toBe(false);
   });
 
-  it("rejects unrelated keywords", () => {
+  it("rejects clearly unrelated keywords", () => {
     expect(matchesBootleAllowlist("michael jackson", allowlist)).toBe(false);
     expect(matchesBootleAllowlist("crypto memes", allowlist)).toBe(false);
-    expect(matchesBootleAllowlist("tomodachi life island layout", allowlist)).toBe(false);
+    expect(
+      matchesBootleAllowlist("tomodachi life island layout", allowlist),
+    ).toBe(false);
+    expect(matchesBootleAllowlist("ibiza nails summer", allowlist)).toBe(false);
+  });
+
+  it("rejects noise that shares only an event/context word with a strong entry", () => {
+    // Real 2026-06-04 leaks: these slipped through by sharing a single
+    // event-context token ("festival", "black", "summer") with a multi-word
+    // allowlist entry like "festival outfit" / "black friday gift" /
+    // "summer wedding". Context words are not core relevance signals.
+    const ctxAllow = [
+      "festival outfit",
+      "festival essentials",
+      "black friday gift",
+      "summer wedding",
+      "college dorm essentials",
+    ];
+    expect(matchesBootleAllowlist("festival nails", ctxAllow)).toBe(false);
+    expect(matchesBootleAllowlist("black noir", ctxAllow)).toBe(false);
+    expect(
+      matchesBootleAllowlist("michael jackson black and white", ctxAllow),
+    ).toBe(false);
+    expect(matchesBootleAllowlist("summer outfits for men", ctxAllow)).toBe(
+      false,
+    );
+    // …but the genuine gifting/wedding phrases still match.
+    expect(matchesBootleAllowlist("wedding gift ideas", ctxAllow)).toBe(true);
+    expect(matchesBootleAllowlist("black friday gift guide", ctxAllow)).toBe(
+      true,
+    );
   });
 });

@@ -400,19 +400,117 @@ export function buildBootleKeywordAllowlist(
 }
 
 /**
- * True if `trendKeyword` matches any allowlist entry. Matching is intentionally
- * permissive because Pinterest trending keywords are short, casual, and rarely
- * include our exact phrasing. We check:
+ * Generic aesthetic / lifestyle terms that drinkware merely co-occurs with on
+ * Pinterest. They are kept in the allowlist because "water bottle aesthetic" or
+ * "desk setup" ARE relevant — but on their OWN they are far too broad to anchor
+ * relevance: "harry styles concert outfit" or "michael jackson aesthetic" would
+ * sail through on a single shared token. So a match on one of these never, by
+ * itself, makes a keyword Bootle-relevant; a strong drinkware/wellness/gifting
+ * signal must also be present. Matched as whole tokens, lowercase.
+ */
+const GENERIC_AESTHETIC_TERMS: ReadonlySet<string> = new Set([
+  "aesthetic",
+  "essentials",
+  "minimalist",
+  "lifestyle",
+  "outfit",
+  "outfits",
+  "decor",
+  "interior",
+  "kitchen",
+  "cozy",
+  "cosy",
+  "party",
+  "diy",
+  "dorm",
+  "brunch",
+  "hosting",
+  "recipe",
+  "recipes",
+  "ideas",
+  "inspo",
+  "summer",
+  "winter",
+  "spring",
+  "autumn",
+  "fall",
+]);
+
+/**
+ * Core relevance tokens — words that, on their OWN, genuinely signal a
+ * Bootle-relevant keyword (drinkware, hydration, wellness, gifting). A single
+ * shared token from THIS set qualifies a keyword; a shared word that is NOT in
+ * this set (an event/context word like "festival", "black", "summer", or a
+ * generic aesthetic term) does not. This is the inverse, stricter complement to
+ * the substring rule below and is what keeps "festival nails" / "black noir" /
+ * "summer outfits for men" out while admitting "wedding gift" or "matcha".
+ */
+const CORE_RELEVANCE_TOKENS: ReadonlySet<string> = new Set([
+  // drinkware / hydration
+  "bottle",
+  "bottles",
+  "water",
+  "hydration",
+  "hydrate",
+  "drinkware",
+  "drink",
+  "drinks",
+  "tumbler",
+  "thermos",
+  "flask",
+  // wellness adjacencies
+  "wellness",
+  "tea",
+  "matcha",
+  "smoothie",
+  "infused",
+  // materials / sustainability
+  "sustainable",
+  "reusable",
+  "eco",
+  "stainless",
+  // gifting (the noun that makes a seasonal moment a Bootle moment)
+  "gift",
+  "gifts",
+  "gifting",
+  "geschenk",
+  // seasonal moments whose token is itself specific enough to anchor
+  "wedding",
+  "bridesmaid",
+  "groomsmen",
+  "graduation",
+  "grad",
+  "christmas",
+  "weihnachtsgeschenk",
+]);
+
+/**
+ * Is this token a meaningful (>= 3 char) word that isn't a generic aesthetic
+ * filler? Used to decide whether a multi-word allowlist entry is specific
+ * enough to be matched as a phrase substring.
+ */
+function isContentfulToken(t: string): boolean {
+  return t.length >= 3 && !GENERIC_AESTHETIC_TERMS.has(t);
+}
+
+/**
+ * True if `trendKeyword` is Bootle-relevant against the allowlist. A keyword
+ * qualifies when EITHER:
  *
- * 1. Direct substring — allowlist entry appears inside the keyword
- *    (e.g. "tea" in "matcha latte recipes")
- * 2. Reverse substring — keyword appears inside an allowlist entry
- *    (e.g. trending "wedding" matches allowlist "wedding gift")
- * 3. Token overlap — any word in the keyword equals any word in any allowlist
- *    entry (e.g. trending "graduation party ideas" overlaps allowlist
- *    "graduation gift" on the word "graduation")
+ *   1. Core-token overlap — it shares a word with the core relevance lexicon
+ *      (CORE_RELEVANCE_TOKENS): "wedding", "gift", "hydration", "tea", … A
+ *      generic or event-context word ("outfit", "festival", "summer", "black")
+ *      is NOT in that set, so sharing only one of those never qualifies.
+ *   2. Specific-phrase substring — a multi-word allowlist entry that carries at
+ *      least one contentful (non-generic) token appears as a substring of the
+ *      keyword (e.g. allowlist "black friday gift" inside "black friday gift
+ *      guide"). The whole phrase must be present, so a lone shared word can't
+ *      sneak through.
  *
- * Whitespace, hyphens, and apostrophes are treated as word boundaries.
+ * This deliberately replaces the old "any shared >=3-char token" rule, which
+ * let pop-culture and nail-art noise through on a single generic token. Single
+ * generic-only allowlist entries (e.g. just "outfit") never match anything.
+ * Whitespace, hyphens and apostrophes are word boundaries.
  */
 export function matchesBootleAllowlist(
   trendKeyword: string,
@@ -421,17 +519,16 @@ export function matchesBootleAllowlist(
   const k = trendKeyword.toLowerCase();
   const kTokens = tokenize(k);
 
+  // Rule 1: the keyword itself carries a core relevance token.
+  if (kTokens.some((t) => CORE_RELEVANCE_TOKENS.has(t))) return true;
+
+  // Rule 2: a specific multi-word allowlist phrase appears in the keyword.
   for (const allowed of allowlist) {
     const a = allowed.toLowerCase();
-    if (k.includes(a) || a.includes(k)) return true;
-
-    // Token overlap. Only treats meaningful tokens (>= 3 chars) so common
-    // short words don't false-positive everything.
     const aTokens = tokenize(a);
-    for (const kt of kTokens) {
-      if (kt.length < 3) continue;
-      if (aTokens.includes(kt)) return true;
-    }
+    if (aTokens.length < 2) continue; // single words handled by rule 1
+    if (!aTokens.some(isContentfulToken)) continue; // all-generic phrase, skip
+    if (k.includes(a)) return true;
   }
   return false;
 }
