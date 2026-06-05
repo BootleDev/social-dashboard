@@ -1066,9 +1066,59 @@ describe("weightedERByDimension", () => {
 });
 
 describe("postEngagement", () => {
-  it("sums likes + comments + saves + shares", () => {
+  it("uses the platform-reported Engagement field when present", () => {
+    // Meta case: Engagement (17) includes Reposts, so it exceeds the
+    // Likes+Comments+Saves+Shares sum (16). The field must win.
+    expect(
+      postEngagement(
+        makeRecord({
+          Engagement: 17,
+          Likes: 14,
+          Comments: 0,
+          Saves: 2,
+          Shares: 0,
+          Reposts: 1,
+        }),
+      ),
+    ).toBe(17);
+  });
+
+  it("uses Engagement for Pinterest where components can't reconstruct it", () => {
+    // Pinterest: Engagement (3) = SAVE + PIN_CLICK, but PIN_CLICK isn't stored
+    // in any component column, so the component sum (0) is wrong. Field wins.
+    expect(
+      postEngagement(
+        makeRecord({
+          Platform: "pinterest",
+          Engagement: 3,
+          Likes: 0,
+          Comments: 0,
+          Saves: 0,
+          Shares: 0,
+        }),
+      ),
+    ).toBe(3);
+  });
+
+  it("falls back to the component sum when Engagement is absent (legacy rows)", () => {
     expect(
       postEngagement(makeRecord({ Likes: 1, Comments: 2, Saves: 3, Shares: 4 })),
     ).toBe(10);
+  });
+
+  it("treats a blank Engagement as absent and falls back", () => {
+    expect(
+      postEngagement(
+        makeRecord({ Engagement: "", Likes: 1, Comments: 0, Saves: 0, Shares: 0 }),
+      ),
+    ).toBe(1);
+  });
+
+  it("returns 0 when Engagement is a real zero", () => {
+    expect(
+      postEngagement(
+        makeRecord({ Engagement: 0, Likes: 0, Comments: 0, Saves: 0, Shares: 0 }),
+      ),
+    ).toBe(0);
   });
 });

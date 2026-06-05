@@ -24,6 +24,7 @@ import {
   buildUnifiedDates,
   alignToDateArray,
   alignToDateArrayNullable,
+  postEngagement,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -186,13 +187,10 @@ export default function PlatformCompare({
         (s, p) => s + recordReach(p),
         0,
       );
+      // Platform-reported engagement (Engagement field), not a component sum —
+      // see postEngagement: Meta includes Reposts, Pinterest includes PIN_CLICK.
       const postEngagementTotal = platformPosts.reduce(
-        (s, p) =>
-          s +
-          num(p.fields["Likes"]) +
-          num(p.fields["Comments"]) +
-          num(p.fields["Saves"]) +
-          num(p.fields["Shares"]),
+        (s, p) => s + postEngagement(p),
         0,
       );
 

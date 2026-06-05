@@ -595,8 +595,32 @@ export function avgField(records: AirtableRecord[], field: string): number {
  * ratios and lets tiny-reach posts dominate. Mirrors how save/comment rates are
  * already computed (sum ÷ reach) so all rate metrics are consistent.
  */
-/** Engagement of a single post = likes + comments + saves + shares. */
+/**
+ * Engagement of a single post — the platform-reported total.
+ *
+ * Reads the authoritative `Engagement` field, which each platform's refresher
+ * populates with that platform's own engagement total:
+ *  - Meta (IG/FB): likes + comments + saves + shares + REPOSTS. The component
+ *    columns alone miss Reposts, so summing them under-counts.
+ *  - Pinterest:    SAVE + PIN_CLICK. PIN_CLICK is NOT stored in any component
+ *    column (only OUTBOUND_CLICK is, as "Link Clicks"), so summing components
+ *    drops most Pinterest engagement and zeroes pins with only pin-clicks.
+ *
+ * Verified against live data 2026-06-04: `Engagement / reach` reproduces the
+ * stored per-post `Engagement Rate` on every platform; the component sum does
+ * not. So this field — not a component reconstruction — is the single source of
+ * truth, and ER stays internally consistent when derived from it.
+ *
+ * Fallback: only when `Engagement` is genuinely absent (older rows predating the
+ * field) do we fall back to the component sum. A blank `Engagement` in current
+ * data always coincides with zero components (verified), so the fallback is a
+ * no-op there and only helps legacy rows.
+ */
 export function postEngagement(r: AirtableRecord): number {
+  const field = r.fields["Engagement"];
+  if (field !== null && field !== undefined && field !== "") {
+    return num(field);
+  }
   return (
     num(r.fields["Likes"]) +
     num(r.fields["Comments"]) +
