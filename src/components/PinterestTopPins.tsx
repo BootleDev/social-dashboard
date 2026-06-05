@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toTopPin, type TopPin } from "@/lib/types";
+import { rankedPins, metricValue } from "@/lib/topPinRanking";
 import { formatNumber, str } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 import PostDrilldownPanel from "./PostDrilldownPanel";
@@ -20,6 +21,10 @@ const SORT_BYS_AVAILABLE: Array<TopPin["sortBy"]> = [
   "IMPRESSION",
   "SAVE",
   "OUTBOUND_CLICK",
+  // Pin clicks aren't fetched as their own server-ranked set, but every pin
+  // carries its pinClick value, so this mode re-ranks client-side (see
+  // lib/topPinRanking). Surfacing it was WEBDEV-182 follow-up.
+  "PIN_CLICK",
 ];
 
 const SORT_LABEL: Record<TopPin["sortBy"], string> = {
@@ -71,11 +76,7 @@ export default function PinterestTopPins({
   const latestDate = useMemo(() => latestSnapshotDate(pins), [pins]);
 
   const filtered = useMemo(
-    () =>
-      pins
-        .filter((p) => p.snapshotDate === latestDate && p.sortBy === sortBy)
-        .sort((a, b) => a.rank - b.rank)
-        .slice(0, 12),
+    () => rankedPins(pins, latestDate, sortBy),
     [pins, latestDate, sortBy],
   );
 
@@ -137,16 +138,7 @@ export default function PinterestTopPins({
             </button>
           ))}
           <StatsPanel
-            stats={(() => {
-              const values = filtered.map((p) =>
-                sortBy === "IMPRESSION"
-                  ? p.impressions
-                  : sortBy === "SAVE"
-                    ? p.saves
-                    : p.outboundClick,
-              );
-              return describe(values);
-            })()}
+            stats={describe(filtered.map((p) => metricValue(p, sortBy)))}
             format={(v) => formatNumber(v)}
             context={`${SORT_LABEL[sortBy]} distribution across top pins`}
           />
@@ -174,12 +166,7 @@ export default function PinterestTopPins({
               : "";
             const captionSnippet =
               caption.length > 90 ? caption.slice(0, 90).trim() + "…" : caption;
-            const headlineMetric =
-              sortBy === "IMPRESSION"
-                ? formatNumber(p.impressions)
-                : sortBy === "SAVE"
-                  ? formatNumber(p.saves)
-                  : formatNumber(p.outboundClick);
+            const headlineMetric = formatNumber(metricValue(p, sortBy));
 
             return (
               <button
