@@ -371,8 +371,12 @@ export default function CompetitorInsights({
               <th scope="col" className="text-left py-2 px-2">
                 Hook
               </th>
-              <th scope="col" className="text-left py-2 px-2">
-                Date
+              <th
+                scope="col"
+                className="text-left py-2 px-2"
+                title="Post date as reported by the source (UTC calendar date)"
+              >
+                Date (UTC)
               </th>
             </tr>
           </thead>

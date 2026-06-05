@@ -333,7 +333,9 @@ export default function DashboardPage() {
                       />
                     );
                   })}
-                  Last data: {latestDataDate}
+                  <span title="Daily data is stamped by UTC calendar date. Late-evening US time can read as 'tomorrow' because it is already the next day in UTC — this is the data's own date, not a future date.">
+                    Last data: {latestDataDate} UTC
+                  </span>
                 </>
               ) : loading ? (
                 "Loading..."

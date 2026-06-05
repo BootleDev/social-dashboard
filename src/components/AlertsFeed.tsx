@@ -135,7 +135,12 @@ export default function AlertsFeed({
                 <span className="font-medium">
                   {icon} {type}
                 </span>
-                <span className="opacity-70">{date?.split("T")[0]}</span>
+                <span
+                  className="opacity-70"
+                  title="Alert date (UTC calendar date)"
+                >
+                  {date?.split("T")[0]}
+                </span>
               </div>
               <div className="opacity-90 capitalize">{platform}</div>
               <div className="opacity-70 mt-0.5">{message}</div>

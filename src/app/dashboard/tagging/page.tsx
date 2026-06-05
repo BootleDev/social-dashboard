@@ -256,8 +256,12 @@ function PostTagCard({
                 {str(record.fields["Tagging Status"])}
               </span>
             )}
-            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-              {date}
+            <span
+              className="text-xs"
+              style={{ color: "var(--text-secondary)" }}
+              title="Published date (UTC calendar date)"
+            >
+              {date} UTC
             </span>
             {post.postType && (
               <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
