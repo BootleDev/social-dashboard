@@ -1,3 +1,10 @@
+import {
+  hasSupabaseDbUrl,
+  getDailyAccountMetricsFromSupabase,
+  getWeeklySummariesFromSupabase,
+  getSocialAlertsFromSupabase,
+} from "./supabase";
+
 const BASE_URL = "https://api.airtable.com/v0";
 
 export const TABLES = {
@@ -98,25 +105,106 @@ export async function getPosts(opts: { noCache?: boolean } = {}) {
   });
 }
 
-export async function getDailyAccountMetrics(opts: { noCache?: boolean } = {}) {
+// ---------------------------------------------------------------------------
+// WEBDEV-207 (dashboard cutover): three getters are repointed to Supabase, each
+// behind a per-table kill switch and each FAIL-CLOSED to the original Airtable
+// read on ANY error, timeout, or empty result. The Supabase reads return the
+// SAME { id, fields:{<Airtable display names>}, createdTime } envelope, so the
+// /api routes and components are untouched. POSTS and CONTENT_LIBRARY are NOT
+// migrated (human-edited) and stay on Airtable below.
+//
+// Per-table kill switches (force Airtable even when SUPABASE_DB_URL is present):
+//   DAILY_METRICS_SOURCE=airtable
+//   WEEKLY_SUMMARIES_SOURCE=airtable
+//   SOCIAL_ALERTS_SOURCE=airtable
+// ---------------------------------------------------------------------------
+
+function forcedToAirtable(envVar: string | undefined): boolean {
+  return envVar?.toLowerCase() === "airtable";
+}
+
+async function getDailyAccountMetricsFromAirtable(opts: { noCache?: boolean }) {
   return fetchAllRecords(TABLES.DAILY_ACCOUNT_METRICS, {
     sort: [{ field: "Date", direction: "desc" }],
     noCache: opts.noCache,
   });
 }
 
-export async function getWeeklySummaries(opts: { noCache?: boolean } = {}) {
+export async function getDailyAccountMetrics(opts: { noCache?: boolean } = {}) {
+  if (
+    !forcedToAirtable(process.env.DAILY_METRICS_SOURCE) &&
+    hasSupabaseDbUrl()
+  ) {
+    try {
+      const rows = await getDailyAccountMetricsFromSupabase();
+      if (rows.length > 0) return rows;
+      console.warn(
+        "[daily-metrics] Supabase returned no rows; falling back to Airtable",
+      );
+    } catch (err) {
+      console.error(
+        "[daily-metrics] Supabase read failed; falling back to Airtable:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return getDailyAccountMetricsFromAirtable(opts);
+}
+
+async function getWeeklySummariesFromAirtable(opts: { noCache?: boolean }) {
   return fetchAllRecords(TABLES.WEEKLY_SUMMARIES, {
     sort: [{ field: "Week Start", direction: "desc" }],
     noCache: opts.noCache,
   });
 }
 
-export async function getSocialAlerts(opts: { noCache?: boolean } = {}) {
+export async function getWeeklySummaries(opts: { noCache?: boolean } = {}) {
+  if (
+    !forcedToAirtable(process.env.WEEKLY_SUMMARIES_SOURCE) &&
+    hasSupabaseDbUrl()
+  ) {
+    try {
+      const rows = await getWeeklySummariesFromSupabase();
+      if (rows.length > 0) return rows;
+      console.warn(
+        "[weekly-summaries] Supabase returned no rows; falling back to Airtable",
+      );
+    } catch (err) {
+      console.error(
+        "[weekly-summaries] Supabase read failed; falling back to Airtable:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return getWeeklySummariesFromAirtable(opts);
+}
+
+async function getSocialAlertsFromAirtable(opts: { noCache?: boolean }) {
   return fetchAllRecords(TABLES.SOCIAL_ALERTS, {
     sort: [{ field: "Alert Date", direction: "desc" }],
     noCache: opts.noCache,
   });
+}
+
+export async function getSocialAlerts(opts: { noCache?: boolean } = {}) {
+  if (
+    !forcedToAirtable(process.env.SOCIAL_ALERTS_SOURCE) &&
+    hasSupabaseDbUrl()
+  ) {
+    try {
+      const rows = await getSocialAlertsFromSupabase();
+      if (rows.length > 0) return rows;
+      console.warn(
+        "[social-alerts] Supabase returned no rows; falling back to Airtable",
+      );
+    } catch (err) {
+      console.error(
+        "[social-alerts] Supabase read failed; falling back to Airtable:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return getSocialAlertsFromAirtable(opts);
 }
 
 export async function getContentLibrary(opts: { noCache?: boolean } = {}) {
