@@ -48,6 +48,7 @@ import "server-only";
 import pg from "pg";
 import type { AirtableRecord } from "./utils";
 import { SUPABASE_ROOT_CA_2021 } from "./supabase-ca";
+import { mapDailyRow, mapWeeklyRow, mapAlertRow } from "./supabaseMappers";
 
 // int8 (OID 20): return as a JS number, not a string. social.social_alerts.id
 // is bigint; we render it to a string when building the envelope, but parsing
@@ -116,9 +117,12 @@ function getPool(): pg.Pool {
       ssl: { ca: SUPABASE_ROOT_CA_2021, rejectUnauthorized: true },
       max: 2,
       // Time-bound a slow/hung pooler so a stall fails over to Airtable fast.
-      connectionTimeoutMillis: 3000,
-      query_timeout: 4000,
-      statement_timeout: 4000,
+      // These sit UNDER the SUPABASE_READ_TIMEOUT_MS (4000) Promise.race ceiling
+      // so the pg-level timeouts fire first and an orphaned query can't outlive
+      // the failover: connect <= 2500, query/statement <= 3500 < 4000.
+      connectionTimeoutMillis: 2500,
+      query_timeout: 3500,
+      statement_timeout: 3500,
       idleTimeoutMillis: 10000,
       allowExitOnIdle: true,
       keepAlive: true,
@@ -163,44 +167,16 @@ async function withTimeout<T>(label: string, read: Promise<T>): Promise<T> {
   }
 }
 
-/**
- * Build a fields object from a row, emitting a key only when the column value
- * is non-null. This reproduces Airtable's sparse-record shape (Airtable omits
- * empty cells from `fields`), which the dashboard relies on to render "—"
- * instead of 0 for never-populated columns (e.g. Website Clicks, Impressions).
- * A SQL 0 is a real value and IS emitted; only null is dropped.
- */
-function buildFields(
-  row: Record<string, unknown>,
-  map: Array<[column: string, displayName: string]>,
-): Record<string, unknown> {
-  const fields: Record<string, unknown> = {};
-  for (const [column, displayName] of map) {
-    const v = row[column];
-    if (v !== null && v !== undefined) {
-      fields[displayName] = v;
-    }
-  }
-  return fields;
-}
-
-/** ISO createdTime for the envelope, from a timestamptz `updated_at`. */
-function toCreatedTime(updatedAt: unknown): string {
-  if (updatedAt instanceof Date) return updatedAt.toISOString();
-  if (typeof updatedAt === "string") {
-    const d = new Date(updatedAt);
-    if (!isNaN(d.getTime())) return d.toISOString();
-  }
-  return new Date(0).toISOString();
-}
+// The pure row -> envelope mappers (and their column->display-name maps) live
+// in ./supabaseMappers so they can be unit-tested without this server-only / pg
+// connection layer. The #1 review risk — the engagement-rate fraction-vs-percent
+// invariant and the exact emitted key set / id synthesis / sparse-shape rule —
+// is locked there by supabaseMappers.test.ts. Each getter below just runs the
+// query and maps each row through the matching pure mapper.
 
 // ---------------------------------------------------------------------------
 // social.daily_account_metrics -> getDailyAccountMetrics
 // ---------------------------------------------------------------------------
-//
-// Column -> Airtable "Daily Account Metrics" display-name map. The display
-// names are the EXACT keys the dashboard reads (Overview / PlatformCompare /
-// AudienceGrowth / chat route / utils via fields['Date'] + fields['Platform']).
 //
 // ENGAGEMENT-RATE UNIT (the #1 review risk): engagement_rate is stored as a
 // FRACTION (e.g. 0.0870 = 8.70%), identical to how Airtable's daily metrics
@@ -209,21 +185,9 @@ function toCreatedTime(updatedAt: unknown): string {
 // Airtable POSTS-derived ER line (which is also a fraction * 100). So we MUST
 // pass the fraction through unchanged — converting to a percent here would
 // render the migrated daily ER 100x too large against the unchanged posts line.
-// pg returns numeric as a string; we Number() it so the envelope matches
-// Airtable's numeric type, then num() in the components parses it identically.
-const DAILY_MAP: Array<[string, string]> = [
-  ["date", "Date"],
-  ["platform", "Platform"],
-  ["followers", "Followers"],
-  ["followers_gained", "Followers Gained"],
-  ["impressions", "Impressions"],
-  ["reach", "Reach"],
-  ["profile_views", "Profile Views"],
-  ["website_clicks", "Website Clicks"],
-  ["engagement_rate", "Engagement Rate"],
-  ["er_type", "ER Type"],
-];
-
+// pg returns numeric as a string; mapDailyRow passes it through verbatim and
+// num() in the components parses that string identically to a JS number, so no
+// coercion is needed here. The invariant is asserted in supabaseMappers.test.ts.
 export async function getDailyAccountMetricsFromSupabase(): Promise<
   AirtableRecord[]
 > {
@@ -237,20 +201,7 @@ export async function getDailyAccountMetricsFromSupabase(): Promise<
            from social.daily_account_metrics
           order by date desc`,
       );
-      return rows.map((r) => {
-        const fields = buildFields(r, DAILY_MAP);
-        // numeric -> JS number (fraction). num() tolerates strings too, but a
-        // Number matches Airtable's stored type for exact parity-test equality.
-        if ("Engagement Rate" in fields) {
-          fields["Engagement Rate"] = Number(fields["Engagement Rate"]);
-        }
-        return {
-          // Stable synthetic id: one row per platform per day.
-          id: `${r.platform}|${r.date}`,
-          fields,
-          createdTime: toCreatedTime(r.updated_at),
-        };
-      });
+      return rows.map(mapDailyRow);
     })(),
   );
 }
@@ -258,15 +209,6 @@ export async function getDailyAccountMetricsFromSupabase(): Promise<
 // ---------------------------------------------------------------------------
 // social.weekly_summaries -> getWeeklySummaries
 // ---------------------------------------------------------------------------
-const WEEKLY_MAP: Array<[string, string]> = [
-  ["week_start", "Week Start"],
-  ["period", "Period"],
-  ["posts_analysed", "Posts Analysed"],
-  ["full_report", "Full Report"],
-  ["top_post", "Top Post"],
-  ["platform_breakdown", "Platform Breakdown"],
-];
-
 export async function getWeeklySummariesFromSupabase(): Promise<
   AirtableRecord[]
 > {
@@ -279,14 +221,7 @@ export async function getWeeklySummariesFromSupabase(): Promise<
            from social.weekly_summaries
           order by week_start desc`,
       );
-      return rows.map((r) => ({
-        // No natural id column; one summary per week -> synthesize from
-        // week_start (the component takes summaries[0], so the desc sort above
-        // is what's load-bearing, not the id).
-        id: `week|${r.week_start}`,
-        fields: buildFields(r, WEEKLY_MAP),
-        createdTime: toCreatedTime(r.updated_at),
-      }));
+      return rows.map(mapWeeklyRow);
     })(),
   );
 }
@@ -294,15 +229,6 @@ export async function getWeeklySummariesFromSupabase(): Promise<
 // ---------------------------------------------------------------------------
 // social.social_alerts -> getSocialAlerts
 // ---------------------------------------------------------------------------
-const ALERTS_MAP: Array<[string, string]> = [
-  ["alert_date", "Alert Date"],
-  ["platform", "Platform"],
-  ["type", "Type"],
-  ["severity", "Severity"],
-  ["message", "Message"],
-  ["post_id", "Post ID"],
-];
-
 export async function getSocialAlertsFromSupabase(): Promise<AirtableRecord[]> {
   return withTimeout(
     "social_alerts",
@@ -313,13 +239,7 @@ export async function getSocialAlertsFromSupabase(): Promise<AirtableRecord[]> {
            from social.social_alerts
           order by alert_date desc, id desc`,
       );
-      return rows.map((r) => ({
-        // Real bigint id -> string (envelope ids are strings; AlertsFeed uses
-        // it as the React key). int8 was parsed to a JS number above.
-        id: String(r.id),
-        fields: buildFields(r, ALERTS_MAP),
-        createdTime: toCreatedTime(r.updated_at),
-      }));
+      return rows.map(mapAlertRow);
     })(),
   );
 }
