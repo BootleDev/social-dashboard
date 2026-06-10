@@ -118,9 +118,12 @@ function getPool(): pg.Pool {
       ssl: { ca: SUPABASE_ROOT_CA_2021, rejectUnauthorized: true },
       max: 2,
       // Time-bound a slow/hung pooler so a stall fails over to Airtable fast.
-      // These sit UNDER the SUPABASE_READ_TIMEOUT_MS (4000) Promise.race ceiling
-      // so the pg-level timeouts fire first and an orphaned query can't outlive
-      // the failover: connect <= 2500, query/statement <= 3500 < 4000.
+      // NOTE: the connect (2500) and query (3500) budgets are SEQUENTIAL, so
+      // they do NOT individually sit under the 4000ms ceiling. The actual
+      // guarantee: failover is guaranteed at 4000ms by the Promise.race in
+      // withTimeout(); an orphaned in-flight query is then destroyed by
+      // query_timeout, bounded at ~6s worst case (2500 connect + 3500 query),
+      // briefly holding one of the pool's 2 slots after the failover.
       connectionTimeoutMillis: 2500,
       query_timeout: 3500,
       statement_timeout: 3500,
@@ -204,10 +207,11 @@ export async function getDailyAccountMetricsFromSupabase(): Promise<
       );
       // Runtime unit-scale tripwire (WEBDEV-210): percent-scale drift on
       // engagement_rate throws here, landing in getDailyAccountMetrics()'s
-      // catch -> Airtable fallback. Counts are never listed.
+      // catch -> Airtable fallback. Counts are never listed. idCols is the
+      // composite key (one row per platform per day).
       assertFractionScale("social.daily_account_metrics", rows, {
         throwOn: ["engagement_rate"],
-        idCol: "date",
+        idCols: ["platform", "date"],
       });
       return rows.map(mapDailyRow);
     })(),

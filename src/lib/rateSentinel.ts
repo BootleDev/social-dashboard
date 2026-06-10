@@ -25,7 +25,9 @@
  *
  * Column policy: engagement_rate is throwOn — an ACCOUNT-level daily ER
  * (engagements relative to followers/reach per er_type) above 100% is not a
- * real value, while percent-scale drift lands at 2–15. Counts (followers,
+ * real value (live data 2026-06: max 0.25 across 361 rows), while
+ * percent-scale drift lands at 2–15. NEGATIVE values also throw — a rate
+ * outside [0, 1] is corrupt whatever the cause. Counts (followers,
  * impressions, reach, ...) are never listed.
  *
  * LIMITATION (by design): a tripwire, not a proof. Percent-scale drift on a
@@ -39,12 +41,16 @@
 type Row = Record<string, unknown>;
 
 export interface RateSentinelCols {
-  /** Columns whose value > 1 throws (fails the Supabase read over to Airtable). */
+  /** Columns whose value outside [0, 1] throws (fails the Supabase read over to Airtable). */
   throwOn: readonly string[];
-  /** Columns whose value > 1 only logs a console.warn. */
+  /** Columns whose value outside [0, 1] only logs a console.warn. */
   warnOn?: readonly string[];
-  /** Column used to identify the first offending row in messages (e.g. "date"). */
-  idCol?: string;
+  /**
+   * Columns concatenated with "|" to identify the first offending row in
+   * messages (e.g. ["platform", "date"] — daily_account_metrics has one row
+   * per platform per day, so no single column is unique).
+   */
+  idCols?: readonly string[];
 }
 
 /** Number(v) for numbers and pg numeric strings; NaN for everything else. */
@@ -62,10 +68,23 @@ interface ColumnViolation {
   exampleValue: unknown;
 }
 
+function rowId(
+  row: Row,
+  index: number,
+  idCols: readonly string[] | undefined,
+): string {
+  if (!idCols || idCols.length === 0) return `row ${index}`;
+  const parts = idCols.map((c) =>
+    row[c] === null || row[c] === undefined ? "?" : String(row[c]),
+  );
+  // All id columns empty -> fall back to the row index.
+  return parts.every((p) => p === "?") ? `row ${index}` : parts.join("|");
+}
+
 function scanColumn(
   rows: Row[],
   column: string,
-  idCol: string | undefined,
+  idCols: readonly string[] | undefined,
 ): ColumnViolation | null {
   let count = 0;
   let max = -Infinity;
@@ -79,11 +98,13 @@ function scanColumn(
     if (v === null || v === undefined) continue;
     const n = asNumber(v);
     if (!Number.isFinite(n)) continue;
-    if (n > 1) {
+    // A fraction-scale rate lives in [0, 1]: > 1 is the percent-drift
+    // signature, < 0 is corrupt whatever the cause.
+    if (n > 1 || n < 0) {
       count++;
       if (n > max) max = n;
       if (count === 1) {
-        exampleId = idCol ? String(rows[i][idCol] ?? `row ${i}`) : `row ${i}`;
+        exampleId = rowId(rows[i], i, idCols);
         exampleValue = v;
       }
     }
@@ -94,9 +115,9 @@ function scanColumn(
 }
 
 /**
- * Assert that the listed rate columns are fraction-scale (<= 1) across all
- * rows. Throws on any throwOn violation; console.warns on warnOn violations.
- * Values of exactly 1 (a true 100% rate) pass.
+ * Assert that the listed rate columns are fraction-scale (within [0, 1])
+ * across all rows. Throws on any throwOn violation; console.warns on warnOn
+ * violations. Values of exactly 0 or 1 (true 0% / 100% rates) pass.
  */
 export function assertFractionScale(
   source: string,
@@ -104,10 +125,10 @@ export function assertFractionScale(
   cols: RateSentinelCols,
 ): void {
   for (const column of cols.warnOn ?? []) {
-    const v = scanColumn(rows, column, cols.idCol);
+    const v = scanColumn(rows, column, cols.idCols);
     if (v) {
       console.warn(
-        `[unit-sentinel] ${source}: ${v.column} > 1 in ${v.count}/${rows.length} rows ` +
+        `[unit-sentinel] ${source}: ${v.column} outside [0, 1] in ${v.count}/${rows.length} rows ` +
           `(max ${v.max}, e.g. ${v.exampleId} = ${JSON.stringify(v.exampleValue)}) — ` +
           `tolerated (this rate can legitimately exceed 1), but if a throwOn ` +
           `metric also trips, suspect percent-scale writer drift.`,
@@ -116,22 +137,23 @@ export function assertFractionScale(
   }
 
   const violations = cols.throwOn
-    .map((column) => scanColumn(rows, column, cols.idCol))
+    .map((column) => scanColumn(rows, column, cols.idCols))
     .filter((v): v is ColumnViolation => v !== null);
 
   if (violations.length > 0) {
     const detail = violations
       .map(
         (v) =>
-          `${v.column} > 1 in ${v.count}/${rows.length} rows ` +
+          `${v.column} outside [0, 1] in ${v.count}/${rows.length} rows ` +
           `(max ${v.max}, e.g. ${v.exampleId} = ${JSON.stringify(v.exampleValue)})`,
       )
       .join("; ");
     throw new Error(
       `[unit-sentinel] ${source}: ${detail}. Rate columns must be FRACTIONS ` +
-        `(0.0870 = 8.70%) — values above 1 mean the upstream writer drifted to ` +
-        `percent scale, which the dashboard would render 100x too large. ` +
-        `Failing this read so the caller falls back to Airtable.`,
+        `in [0, 1] (0.0870 = 8.70%) — values above 1 mean the upstream writer ` +
+        `drifted to percent scale (rendered 100x too large by the dashboard); ` +
+        `negative values are corrupt either way. Failing this read so the ` +
+        `caller falls back to Airtable.`,
     );
   }
 }

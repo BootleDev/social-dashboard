@@ -10,9 +10,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { assertFractionScale } from "../rateSentinel";
 
+// Mirrors the production policy for social.daily_account_metrics in
+// supabase.ts (idCols = the composite key: one row per platform per day).
 const DAILY_COLS = {
   throwOn: ["engagement_rate"],
-  idCol: "date",
+  idCols: ["platform", "date"],
 } as const;
 
 /** A healthy fraction-scale row as pg returns it (numerics as strings). */
@@ -99,7 +101,9 @@ describe("assertFractionScale — throwOn (percent-scale drift)", () => {
         DAILY_COLS,
       ),
     ).toThrow(
-      /social\.daily_account_metrics.*engagement_rate > 1 in 1\/2 rows.*2026-06-02.*"8\.70".*FRACTIONS/,
+      // The example id is the platform|date composite (idCols). Single-line
+      // error, so plain `.*` spans it.
+      /social\.daily_account_metrics.*engagement_rate outside \[0, 1\] in 1\/2 rows.*Instagram\|2026-06-02.*"8\.70".*FRACTIONS/,
     );
   });
 
@@ -110,14 +114,31 @@ describe("assertFractionScale — throwOn (percent-scale drift)", () => {
         [healthyRow({ engagement_rate: 8.7 })],
         DAILY_COLS,
       ),
-    ).toThrow(/engagement_rate > 1/);
+    ).toThrow(/engagement_rate outside \[0, 1\]/);
   });
 
-  it("falls back to the row index when idCol is absent from the row", () => {
+  it("throws on a NEGATIVE engagement_rate — a rate outside [0, 1] is corrupt in either direction", () => {
+    expect(() =>
+      assertFractionScale(
+        "social.daily_account_metrics",
+        [healthyRow({ engagement_rate: "-0.08" })],
+        DAILY_COLS,
+      ),
+    ).toThrow(/engagement_rate outside \[0, 1\] in 1\/1 rows/);
+  });
+
+  it("shows '?' for a missing idCols part and falls back to the row index only when ALL parts are absent", () => {
     expect(() =>
       assertFractionScale(
         "social.daily_account_metrics",
         [healthyRow({ date: null, engagement_rate: "8.70" })],
+        DAILY_COLS,
+      ),
+    ).toThrow(/Instagram\|\?/);
+    expect(() =>
+      assertFractionScale(
+        "social.daily_account_metrics",
+        [healthyRow({ platform: null, date: null, engagement_rate: "8.70" })],
         DAILY_COLS,
       ),
     ).toThrow(/row 0/);
@@ -125,16 +146,24 @@ describe("assertFractionScale — throwOn (percent-scale drift)", () => {
 });
 
 describe("assertFractionScale — warnOn (tolerated overshoot)", () => {
+  // The production call registers NO warnOn columns (engagement_rate is the
+  // only rate in daily_account_metrics); this spec exercises the generic
+  // warn path with a deliberately fictitious column so the ported module
+  // stays behavior-identical to ad-dashboard (where cvr/hook/hold use it).
   it("console.warns without throwing for a warnOn column", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(() =>
       assertFractionScale(
         "social.daily_account_metrics",
         [healthyRow({ some_rate: "1.23" })],
-        { throwOn: ["engagement_rate"], warnOn: ["some_rate"], idCol: "date" },
+        {
+          throwOn: ["engagement_rate"],
+          warnOn: ["some_rate"],
+          idCols: ["platform", "date"],
+        },
       ),
     ).not.toThrow();
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toMatch(/some_rate > 1 in 1\/1 rows/);
+    expect(warn.mock.calls[0][0]).toMatch(/some_rate outside \[0, 1\] in 1\/1 rows/);
   });
 });
