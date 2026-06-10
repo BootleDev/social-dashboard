@@ -49,6 +49,7 @@ import pg from "pg";
 import type { AirtableRecord } from "./utils";
 import { SUPABASE_ROOT_CA_2021 } from "./supabase-ca";
 import { mapDailyRow, mapWeeklyRow, mapAlertRow } from "./supabaseMappers";
+import { assertFractionScale } from "./rateSentinel";
 
 // int8 (OID 20): return as a JS number, not a string. social.social_alerts.id
 // is bigint; we render it to a string when building the envelope, but parsing
@@ -201,6 +202,13 @@ export async function getDailyAccountMetricsFromSupabase(): Promise<
            from social.daily_account_metrics
           order by date desc`,
       );
+      // Runtime unit-scale tripwire (WEBDEV-210): percent-scale drift on
+      // engagement_rate throws here, landing in getDailyAccountMetrics()'s
+      // catch -> Airtable fallback. Counts are never listed.
+      assertFractionScale("social.daily_account_metrics", rows, {
+        throwOn: ["engagement_rate"],
+        idCol: "date",
+      });
       return rows.map(mapDailyRow);
     })(),
   );
