@@ -4,6 +4,7 @@ import {
   getWeeklySummariesFromSupabase,
   getSocialAlertsFromSupabase,
 } from "./supabase";
+import { forcedToAirtable } from "./sourceSwitch";
 
 const BASE_URL = "https://api.airtable.com/v0";
 
@@ -119,9 +120,10 @@ export async function getPosts(opts: { noCache?: boolean } = {}) {
 //   SOCIAL_ALERTS_SOURCE=airtable
 // ---------------------------------------------------------------------------
 
-function forcedToAirtable(envVar: string | undefined): boolean {
-  return envVar?.toLowerCase() === "airtable";
-}
+// forcedToAirtable lives in ./sourceSwitch (pure, unit-tested): whitespace-
+// and case-insensitive "airtable" match, warns on any other non-empty value
+// (WEBDEV-210 port of the ad-dashboard hardening — a Vercel-pasted
+// "airtable\n" must still roll back).
 
 async function getDailyAccountMetricsFromAirtable(opts: { noCache?: boolean }) {
   return fetchAllRecords(TABLES.DAILY_ACCOUNT_METRICS, {
@@ -132,7 +134,7 @@ async function getDailyAccountMetricsFromAirtable(opts: { noCache?: boolean }) {
 
 export async function getDailyAccountMetrics(opts: { noCache?: boolean } = {}) {
   if (
-    !forcedToAirtable(process.env.DAILY_METRICS_SOURCE) &&
+    !forcedToAirtable(process.env.DAILY_METRICS_SOURCE, "DAILY_METRICS_SOURCE") &&
     hasSupabaseDbUrl()
   ) {
     try {
@@ -160,7 +162,10 @@ async function getWeeklySummariesFromAirtable(opts: { noCache?: boolean }) {
 
 export async function getWeeklySummaries(opts: { noCache?: boolean } = {}) {
   if (
-    !forcedToAirtable(process.env.WEEKLY_SUMMARIES_SOURCE) &&
+    !forcedToAirtable(
+      process.env.WEEKLY_SUMMARIES_SOURCE,
+      "WEEKLY_SUMMARIES_SOURCE",
+    ) &&
     hasSupabaseDbUrl()
   ) {
     try {
@@ -188,7 +193,7 @@ async function getSocialAlertsFromAirtable(opts: { noCache?: boolean }) {
 
 export async function getSocialAlerts(opts: { noCache?: boolean } = {}) {
   if (
-    !forcedToAirtable(process.env.SOCIAL_ALERTS_SOURCE) &&
+    !forcedToAirtable(process.env.SOCIAL_ALERTS_SOURCE, "SOCIAL_ALERTS_SOURCE") &&
     hasSupabaseDbUrl()
   ) {
     try {

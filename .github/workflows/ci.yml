@@ -1,0 +1,25 @@
+# CI gate (WEBDEV-210): run the vitest guards on every PR and push to main.
+# This is the PR-time signal; the actual DEPLOY gate is vercel.json's
+# buildCommand ("npm run test && next build"), which makes a failing suite
+# fail the Vercel build so the previous deployment stays live. `next build`
+# itself is NOT run here — it needs the Vercel-held env vars, and Vercel
+# already runs it as the real thing.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Match the Vercel project's runtime (Node 24.x).
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test
