@@ -21,6 +21,8 @@ import {
   groupByDimension,
   timeBucket,
   dayOfWeek,
+  platformsReporting,
+  qualifiedMetricTitle,
 } from "../utils";
 import type { AirtableRecord } from "../utils";
 
@@ -552,5 +554,88 @@ describe("dayOfWeek", () => {
   });
   it("returns Unknown for invalid date", () => {
     expect(dayOfWeek("bad")).toBe("Unknown");
+  });
+});
+
+// --- platformsReporting (WEBDEV-189) ---
+describe("platformsReporting", () => {
+  const platformMap = new Map<string, AirtableRecord[]>([
+    [
+      "instagram",
+      [
+        makeRecord({ Platform: "instagram", Reach: 120 }),
+        makeRecord({ Platform: "instagram", Reach: 80 }),
+      ],
+    ],
+    [
+      "facebook",
+      // FB account reach is written as 0 (no real data) but impressions are real
+      [makeRecord({ Platform: "facebook", Reach: 0, Impressions: 454 })],
+    ],
+    [
+      "pinterest",
+      [makeRecord({ Platform: "pinterest", Reach: 0, Impressions: 5234 })],
+    ],
+  ]);
+  const keys = ["instagram", "facebook", "pinterest"];
+
+  it("includes only platforms with a positive sum for the field", () => {
+    expect(platformsReporting(keys, platformMap, "Reach")).toEqual([
+      "instagram",
+    ]);
+    expect(platformsReporting(keys, platformMap, "Impressions")).toEqual([
+      "facebook",
+      "pinterest",
+    ]);
+  });
+
+  it("excludes platforms whose field is missing entirely (null in DB)", () => {
+    // IG impressions is null post-OPS-53 — Airtable-shaped records omit the key
+    expect(
+      platformsReporting(keys, platformMap, "Impressions"),
+    ).not.toContain("instagram");
+  });
+
+  it("returns empty for a field no platform reports", () => {
+    expect(platformsReporting(keys, platformMap, "Nonexistent")).toEqual([]);
+  });
+
+  it("handles platform keys missing from the map", () => {
+    expect(platformsReporting(["tiktok"], platformMap, "Reach")).toEqual([]);
+  });
+
+  it("preserves the order of platformKeys", () => {
+    const reversed = ["pinterest", "facebook", "instagram"];
+    expect(platformsReporting(reversed, platformMap, "Impressions")).toEqual([
+      "pinterest",
+      "facebook",
+    ]);
+  });
+});
+
+// --- qualifiedMetricTitle (WEBDEV-189) ---
+describe("qualifiedMetricTitle", () => {
+  const label = (k: string) => k.charAt(0).toUpperCase() + k.slice(1);
+  const all = ["instagram", "facebook", "pinterest"];
+
+  it("names the reporting platforms when a strict subset reports", () => {
+    expect(qualifiedMetricTitle("Reach", ["instagram"], all, label)).toBe(
+      "Reach (Instagram)",
+    );
+    expect(
+      qualifiedMetricTitle("Impressions", ["facebook", "pinterest"], all, label),
+    ).toBe("Impressions (Facebook + Pinterest)");
+  });
+
+  it("returns the bare base when all platforms report", () => {
+    expect(qualifiedMetricTitle("Reach", all, all, label)).toBe("Reach");
+  });
+
+  it("returns the bare base when no platform reports", () => {
+    expect(qualifiedMetricTitle("Reach", [], all, label)).toBe("Reach");
+  });
+
+  it("returns the bare base when there are no platforms at all", () => {
+    expect(qualifiedMetricTitle("Reach", [], [], label)).toBe("Reach");
   });
 });

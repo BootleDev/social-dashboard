@@ -22,6 +22,8 @@ import {
   getPlatformKeys,
   buildUnifiedDates,
   alignToDateArray,
+  platformsReporting,
+  qualifiedMetricTitle,
 } from "@/lib/utils";
 import { toPost } from "@/lib/types";
 import {
@@ -81,6 +83,20 @@ export default function Overview({
 
     const totalImpressions = sumField(dailyMetrics, "Impressions");
     const prevTotalImpressions = sumField(prevDailyMetrics, "Impressions");
+
+    // Not every platform reports every account metric (IG impressions is
+    // permanently retired; FB/Pinterest reach is not currently reported), so
+    // the Reach/Impressions KPI titles name the platforms actually summed.
+    const reachPlatforms = platformsReporting(
+      platformKeys,
+      platformMap,
+      "Reach",
+    );
+    const impressionPlatforms = platformsReporting(
+      platformKeys,
+      platformMap,
+      "Impressions",
+    );
 
     const totalProfileViews = sumField(dailyMetrics, "Profile Views");
 
@@ -142,11 +158,13 @@ export default function Overview({
       totalReach,
       reachChange:
         prevTotalReach > 0 ? pctChange(totalReach, prevTotalReach) : undefined,
+      reachPlatforms,
       totalImpressions,
       impressionsChange:
         prevTotalImpressions > 0
           ? pctChange(totalImpressions, prevTotalImpressions)
           : undefined,
+      impressionPlatforms,
       postsPublished: posts.length,
       avgSaveRate,
       totalProfileViews,
@@ -295,12 +313,23 @@ export default function Overview({
           tooltip={`Combined ${platformCountLabel} followers`}
         />
         <KPICard
-          title="Total Reach"
-          value={formatNumber(kpis.totalReach)}
-          change={kpis.reachChange}
+          title={qualifiedMetricTitle(
+            "Reach",
+            kpis.reachPlatforms,
+            platformKeys,
+            (k) => getPlatformConfig(k).label,
+          )}
+          value={kpis.totalReach > 0 ? formatNumber(kpis.totalReach) : "—"}
+          change={kpis.totalReach > 0 ? kpis.reachChange : undefined}
+          tooltip="Per-day account reach summed across the platforms in the title; platforms not reporting account reach this period are excluded. Reach is Instagram's distribution metric (Meta retired IG account-level impressions)."
         />
         <KPICard
-          title="Impressions"
+          title={qualifiedMetricTitle(
+            "Impressions",
+            kpis.impressionPlatforms,
+            platformKeys,
+            (k) => getPlatformConfig(k).label,
+          )}
           value={
             kpis.totalImpressions > 0
               ? formatNumber(kpis.totalImpressions)
@@ -309,7 +338,7 @@ export default function Overview({
           change={
             kpis.totalImpressions > 0 ? kpis.impressionsChange : undefined
           }
-          tooltip="Instagram retired the account-level impressions metric in 2024 (now reported as 'views'). Shows — until the Social Data Refresher is migrated to the views metric. Not a tracking gap on our end."
+          tooltip="Per-day account impressions summed across the platforms in the title. Instagram is permanently excluded: Meta retired IG account-level impressions and its 'views' replacement has no per-day variant — track IG distribution via Reach."
         />
         <KPICard title="Posts Published" value={String(kpis.postsPublished)} />
       </div>

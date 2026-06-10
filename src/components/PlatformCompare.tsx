@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { defaultOptions } from "@/lib/chartSetup";
@@ -46,10 +46,22 @@ function PlatformCard({
 }) {
   const config = getPlatformConfig(platformKey);
 
+  // Reach and Impressions show "—" when the platform doesn't report that
+  // metric (IG account impressions is retired; FB/Pinterest report no reach):
+  // each platform's real distribution metric stays visible, nothing reads as
+  // a silent zero.
   const rows = [
     { label: "Followers", value: formatNumber(kpis.followers) },
     { label: "Avg ER", value: formatPercent(kpis.avgER) },
-    { label: "Total Reach", value: formatNumber(kpis.totalReach) },
+    {
+      label: "Reach",
+      value: kpis.totalReach > 0 ? formatNumber(kpis.totalReach) : "—",
+    },
+    {
+      label: "Impressions",
+      value:
+        kpis.totalImpressions > 0 ? formatNumber(kpis.totalImpressions) : "—",
+    },
     { label: "Posts", value: String(kpis.posts) },
     { label: "Profile Views", value: formatNumber(kpis.profileViews) },
     { label: "Web Clicks", value: formatNumber(kpis.webClicks) },
@@ -180,27 +192,47 @@ export default function PlatformCompare({
     };
   }, [platformKeys, metricsMap, allDates]);
 
-  // Reach comparison
-  const reachTrendData = useMemo(() => {
-    const labels = allDates.map((d) => d.slice(5));
+  // Reach / Impressions comparison. Platforms that never report the metric in
+  // range are dropped from the chart — an all-zero line would read as a real
+  // flatline when the platform simply has no such metric (IG account
+  // impressions is retired; FB/Pinterest report no account reach).
+  const distributionTrend = useCallback(
+    (field: "Reach" | "Impressions") => {
+      const labels = allDates.map((d) => d.slice(5));
 
-    return {
-      labels,
-      datasets: platformKeys.map((key) => {
-        const config = getPlatformConfig(key);
-        const metrics = metricsMap.get(key) ?? [];
-        return {
-          label: `${config.label} Reach`,
-          data: alignToDateArray(metrics, allDates, "Reach"),
-          borderColor: config.color,
-          backgroundColor: config.colorFill,
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-        };
-      }),
-    };
-  }, [platformKeys, metricsMap, allDates]);
+      return {
+        labels,
+        datasets: platformKeys
+          .filter((key) =>
+            (metricsMap.get(key) ?? []).some((r) => num(r.fields[field]) > 0),
+          )
+          .map((key) => {
+            const config = getPlatformConfig(key);
+            const metrics = metricsMap.get(key) ?? [];
+            return {
+              label: `${config.label} ${field}`,
+              data: alignToDateArray(metrics, allDates, field),
+              borderColor: config.color,
+              backgroundColor: config.colorFill,
+              fill: true,
+              tension: 0.3,
+              pointRadius: 0,
+            };
+          }),
+      };
+    },
+    [platformKeys, metricsMap, allDates],
+  );
+
+  const reachTrendData = useMemo(
+    () => distributionTrend("Reach"),
+    [distributionTrend],
+  );
+
+  const impressionsTrendData = useMemo(
+    () => distributionTrend("Impressions"),
+    [distributionTrend],
+  );
 
   // Post type breakdown per platform
   const postTypeComparison = useMemo(() => {
@@ -272,6 +304,9 @@ export default function PlatformCompare({
         </ChartCard>
         <ChartCard title="Reach Comparison">
           <Line data={reachTrendData} options={defaultOptions} />
+        </ChartCard>
+        <ChartCard title="Impressions Comparison">
+          <Line data={impressionsTrendData} options={defaultOptions} />
         </ChartCard>
       </div>
 
