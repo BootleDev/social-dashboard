@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { defaultOptions } from "@/lib/chartSetup";
@@ -17,6 +17,7 @@ import {
   getPlatformKeys,
   buildUnifiedDates,
   alignToDateArray,
+  platformsReporting,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
@@ -78,7 +79,7 @@ function PlatformCard({
       <h3 className="text-sm font-semibold" style={{ color: config.color }}>
         {config.label}
       </h3>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         {rows.map((row) => (
           <div key={row.label}>
             <p
@@ -195,44 +196,35 @@ export default function PlatformCompare({
   // Reach / Impressions comparison. Platforms that never report the metric in
   // range are dropped from the chart — an all-zero line would read as a real
   // flatline when the platform simply has no such metric (IG account
-  // impressions is retired; FB/Pinterest report no account reach).
-  const distributionTrend = useCallback(
-    (field: "Reach" | "Impressions") => {
-      const labels = allDates.map((d) => d.slice(5));
+  // impressions is retired; FB/Pinterest report no account reach). Uses the
+  // same platformsReporting predicate as the Overview KPI titles.
+  const { reachTrendData, impressionsTrendData } = useMemo(() => {
+    const labels = allDates.map((d) => d.slice(5));
 
-      return {
-        labels,
-        datasets: platformKeys
-          .filter((key) =>
-            (metricsMap.get(key) ?? []).some((r) => num(r.fields[field]) > 0),
-          )
-          .map((key) => {
-            const config = getPlatformConfig(key);
-            const metrics = metricsMap.get(key) ?? [];
-            return {
-              label: `${config.label} ${field}`,
-              data: alignToDateArray(metrics, allDates, field),
-              borderColor: config.color,
-              backgroundColor: config.colorFill,
-              fill: true,
-              tension: 0.3,
-              pointRadius: 0,
-            };
-          }),
-      };
-    },
-    [platformKeys, metricsMap, allDates],
-  );
+    const build = (field: "Reach" | "Impressions") => ({
+      labels,
+      datasets: platformsReporting(platformKeys, metricsMap, field).map(
+        (key) => {
+          const config = getPlatformConfig(key);
+          const metrics = metricsMap.get(key) ?? [];
+          return {
+            label: `${config.label} ${field}`,
+            data: alignToDateArray(metrics, allDates, field),
+            borderColor: config.color,
+            backgroundColor: config.colorFill,
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+          };
+        },
+      ),
+    });
 
-  const reachTrendData = useMemo(
-    () => distributionTrend("Reach"),
-    [distributionTrend],
-  );
-
-  const impressionsTrendData = useMemo(
-    () => distributionTrend("Impressions"),
-    [distributionTrend],
-  );
+    return {
+      reachTrendData: build("Reach"),
+      impressionsTrendData: build("Impressions"),
+    };
+  }, [platformKeys, metricsMap, allDates]);
 
   // Post type breakdown per platform
   const postTypeComparison = useMemo(() => {
@@ -303,11 +295,25 @@ export default function PlatformCompare({
           <Line data={erTrendData} options={defaultOptions} />
         </ChartCard>
         <ChartCard title="Reach Comparison">
-          <Line data={reachTrendData} options={defaultOptions} />
+          {reachTrendData.datasets.length > 0 ? (
+            <Line data={reachTrendData} options={defaultOptions} />
+          ) : (
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+              No platform reports account reach in the selected range.
+            </p>
+          )}
         </ChartCard>
-        <ChartCard title="Impressions Comparison">
-          <Line data={impressionsTrendData} options={defaultOptions} />
-        </ChartCard>
+        <div className="lg:col-span-2">
+          <ChartCard title="Impressions Comparison">
+            {impressionsTrendData.datasets.length > 0 ? (
+              <Line data={impressionsTrendData} options={defaultOptions} />
+            ) : (
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                No platform reports account impressions in the selected range.
+              </p>
+            )}
+          </ChartCard>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

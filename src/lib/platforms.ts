@@ -1,6 +1,8 @@
 export interface PlatformConfig {
   key: string;
   label: string;
+  /** Compact form for tight UI (KPI card titles): "IG", "FB". */
+  shortLabel: string;
   color: string;
   colorBg: string;
   colorFill: string;
@@ -10,6 +12,7 @@ const PLATFORM_REGISTRY: Record<string, PlatformConfig> = {
   instagram: {
     key: "instagram",
     label: "Instagram",
+    shortLabel: "IG",
     color: "#a855f7",
     colorBg: "rgba(168, 85, 247, 0.15)",
     colorFill: "rgba(168, 85, 247, 0.1)",
@@ -17,6 +20,7 @@ const PLATFORM_REGISTRY: Record<string, PlatformConfig> = {
   facebook: {
     key: "facebook",
     label: "Facebook",
+    shortLabel: "FB",
     color: "#3b82f6",
     colorBg: "rgba(59, 130, 246, 0.15)",
     colorFill: "rgba(59, 130, 246, 0.1)",
@@ -24,6 +28,7 @@ const PLATFORM_REGISTRY: Record<string, PlatformConfig> = {
   pinterest: {
     key: "pinterest",
     label: "Pinterest",
+    shortLabel: "Pinterest",
     color: "#e60023",
     colorBg: "rgba(230, 0, 35, 0.15)",
     colorFill: "rgba(230, 0, 35, 0.1)",
@@ -31,6 +36,7 @@ const PLATFORM_REGISTRY: Record<string, PlatformConfig> = {
   tiktok: {
     key: "tiktok",
     label: "TikTok",
+    shortLabel: "TikTok",
     color: "#00f2ea",
     colorBg: "rgba(0, 242, 234, 0.15)",
     colorFill: "rgba(0, 242, 234, 0.1)",
@@ -38,6 +44,7 @@ const PLATFORM_REGISTRY: Record<string, PlatformConfig> = {
   youtube: {
     key: "youtube",
     label: "YouTube",
+    shortLabel: "YouTube",
     color: "#ff4500",
     colorBg: "rgba(255, 69, 0, 0.15)",
     colorFill: "rgba(255, 69, 0, 0.1)",
@@ -63,9 +70,11 @@ export function getPlatformConfig(key: string): PlatformConfig {
   );
   const fallbackColor = FALLBACK_COLORS[hash % FALLBACK_COLORS.length];
 
+  const fallbackLabel = key.charAt(0).toUpperCase() + key.slice(1);
   return {
     key: normalized,
-    label: key.charAt(0).toUpperCase() + key.slice(1),
+    label: fallbackLabel,
+    shortLabel: fallbackLabel,
     color: fallbackColor,
     colorBg: `${fallbackColor}26`,
     colorFill: `${fallbackColor}1a`,

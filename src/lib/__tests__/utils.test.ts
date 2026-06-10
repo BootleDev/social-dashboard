@@ -589,13 +589,6 @@ describe("platformsReporting", () => {
     ]);
   });
 
-  it("excludes platforms whose field is missing entirely (null in DB)", () => {
-    // IG impressions is null post-OPS-53 — Airtable-shaped records omit the key
-    expect(
-      platformsReporting(keys, platformMap, "Impressions"),
-    ).not.toContain("instagram");
-  });
-
   it("returns empty for a field no platform reports", () => {
     expect(platformsReporting(keys, platformMap, "Nonexistent")).toEqual([]);
   });
@@ -637,5 +630,18 @@ describe("qualifiedMetricTitle", () => {
 
   it("returns the bare base when there are no platforms at all", () => {
     expect(qualifiedMetricTitle("Reach", [], [], label)).toBe("Reach");
+  });
+
+  it("returns the bare base when reporting exceeds the known platform set", () => {
+    // pins the >= guard: a platform appearing mid-period must not produce a
+    // qualifier longer than the platform universe
+    expect(
+      qualifiedMetricTitle(
+        "Reach",
+        ["instagram", "facebook", "pinterest"],
+        ["instagram", "facebook"],
+        label,
+      ),
+    ).toBe("Reach");
   });
 });

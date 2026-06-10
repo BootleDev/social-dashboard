@@ -79,22 +79,32 @@ export default function Overview({
     const prevAvgER = avgField(prevPosts, "Engagement Rate") * 100;
 
     const totalReach = sumField(dailyMetrics, "Reach");
-    const prevTotalReach = sumField(prevDailyMetrics, "Reach");
-
     const totalImpressions = sumField(dailyMetrics, "Impressions");
-    const prevTotalImpressions = sumField(prevDailyMetrics, "Impressions");
 
     // Not every platform reports every account metric (IG impressions is
     // permanently retired; FB/Pinterest reach is not currently reported), so
-    // the Reach/Impressions KPI titles name the platforms actually summed.
+    // the Reach/Impressions KPI titles name the platforms actually summed —
+    // and the previous-period comparison uses that same platform scope, so
+    // the change % never compares against platforms the value excludes.
     const reachPlatforms = platformsReporting(
       platformKeys,
       platformMap,
       "Reach",
     );
-    const impressionPlatforms = platformsReporting(
+    const impressionsPlatforms = platformsReporting(
       platformKeys,
       platformMap,
+      "Impressions",
+    );
+    const sumOverPlatforms = (
+      keys: string[],
+      map: Map<string, AirtableRecord[]>,
+      field: string,
+    ) => keys.reduce((sum, key) => sum + sumField(map.get(key) ?? [], field), 0);
+    const prevTotalReach = sumOverPlatforms(reachPlatforms, prevMap, "Reach");
+    const prevTotalImpressions = sumOverPlatforms(
+      impressionsPlatforms,
+      prevMap,
       "Impressions",
     );
 
@@ -164,7 +174,7 @@ export default function Overview({
         prevTotalImpressions > 0
           ? pctChange(totalImpressions, prevTotalImpressions)
           : undefined,
-      impressionPlatforms,
+      impressionsPlatforms,
       postsPublished: posts.length,
       avgSaveRate,
       totalProfileViews,
@@ -317,7 +327,7 @@ export default function Overview({
             "Reach",
             kpis.reachPlatforms,
             platformKeys,
-            (k) => getPlatformConfig(k).label,
+            (k) => getPlatformConfig(k).shortLabel,
           )}
           value={kpis.totalReach > 0 ? formatNumber(kpis.totalReach) : "—"}
           change={kpis.totalReach > 0 ? kpis.reachChange : undefined}
@@ -326,9 +336,9 @@ export default function Overview({
         <KPICard
           title={qualifiedMetricTitle(
             "Impressions",
-            kpis.impressionPlatforms,
+            kpis.impressionsPlatforms,
             platformKeys,
-            (k) => getPlatformConfig(k).label,
+            (k) => getPlatformConfig(k).shortLabel,
           )}
           value={
             kpis.totalImpressions > 0
