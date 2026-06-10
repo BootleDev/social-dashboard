@@ -202,6 +202,41 @@ export function avgField(records: AirtableRecord[], field: string): number {
   return sumField(records, field) / records.length;
 }
 
+/**
+ * Platforms that actually report a daily metric in the current range (sum > 0).
+ * Platforms whose pipeline writes 0/null for a metric they don't have (e.g. IG
+ * account impressions, retired by Meta) contribute nothing to a cross-platform
+ * sum, so they are excluded here and the KPI title names only the real sources.
+ * A platform with a legitimate all-zero period is also excluded — its zeros
+ * don't change the sum, so the title stays accurate either way.
+ */
+export function platformsReporting(
+  platformKeys: string[],
+  platformMap: Map<string, AirtableRecord[]>,
+  field: string,
+): string[] {
+  return platformKeys.filter(
+    (key) => sumField(platformMap.get(key) ?? [], field) > 0,
+  );
+}
+
+/**
+ * KPI title qualified with the platforms behind it: "Reach (Instagram)".
+ * Returns the bare base title when every platform reports the metric (nothing
+ * is excluded) or when none do (the card shows "—" anyway).
+ */
+export function qualifiedMetricTitle(
+  base: string,
+  reportingKeys: string[],
+  allKeys: string[],
+  label: (key: string) => string,
+): string {
+  if (reportingKeys.length === 0 || reportingKeys.length >= allKeys.length) {
+    return base;
+  }
+  return `${base} (${reportingKeys.map(label).join(" + ")})`;
+}
+
 /** Build unified date labels from multiple platform metric arrays, sorted ascending. */
 export function buildUnifiedDates(
   ...metricArrays: AirtableRecord[][]

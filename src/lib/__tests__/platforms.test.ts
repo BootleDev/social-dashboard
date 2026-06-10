@@ -74,3 +74,21 @@ describe("platformSortOrder", () => {
     expect(platformSortOrder("mastodon")).toBe(99);
   });
 });
+
+// --- shortLabel (WEBDEV-189) ---
+describe("getPlatformConfig shortLabel", () => {
+  it("returns compact labels for Meta platforms", () => {
+    expect(getPlatformConfig("instagram").shortLabel).toBe("IG");
+    expect(getPlatformConfig("facebook").shortLabel).toBe("FB");
+  });
+
+  it("keeps full names where no shorter form exists", () => {
+    expect(getPlatformConfig("pinterest").shortLabel).toBe("Pinterest");
+    expect(getPlatformConfig("tiktok").shortLabel).toBe("TikTok");
+  });
+
+  it("falls back to the generated label for unknown platforms", () => {
+    const config = getPlatformConfig("mastodon");
+    expect(config.shortLabel).toBe(config.label);
+  });
+});
