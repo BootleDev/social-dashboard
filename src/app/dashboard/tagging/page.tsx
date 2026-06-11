@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { str, num } from "@/lib/utils";
 import { toPost } from "@/lib/types";
+import { resolveViewUrl } from "@/lib/viewUrl";
 import type { AirtableRecord } from "@/lib/utils";
 
 const HOOK_TYPES = ["Question", "Bold claim", "Curiosity gap", "Pain point", "Visual-only", "None"];
@@ -83,23 +84,29 @@ function CheckField({
   label,
   value,
   onChange,
+  idPrefix,
 }: {
   label: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  // Unique per card so the htmlFor/id pair doesn't collide across the
+  // identically-labelled checkboxes on every other card (which made a label
+  // click toggle the same-named checkbox on the post above).
+  idPrefix: string;
 }) {
+  const id = `${idPrefix}-check-${label}`;
   return (
     <div className="flex items-center gap-1.5">
       <input
         type="checkbox"
-        id={`check-${label}`}
+        id={id}
         checked={value}
         onChange={(e) => onChange(e.target.checked)}
         className="cursor-pointer"
         aria-label={label}
       />
       <label
-        htmlFor={`check-${label}`}
+        htmlFor={id}
         className="text-xs cursor-pointer"
         style={{ color: "var(--text-secondary)" }}
       >
@@ -123,6 +130,7 @@ function PostTagCard({
   const post = toPost(record);
   const date = post.publishedAt.split("T")[0];
   const caption = post.caption.slice(0, 120);
+  const viewUrl = resolveViewUrl(post.platform, str(record.fields["Post ID"]), post.mediaUrl);
 
   function update<K extends keyof DraftState>(key: K, value: DraftState[K]) {
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -218,15 +226,15 @@ function PostTagCard({
           </div>
           <p className="text-sm leading-snug">{caption}{post.caption.length > 120 ? "…" : ""}</p>
         </div>
-        {post.mediaUrl && (
+        {viewUrl && (
           <a
-            href={post.mediaUrl}
+            href={viewUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs shrink-0 underline"
             style={{ color: "var(--text-secondary)" }}
           >
-            View
+            {post.platform === "pinterest" ? "View pin" : "View"}
           </a>
         )}
       </div>
@@ -273,16 +281,19 @@ function PostTagCard({
 
       <div className="flex items-center gap-4 flex-wrap">
         <CheckField
+          idPrefix={record.id}
           label="Hook Present"
           value={draft.hookPresent}
           onChange={(v) => update("hookPresent", v)}
         />
         <CheckField
+          idPrefix={record.id}
           label="On-Screen Text"
           value={draft.onScreenText}
           onChange={(v) => update("onScreenText", v)}
         />
         <CheckField
+          idPrefix={record.id}
           label="Talent Present"
           value={draft.talentPresent}
           onChange={(v) => update("talentPresent", v)}
