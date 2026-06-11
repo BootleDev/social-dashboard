@@ -332,7 +332,12 @@ export default function DashboardPage() {
                   prevDailyMetrics={comparisonDaily}
                 />
               )}
-              {tab === "content" && <ContentAnalysis posts={filteredPosts} />}
+              {tab === "content" && (
+                <ContentAnalysis
+                  posts={filteredPosts}
+                  dailyMetrics={filteredDaily}
+                />
+              )}
               {tab === "audience" && (
                 <AudienceGrowth
                   posts={filteredPosts}

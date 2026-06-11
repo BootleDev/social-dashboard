@@ -9,14 +9,28 @@ import DimensionSlicer from "./DimensionSlicer";
 import PostScorecardTable from "./PostScorecardTable";
 import PostingHeatmap from "./PostingHeatmap";
 import HashtagCharts from "./HashtagCharts";
-import { num, avgERByPostType, avgERByTheme, sumField } from "@/lib/utils";
+import {
+  num,
+  avgERByPostType,
+  avgERByTheme,
+  groupByPlatform,
+  getPlatformKeys,
+} from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface ContentAnalysisProps {
   posts: AirtableRecord[];
+  // Account-grain daily metrics — needed for the followers normalizer below.
+  // "Followers" is an account-level field and does NOT exist on post records,
+  // so it must come from here, not from summing posts (which yields 0 and
+  // silently kills the Reach Score metric).
+  dailyMetrics: AirtableRecord[];
 }
 
-export default function ContentAnalysis({ posts }: ContentAnalysisProps) {
+export default function ContentAnalysis({
+  posts,
+  dailyMetrics,
+}: ContentAnalysisProps) {
   const formatData = useMemo(() => {
     const breakdown = avgERByPostType(posts);
     return {
@@ -89,10 +103,22 @@ export default function ContentAnalysis({ posts }: ContentAnalysisProps) {
       (max, p) => Math.max(max, num(p.fields["Impressions"])),
       0,
     );
+    // Account-grain followers: sum the latest Followers per platform from the
+    // daily metrics, then average across reporting platforms — identical to the
+    // Overview KPI (Overview.tsx). Falls back to 1 (a safe normalizer divisor)
+    // when there's no account data, so reachScore degrades instead of dying.
+    const platformMap = groupByPlatform(dailyMetrics);
+    const platformKeys = getPlatformKeys(dailyMetrics);
+    const totalFollowers = platformKeys.reduce((sum, key) => {
+      const latest = (platformMap.get(key) ?? [])[0];
+      return sum + (latest ? num(latest.fields["Followers"]) : 0);
+    }, 0);
     const avgFollowers =
-      posts.length > 0 ? sumField(posts, "Followers") / posts.length : 1;
+      totalFollowers > 0 && platformKeys.length > 0
+        ? totalFollowers / platformKeys.length
+        : 1;
     return { maxVideoViews, maxImpressions, avgFollowers };
-  }, [posts]);
+  }, [posts, dailyMetrics]);
 
   const scatterOptions = {
     ...defaultOptions,
