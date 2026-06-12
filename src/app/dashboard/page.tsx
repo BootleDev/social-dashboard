@@ -1,29 +1,55 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import Link from "next/link";
 import Overview from "@/components/Overview";
 import ContentAnalysis from "@/components/ContentAnalysis";
-import AudienceGrowth from "@/components/AudienceGrowth";
-import PlatformCompare from "@/components/PlatformCompare";
-import CompetitorInsights from "@/components/CompetitorInsights";
-import TaggingPage from "@/app/dashboard/tagging/page";
+import PostDrilldownPanel from "@/components/PostDrilldownPanel";
+import PlanningPanel from "@/components/PlanningPanel";
+import OpsPanel from "@/components/OpsPanel";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
 import PlatformFilter from "@/components/PlatformFilter";
+import TimezoneSelector from "@/components/TimezoneSelector";
+import ThemeToggle from "@/components/ThemeToggle";
+import { useTimezone } from "@/lib/useTimezone";
 import ChatBox from "@/components/ChatBox";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import OutOfRangeNotice from "@/components/OutOfRangeNotice";
 import { str, getComparisonPeriod, getPlatformKeys } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
+import type { PlanSelection } from "@/lib/planSelection";
 
-type Tab = "overview" | "content" | "audience" | "compare" | "competitors" | "tagging";
+/**
+ * Tab structure (2026-05-26 IA rewrite):
+ * - pulse: daily check-in. KPIs + alerts + summaries.
+ * - insights: deep EDA for "why is X behaving this way".
+ * - planning: content production tools — when, what, who.
+ * - ops: admin (tagging, platform compare, health).
+ *
+ * Old tabs (overview/content/audience/pinterest/compare/competitors/tagging)
+ * are merged into the four above; component reuse is preserved.
+ */
+type Tab = "pulse" | "insights" | "planning" | "ops";
 
 interface DashboardData {
   posts: AirtableRecord[];
+  // Legacy account table. Retired as the source of account-grain KPIs
+  // (WEBDEV-146) — kept on the payload only for any non-KPI legacy reader.
   dailyMetrics: AirtableRecord[];
+  // Sole source for account-grain KPIs (Followers, Reach, Impressions, ER).
+  // Optional so a mid-deploy cached payload without this key doesn't break the UI.
+  accountDailyFacts?: AirtableRecord[];
   weeklySummaries: AirtableRecord[];
   alerts: AirtableRecord[];
+  // Per-channel feeds (added 2026-05-26). Optional so older API responses
+  // (cached, mid-deploy) don't break the UI; components treat empty as no-data.
+  instagramAudience?: AirtableRecord[];
+  pinterestTrends?: AirtableRecord[];
+  pinterestTopPins?: AirtableRecord[];
+  seasonalOpportunities?: AirtableRecord[];
 }
 
 function filterByPlatform(
@@ -53,14 +79,21 @@ function filterByDateRange(
 }
 
 export default function DashboardPage() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("pulse");
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState<DateRange>({
-    start: null,
-    end: null,
-    label: "All Time",
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    // Default to Last 30 days — the prior "All Time" default included every
+    // historical record and made period-over-period comparisons meaningless.
+    const end = new Date();
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - 29);
+    return {
+      start: start.toISOString().split("T")[0],
+      end: end.toISOString().split("T")[0],
+      label: "Last 30 days",
+    };
   });
   const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(
     new Set(),
@@ -71,6 +104,19 @@ export default function DashboardPage() {
   const [competitorLoading, setCompetitorLoading] = useState(false);
   const [competitorError, setCompetitorError] = useState("");
   const [competitorFetched, setCompetitorFetched] = useState(false);
+  const [timezone, setTimezone] = useTimezone();
+  // Post opened from a Pulse alert click; rendered in PostDrilldownPanel.
+  const [selectedPost, setSelectedPost] = useState<AirtableRecord | null>(null);
+  // Cross-tab carry from Insights ("what worked") to Planning ("when to post").
+  // Set by "Plan from this →" on a winning Theme × Post Type bar; consumed by
+  // the When-to-post heatmap. Switching tabs is part of the same action, so the
+  // setter below also routes the user to Planning.
+  const [planSelection, setPlanSelection] = useState<PlanSelection | null>(null);
+
+  const planFromSelection = useCallback((sel: PlanSelection) => {
+    setPlanSelection(sel);
+    setTab("planning");
+  }, []);
 
   const fetchData = useCallback((force = false) => {
     // MARKETING-19 Fix 7: when force=true (Refresh button), bypass the 30-min
@@ -92,9 +138,10 @@ export default function DashboardPage() {
     fetchData();
   }, [fetchData]);
 
-  // Lazy-fetch competitor data when tab is selected
+  // Lazy-fetch competitor data when Planning tab is selected (competitors live
+  // inside Planning now, under "Competitor signal").
   useEffect(() => {
-    if (tab !== "competitors" || competitorFetched) return;
+    if (tab !== "planning" || competitorFetched) return;
     setCompetitorLoading(true);
     setCompetitorError("");
     fetch("/api/competitors")
@@ -121,15 +168,32 @@ export default function DashboardPage() {
         : [],
     [data, dateRange, selectedPlatforms],
   );
-  const filteredDaily = useMemo(
+  // Account-grain KPI source (WEBDEV-146). Date+platform filtered, read from
+  // Account Daily Facts. This is the account-KPI input to both Overview and the
+  // Ops-tab Platform Compare (the legacy Daily Account Metrics feed is retired
+  // for account KPIs).
+  const filteredAccountFacts = useMemo(
     () =>
       data
         ? filterByPlatform(
-            filterByDateRange(data.dailyMetrics, "Date", dateRange),
+            filterByDateRange(
+              data.accountDailyFacts ?? [],
+              "Date",
+              dateRange,
+            ),
             selectedPlatforms,
           )
         : [],
     [data, dateRange, selectedPlatforms],
+  );
+  // Unfiltered account facts (platform filter only, NO date range) — the IG
+  // 30-day period figures live on the latest row and must not be date-gated.
+  const accountFactsAllDates = useMemo(
+    () =>
+      data
+        ? filterByPlatform(data.accountDailyFacts ?? [], selectedPlatforms)
+        : [],
+    [data, selectedPlatforms],
   );
   const filteredAlerts = useMemo(
     () =>
@@ -142,25 +206,32 @@ export default function DashboardPage() {
     [data, dateRange, selectedPlatforms],
   );
 
-  // Weekly summaries filtered by date range only.
-  // NOT by platform: Weekly Summary records have no "Platform" field (they hold
-  // a cross-platform "Platform Breakdown" instead), so platform-filtering would
-  // drop every record and the panel would always render its empty state.
-  const filteredSummaries = useMemo(
-    () =>
-      data
-        ? filterByDateRange(data.weeklySummaries, "Week Start", dateRange)
-        : [],
-    [data, dateRange],
-  );
+  // Weekly summaries are NOT filtered by the dashboard date range or platform.
+  // Each summary is a discrete weekly document, and the WeeklySummary panel has
+  // its own report picker for browsing history — gating it by the (default
+  // 30-day) range would hide most reports and starve the picker. So we pass the
+  // full set, sorted newest-first so summaries[0] is always the latest (the
+  // picker relies on that ordering).
+  // Not platform-filtered either: Weekly Summary records have no "Platform"
+  // field (they hold a cross-platform "Platform Breakdown" instead).
+  const filteredSummaries = useMemo(() => {
+    if (!data) return [];
+    return [...data.weeklySummaries].sort((a, b) =>
+      str(b.fields["Week Start"]).localeCompare(str(a.fields["Week Start"])),
+    );
+  }, [data]);
 
-  // Comparison period metrics (same duration, immediately before selected range)
-  const comparisonDaily = useMemo(() => {
+  // Comparison period posts (same duration, immediately before selected range).
+  // Account-level prior-period comparison uses comparisonAccountFacts below
+  // (Account Daily Facts), NOT the retired Daily Account Metrics table — the old
+  // comparisonDaily built from data.dailyMetrics was removed 2026-06-04 as a
+  // dead legacy-table trap (WEBDEV-146).
+  const comparisonPosts = useMemo(() => {
     if (!data) return [];
     const comp = getComparisonPeriod(dateRange.start, dateRange.end);
     if (!comp) return [];
     return filterByPlatform(
-      filterByDateRange(data.dailyMetrics, "Date", {
+      filterByDateRange(data.posts, "Published At", {
         start: comp.compStart,
         end: comp.compEnd,
         label: "",
@@ -169,12 +240,13 @@ export default function DashboardPage() {
     );
   }, [data, dateRange, selectedPlatforms]);
 
-  const comparisonPosts = useMemo(() => {
+  // Prior-period account facts, for period-over-period change on account KPIs.
+  const comparisonAccountFacts = useMemo(() => {
     if (!data) return [];
     const comp = getComparisonPeriod(dateRange.start, dateRange.end);
     if (!comp) return [];
     return filterByPlatform(
-      filterByDateRange(data.posts, "Published At", {
+      filterByDateRange(data.accountDailyFacts ?? [], "Date", {
         start: comp.compStart,
         end: comp.compEnd,
         label: "",
@@ -207,13 +279,27 @@ export default function DashboardPage() {
     }
   }, [activePlatforms, selectedPlatforms.size]);
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "content", label: "Content Analysis" },
-    { key: "audience", label: "Audience & Growth" },
-    { key: "compare", label: "Platform Compare" },
-    { key: "competitors", label: "Competitors" },
-    { key: "tagging", label: "Tagging" },
+  const tabs: { key: Tab; label: string; description: string }[] = [
+    {
+      key: "pulse",
+      label: "Pulse",
+      description: "Daily check-in: what happened, what's working, what needs attention",
+    },
+    {
+      key: "insights",
+      label: "Insights",
+      description: "Deep EDA: why is content behaving this way, what shapes drive what outcomes",
+    },
+    {
+      key: "planning",
+      label: "Planning",
+      description: "Content production: when to post, what to make, who to reach, who to learn from",
+    },
+    {
+      key: "ops",
+      label: "Ops",
+      description: "Tagging, platform comparison, pipeline health",
+    },
   ];
 
   return (
@@ -247,7 +333,9 @@ export default function DashboardPage() {
                       />
                     );
                   })}
-                  Last data: {latestDataDate}
+                  <span title="Daily data is stamped by UTC calendar date. Late-evening US time can read as 'tomorrow' because it is already the next day in UTC — this is the data's own date, not a future date.">
+                    Last data: {latestDataDate} UTC
+                  </span>
                 </>
               ) : loading ? (
                 "Loading..."
@@ -265,6 +353,14 @@ export default function DashboardPage() {
                 Refresh
               </button>
             )}
+            <Link
+              href="/dashboard/methodology"
+              className="text-[10px] px-1.5 py-0.5 rounded transition-colors hover:bg-white/10 cursor-pointer"
+              style={{ color: "var(--text-secondary)" }}
+              title="How these numbers are sourced"
+            >
+              Methodology
+            </Link>
           </div>
         </div>
 
@@ -281,6 +377,10 @@ export default function DashboardPage() {
             />
           )}
 
+          <TimezoneSelector value={timezone} onChange={setTimezone} />
+
+          <ThemeToggle />
+
           <nav
             className="flex gap-1 rounded-lg p-1"
             style={{ background: "var(--bg-secondary)" }}
@@ -293,12 +393,12 @@ export default function DashboardPage() {
                 onClick={() => setTab(t.key)}
                 role="tab"
                 aria-selected={tab === t.key}
+                title={t.description}
                 className={`px-3 py-2 rounded-md text-xs font-medium transition-all cursor-pointer ${
                   tab === t.key ? "text-white" : ""
                 }`}
                 style={{
-                  background:
-                    tab === t.key ? "var(--accent-purple)" : "transparent",
+                  background: tab === t.key ? "var(--brand)" : "transparent",
                   color: tab === t.key ? "#fff" : "var(--text-secondary)",
                 }}
               >
@@ -309,56 +409,100 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Content */}
-      <main className="p-6 max-w-[1400px] mx-auto">
+      {/* Content. Extra bottom padding on small screens so the last card clears
+          the fixed "Ask AI" FAB (bottom-6 + button height); on sm+ the FAB sits
+          in the side gutter so the normal padding is enough (WEBDEV-182 item 15). */}
+      <main className="p-6 pb-28 sm:pb-6 max-w-[1400px] mx-auto">
         {loading && <LoadingSkeleton />}
 
         {error && (
-          <div className="rounded-xl p-6 border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
+          <div
+            className="rounded-xl p-6 text-sm"
+            style={{
+              border: "1px solid var(--danger)",
+              background: "var(--danger-soft)",
+              color: "var(--danger)",
+            }}
+          >
             Error loading data: {error}
           </div>
         )}
 
         {data && !loading && (
           <ErrorBoundary>
+            <OutOfRangeNotice
+              allPosts={data.posts}
+              filteredPosts={filteredPosts}
+              selectedPlatforms={selectedPlatforms}
+              rangeLabel={dateRange.label}
+            />
             <div role="tabpanel">
-              {tab === "overview" && (
+              {tab === "pulse" && (
                 <Overview
                   posts={filteredPosts}
-                  dailyMetrics={filteredDaily}
+                  // Account-grain KPIs read from Account Daily Facts (WEBDEV-146),
+                  // not the legacy Daily Account Metrics table.
+                  dailyMetrics={filteredAccountFacts}
+                  periodFacts={accountFactsAllDates}
                   alerts={filteredAlerts}
                   weeklySummaries={filteredSummaries}
                   prevPosts={comparisonPosts}
-                  prevDailyMetrics={comparisonDaily}
+                  prevDailyMetrics={comparisonAccountFacts}
+                  onSelectPost={setSelectedPost}
                 />
               )}
-              {tab === "content" && (
+              {tab === "insights" && (
                 <ContentAnalysis
                   posts={filteredPosts}
-                  dailyMetrics={filteredDaily}
+                  timezone={timezone}
+                  instagramAudience={data?.instagramAudience ?? []}
+                  pinterestTopPins={data?.pinterestTopPins ?? []}
+                  onPlanFromSelection={planFromSelection}
                 />
               )}
-              {tab === "audience" && (
-                <AudienceGrowth
+              {tab === "planning" && (
+                <PlanningPanel
                   posts={filteredPosts}
-                  dailyMetrics={filteredDaily}
+                  pinterestTrends={data?.pinterestTrends ?? []}
+                  seasonalOpportunities={data?.seasonalOpportunities ?? []}
+                  competitorRecords={competitorRecords}
+                  competitorLoading={competitorLoading}
+                  competitorError={competitorError}
+                  timezone={timezone}
+                  range={{ start: dateRange.start, end: dateRange.end }}
+                  planSelection={planSelection}
+                  onClearPlanSelection={() => setPlanSelection(null)}
                 />
               )}
-              {tab === "compare" && (
-                <PlatformCompare
+              {tab === "ops" && (
+                <OpsPanel
                   posts={filteredPosts}
-                  dailyMetrics={filteredDaily}
+                  dailyMetrics={filteredAccountFacts}
+                  // Raw (unfiltered) feeds for the Pipeline Health freshness
+                  // view — it judges each feed's last-update date, so it must
+                  // see every record, not the date/platform-filtered subset.
+                  feeds={{
+                    posts: data.posts,
+                    accountDailyFacts: data.accountDailyFacts,
+                    dailyMetrics: data.dailyMetrics,
+                    alerts: data.alerts,
+                    weeklySummaries: data.weeklySummaries,
+                    instagramAudience: data.instagramAudience,
+                    pinterestTrends: data.pinterestTrends,
+                    pinterestTopPins: data.pinterestTopPins,
+                    seasonalOpportunities: data.seasonalOpportunities,
+                  }}
                 />
               )}
-              {tab === "competitors" && (
-                <CompetitorInsights
-                  records={competitorRecords}
-                  loading={competitorLoading}
-                  error={competitorError}
-                />
-              )}
-              {tab === "tagging" && <TaggingPage />}
             </div>
+            {selectedPost && (
+              <PostDrilldownPanel
+                posts={[selectedPost]}
+                bucketLabel={`Alert: ${str(selectedPost.fields["Post Type"]) || "post"} on ${str(selectedPost.fields["Platform"])}`}
+                timezone={timezone}
+                onClose={() => setSelectedPost(null)}
+              />
+            )}
           </ErrorBoundary>
         )}
       </main>

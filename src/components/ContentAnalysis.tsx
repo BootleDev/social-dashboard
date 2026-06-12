@@ -1,127 +1,372 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Bar, Scatter } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import ChartCard from "./ChartCard";
 import DimensionSlicer from "./DimensionSlicer";
 import PostScorecardTable from "./PostScorecardTable";
-import PostingHeatmap from "./PostingHeatmap";
 import HashtagCharts from "./HashtagCharts";
+import PostDrilldownPanel from "./PostDrilldownPanel";
 import {
   num,
-  avgERByPostType,
-  avgERByTheme,
-  groupByPlatform,
-  getPlatformKeys,
+  str,
+  recordReach,
+  formatNumber,
+  avgERByDimensionStacked,
+  sumByDimensionStacked,
+  postEngagement,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
+import type { PlanSelection } from "@/lib/planSelection";
+import WhatWorkedToPlan from "./WhatWorkedToPlan";
+import SubNav, { useSubNav, type SubNavItem } from "./SubNav";
+import AudienceDemographics from "./AudienceDemographics";
+import PinterestTopPins from "./PinterestTopPins";
+import StatsPanel from "./StatsPanel";
+import TopFindings from "./TopFindings";
+import { describe } from "@/lib/stats";
 
-interface ContentAnalysisProps {
+interface ContentAnalysisExtraProps {
+  /** Instagram audience demographics records. */
+  instagramAudience?: AirtableRecord[];
+  /** Pinterest top pins records (Bootle's own pins, ranked). */
+  pinterestTopPins?: AirtableRecord[];
+}
+
+type InsightsTab =
+  | "loop"
+  | "performance"
+  | "audience"
+  | "pinterest"
+  | "hashtags";
+
+const SUBNAV_ITEMS: ReadonlyArray<SubNavItem<InsightsTab>> = [
+  { key: "loop", label: "What worked → plan" },
+  { key: "performance", label: "Post performance" },
+  { key: "audience", label: "Audience" },
+  { key: "pinterest", label: "Pinterest pins" },
+  { key: "hashtags", label: "Hashtags" },
+];
+
+const VALID_KEYS: ReadonlyArray<InsightsTab> = [
+  "loop",
+  "performance",
+  "audience",
+  "pinterest",
+  "hashtags",
+];
+
+// CHART METRIC RULES
+//   Additive metrics (Engagement, Impressions, Reach) -> stacked bars OK,
+//     segments contribute to a meaningful total.
+//   Rate metrics (Engagement Rate, Save Rate, Share Rate) -> grouped bars ONLY,
+//     stacking would produce a nonsensical sum-of-rates.
+type MetricKey = "engagement" | "engagementRate" | "impressions";
+
+interface MetricConfig {
+  label: string;
+  /** Whether stacking the metric across segments is semantically meaningful. */
+  additive: boolean;
+  /** y-axis suffix in chart tooltips */
+  formatter: (v: number) => string;
+}
+
+const METRICS: Record<MetricKey, MetricConfig> = {
+  engagement: {
+    label: "Total Engagement",
+    additive: true,
+    formatter: (v) => v.toLocaleString(),
+  },
+  impressions: {
+    label: "Total Impressions",
+    additive: true,
+    formatter: (v) => v.toLocaleString(),
+  },
+  engagementRate: {
+    label: "Avg Engagement Rate",
+    additive: false,
+    formatter: (v) => `${v.toFixed(2)}%`,
+  },
+};
+
+function metricGetter(key: MetricKey): (p: AirtableRecord) => number {
+  if (key === "engagement") {
+    // Platform-reported engagement (Engagement field), not a component sum —
+    // see postEngagement: Meta includes Reposts, Pinterest includes PIN_CLICK,
+    // neither reconstructable from Likes/Comments/Saves/Shares.
+    return (p) => postEngagement(p);
+  }
+  if (key === "impressions") return (p) => num(p.fields["Impressions"]);
+  return (p) => num(p.fields["Engagement Rate"]);
+}
+
+interface ContentAnalysisProps extends ContentAnalysisExtraProps {
   posts: AirtableRecord[];
-  // Account-grain daily metrics — needed for the followers normalizer below.
-  // "Followers" is an account-level field and does NOT exist on post records,
-  // so it must come from here, not from summing posts (which yields 0 and
-  // silently kills the Reach Score metric).
-  dailyMetrics: AirtableRecord[];
+  timezone?: string;
+  /**
+   * Carry a winning Theme × Post Type into Planning's "when to post" heatmap.
+   * Wired to the "Plan from this →" action on the Theme × Type drilldown.
+   */
+  onPlanFromSelection?: (sel: PlanSelection) => void;
 }
 
 export default function ContentAnalysis({
   posts,
-  dailyMetrics,
+  timezone = "",
+  instagramAudience = [],
+  pinterestTopPins = [],
+  onPlanFromSelection,
 }: ContentAnalysisProps) {
-  const formatData = useMemo(() => {
-    const breakdown = avgERByPostType(posts);
-    return {
-      labels: breakdown.map((b) => `${b.type} (${b.count})`),
-      datasets: [
-        {
-          label: "Avg ER %",
-          data: breakdown.map((b) => b.avgER * 100),
-          backgroundColor: [
-            CHART_COLORS.purple + "80",
-            CHART_COLORS.blue + "80",
-            CHART_COLORS.cyan + "80",
-            CHART_COLORS.green + "80",
-            CHART_COLORS.amber + "80",
-            CHART_COLORS.pink + "80",
-          ],
-          borderWidth: 0,
-        },
-      ],
-    };
+  const { colors, defaultOptions } = useChartTheme();
+  // Palette used to color stacked segments. Reused across both stacked charts
+  // so the same segment label gets the same color in the legend regardless of
+  // which chart it appears in. The 6-entry blue-anchored ramp is indexed with
+  // `% SEGMENT_COLORS.length`, so it stays safe for any number of segments.
+  const SEGMENT_COLORS = colors.series;
+
+  const [subTab, setSubTab] = useSubNav<InsightsTab>(
+    "insights",
+    "performance",
+    VALID_KEYS,
+  );
+  const [metricKey, setMetricKey] = useState<MetricKey>("engagement");
+  const metric = METRICS[metricKey];
+
+  // Drilldown shared across stacked bars, scatter, and hashtag bars. Holds
+  // the filtered post subset, the human-readable label of what was clicked,
+  // and the metric to sort by inside the panel so posts rank by the same
+  // measure that produced the click.
+  const [drilldown, setDrilldown] = useState<{
+    posts: AirtableRecord[];
+    label: string;
+    metricLabel: string;
+    getMetricValue: (r: AirtableRecord) => number | undefined;
+    formatMetric: (v: number) => string;
+    /**
+     * Present only for Theme × Post Type drilldowns — carries the exact theme +
+     * format so the panel can offer "Plan from this →". Other click sources
+     * (scatter, hashtags) leave this undefined and get no plan action.
+     */
+    planSelection?: PlanSelection;
+  } | null>(null);
+
+  // Precompute index by (Post Type, Content Theme) for fast drilldown lookup.
+  const postsByTypeTheme = useMemo(() => {
+    const map = new Map<string, AirtableRecord[]>();
+    for (const p of posts) {
+      const t = str(p.fields["Post Type"]) || "unknown";
+      const th = str(p.fields["Content Theme"]) || "untagged";
+      const key = `${t}${th}`;
+      const arr = map.get(key);
+      if (arr) arr.push(p);
+      else map.set(key, [p]);
+    }
+    return map;
   }, [posts]);
 
+  const openTypeThemeDrill = (postType: string, theme: string) => {
+    const cleanType = postType.replace(/\s*\(\d+\)$/, "");
+    const cleanTheme = theme.replace(/\s*\(\d+\)$/, "");
+    const subset =
+      postsByTypeTheme.get(`${cleanType}${cleanTheme}`) ?? [];
+    if (subset.length === 0) return;
+    const get = metricGetter(metricKey);
+    const isRate = !metric.additive;
+    setDrilldown({
+      posts: subset,
+      label: `${cleanType} × ${cleanTheme}`,
+      metricLabel: metric.label,
+      // ER stored as 0-1 in Airtable but displayed as %; multiply when the
+      // active metric is a rate so the drilldown column matches the chart.
+      getMetricValue: (r) => {
+        const v = get(r);
+        return v === undefined ? undefined : isRate ? v * 100 : v;
+      },
+      formatMetric: metric.formatter,
+      // cleanType is the Post Type / format; cleanTheme is the Content Theme.
+      planSelection: { theme: cleanTheme, postType: cleanType },
+    });
+  };
+
   const themeData = useMemo(() => {
-    const breakdown = avgERByTheme(posts).slice(0, 10);
+    const getPrimary = (p: AirtableRecord) =>
+      str(p.fields["Content Theme"]) || "untagged";
+    const getSegment = (p: AirtableRecord) =>
+      str(p.fields["Post Type"]) || "unknown";
+
+    if (metric.additive) {
+      const s = sumByDimensionStacked(posts, getPrimary, getSegment, metricGetter(metricKey));
+      const top = s.primaries.slice(0, 10);
+      return {
+        labels: top.map((p) => `${p.label} (${p.count})`),
+        datasets: s.segments.map((segment, i) => ({
+          label: segment,
+          data: top.map((p) => s.matrix[p.label][segment].sum),
+          backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
+          borderWidth: 0,
+        })),
+      };
+    }
+    const a = avgERByDimensionStacked(posts, getPrimary, getSegment);
+    const top = a.primaries.slice(0, 10);
     return {
-      labels: breakdown.map((b) => `${b.theme} (${b.count})`),
-      datasets: [
-        {
-          label: "Avg ER %",
-          data: breakdown.map((b) => b.avgER * 100),
-          backgroundColor: CHART_COLORS.purple + "60",
-          borderColor: CHART_COLORS.purple,
-          borderWidth: 1,
-        },
-      ],
+      labels: top.map((p) => `${p.label} (${p.count})`),
+      datasets: a.segments.map((segment, i) => ({
+        label: segment,
+        data: top.map((p) => a.matrix[p.label][segment].avg * 100),
+        backgroundColor: SEGMENT_COLORS[i % SEGMENT_COLORS.length] + "cc",
+        borderWidth: 0,
+      })),
     };
-  }, [posts]);
+  }, [posts, metric.additive, metricKey, SEGMENT_COLORS]);
+
+  // Click handlers for Post Type × Theme stacked bars. The Chart.js onClick
+  // returns elements with the dataIndex (primary axis position) and
+  // datasetIndex (segment). We resolve those back to label strings via the
+  // chart's own labels and dataset metadata.
+  const onFormatBarClick = (
+    _e: unknown,
+    elements: Array<{ datasetIndex: number; index: number }>,
+    chart: { data: { labels?: unknown[]; datasets: Array<{ label?: string }> } },
+  ) => {
+    if (!elements.length) return;
+    const { datasetIndex, index } = elements[0];
+    const primaryLabel = String(chart.data.labels?.[index] ?? "");
+    const segmentLabel = chart.data.datasets[datasetIndex]?.label ?? "";
+    openTypeThemeDrill(primaryLabel, segmentLabel);
+  };
+
+  const onThemeBarClick = (
+    _e: unknown,
+    elements: Array<{ datasetIndex: number; index: number }>,
+    chart: { data: { labels?: unknown[]; datasets: Array<{ label?: string }> } },
+  ) => {
+    if (!elements.length) return;
+    const { datasetIndex, index } = elements[0];
+    const themeLabel = String(chart.data.labels?.[index] ?? "");
+    const typeLabel = chart.data.datasets[datasetIndex]?.label ?? "";
+    openTypeThemeDrill(typeLabel, themeLabel);
+  };
+
+  // Stacked when additive (sums sum), grouped when a rate (sums don't sum).
+  const chartOptions = useMemo(() => {
+    const formatter = metric.formatter;
+    return {
+      ...defaultOptions,
+      onClick: onFormatBarClick,
+      scales: {
+        x: { ...defaultOptions.scales.x, stacked: metric.additive },
+        y: {
+          ...defaultOptions.scales.y,
+          stacked: metric.additive,
+          ticks: {
+            ...defaultOptions.scales.y.ticks,
+            callback: (v: string | number) => formatter(Number(v)),
+          },
+        },
+      },
+      plugins: {
+        ...defaultOptions.plugins,
+        tooltip: {
+          ...defaultOptions.plugins.tooltip,
+          callbacks: {
+            label: (ctx: {
+              dataset: { label?: string };
+              parsed: { y: number | null; x: number | null };
+            }) => {
+              const v = ctx.parsed.y ?? ctx.parsed.x ?? 0;
+              return `${ctx.dataset.label}: ${formatter(v)}`;
+            },
+          },
+        },
+      },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metric.additive, metric.formatter, postsByTypeTheme, defaultOptions]);
+
+  const chartOptionsHorizontal = useMemo(
+    () => {
+      const formatter = metric.formatter;
+      return {
+        ...chartOptions,
+        onClick: onThemeBarClick,
+        indexAxis: "y" as const,
+        scales: {
+          x: {
+            ...defaultOptions.scales.x,
+            stacked: metric.additive,
+            ticks: {
+              ...defaultOptions.scales.x.ticks,
+              callback: (v: string | number) => formatter(Number(v)),
+            },
+          },
+          y: { ...defaultOptions.scales.y, stacked: metric.additive },
+        },
+      };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [chartOptions, metric.additive, metric.formatter, postsByTypeTheme, defaultOptions],
+  );
+
+  // Build the scatter point array AND keep a parallel index of the source
+  // post records so a click can resolve back to the original post.
+  const scatterPosts = useMemo(
+    () => posts.filter((p) => recordReach(p) > 0),
+    [posts],
+  );
 
   const scatterData = useMemo(() => {
     return {
       datasets: [
         {
           label: "Posts",
-          data: posts
-            .filter((p) => num(p.fields["Reach"]) > 0)
-            .map((p) => ({
-              x:
-                num(p.fields["Reach"]) > 0
-                  ? (num(p.fields["Saves"]) / num(p.fields["Reach"])) * 100
-                  : 0,
-              y:
-                num(p.fields["Reach"]) > 0
-                  ? (num(p.fields["Shares"]) / num(p.fields["Reach"])) * 100
-                  : 0,
-            })),
-          backgroundColor: CHART_COLORS.purple + "80",
+          data: scatterPosts.map((p) => ({
+            x: (num(p.fields["Saves"]) / recordReach(p)) * 100,
+            y: (num(p.fields["Shares"]) / recordReach(p)) * 100,
+          })),
+          backgroundColor: colors.series[0] + "80",
           pointRadius: 5,
           pointHoverRadius: 7,
         },
       ],
     };
-  }, [posts]);
+  }, [scatterPosts, colors]);
 
-  const normalizers = useMemo(() => {
-    const maxVideoViews = posts.reduce(
-      (max, p) => Math.max(max, num(p.fields["Video Views"])),
-      0,
+  // Save-rate distribution stats for the Stats panel on the scatter.
+  const scatterSaveStats = useMemo(() => {
+    if (scatterPosts.length < 3) return undefined;
+    const saves = scatterPosts.map(
+      (p) => (num(p.fields["Saves"]) / recordReach(p)) * 100,
     );
-    const maxImpressions = posts.reduce(
-      (max, p) => Math.max(max, num(p.fields["Impressions"])),
-      0,
-    );
-    // Account-grain followers: sum the latest Followers per platform from the
-    // daily metrics, then average across reporting platforms — identical to the
-    // Overview KPI (Overview.tsx). Falls back to 1 (a safe normalizer divisor)
-    // when there's no account data, so reachScore degrades instead of dying.
-    const platformMap = groupByPlatform(dailyMetrics);
-    const platformKeys = getPlatformKeys(dailyMetrics);
-    const totalFollowers = platformKeys.reduce((sum, key) => {
-      const latest = (platformMap.get(key) ?? [])[0];
-      return sum + (latest ? num(latest.fields["Followers"]) : 0);
-    }, 0);
-    const avgFollowers =
-      totalFollowers > 0 && platformKeys.length > 0
-        ? totalFollowers / platformKeys.length
-        : 1;
-    return { maxVideoViews, maxImpressions, avgFollowers };
-  }, [posts, dailyMetrics]);
+    return describe(saves);
+  }, [scatterPosts]);
 
   const scatterOptions = {
     ...defaultOptions,
+    onClick: (
+      _e: unknown,
+      elements: Array<{ index: number }>,
+    ) => {
+      if (!elements.length) return;
+      const post = scatterPosts[elements[0].index];
+      if (!post) return;
+      // Scatter axes are Save Rate (x) and Share Rate (y); rank by Save Rate
+      // since that's the higher-intent signal and matches what users tend to
+      // be searching for when clicking outliers on this chart.
+      setDrilldown({
+        posts: [post],
+        label: `Post ${str(post.fields["Post ID"]).slice(-10)} — Save vs Share`,
+        metricLabel: "Save Rate",
+        getMetricValue: (r) => {
+          const reach = recordReach(r);
+          if (reach <= 0) return undefined;
+          return (num(r.fields["Saves"]) / reach) * 100;
+        },
+        formatMetric: (v: number) => `${v.toFixed(2)}%`,
+      });
+    },
     scales: {
       ...defaultOptions.scales,
       x: {
@@ -129,7 +374,7 @@ export default function ContentAnalysis({
         title: {
           display: true,
           text: "Save Rate %",
-          color: CHART_COLORS.muted,
+          color: colors.axis,
         },
       },
       y: {
@@ -137,63 +382,179 @@ export default function ContentAnalysis({
         title: {
           display: true,
           text: "Share Rate %",
-          color: CHART_COLORS.muted,
+          color: colors.axis,
         },
       },
     },
   };
 
-  if (posts.length === 0) {
-    return (
-      <div
-        className="rounded-xl p-8 text-center"
-        style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border)",
-        }}
-      >
-        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          No posts found for this period. Try expanding the date range.
-        </p>
-      </div>
-    );
-  }
+  const emptyPostsBanner = (
+    <div
+      className="rounded-xl p-8 text-center"
+      style={{
+        background: "var(--bg-card)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+        No posts found for this period. Try expanding the date range.
+      </p>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
-      <PostScorecardTable posts={posts} />
+    <div className="space-y-4">
+      {/* "Top findings" is a window-level summary, not per-sub-tab content. It
+          used to render above the SubNav so it repeated on all five Insights
+          sub-tabs (WEBDEV-182 item 12). Scope it to the entry/landing sub-tab
+          ("performance") so it shows once. */}
+      <SubNav
+        storageKey="insights"
+        items={SUBNAV_ITEMS}
+        value={subTab}
+        onChange={setSubTab}
+      />
 
-      <DimensionSlicer posts={posts} normalizers={normalizers} />
+      {subTab === "performance" && <TopFindings posts={posts} />}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard
-          title="Avg Engagement Rate by Post Type"
-          tooltip="Higher ER = better content-market fit for that format"
-        >
-          <Bar data={formatData} options={defaultOptions} />
-        </ChartCard>
-        <ChartCard
-          title="Content Theme Performance"
-          tooltip="Avg ER by AI-tagged content theme"
-        >
-          <Bar
-            data={themeData}
-            options={{ ...defaultOptions, indexAxis: "y" as const }}
+      {subTab === "loop" &&
+        (posts.length === 0 ? (
+          emptyPostsBanner
+        ) : (
+          <WhatWorkedToPlan
+            posts={posts}
+            timezone={timezone}
+            onPlanFromSelection={onPlanFromSelection}
           />
-        </ChartCard>
-      </div>
+        ))}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <PostingHeatmap posts={posts} />
-        <ChartCard
-          title="Save Rate vs Share Rate"
-          tooltip="Intent signals — saves = personal value, shares = social value"
-        >
-          <Scatter data={scatterData} options={scatterOptions} />
-        </ChartCard>
-      </div>
+      {subTab === "performance" && posts.length === 0 && emptyPostsBanner}
+      {subTab === "performance" && posts.length > 0 && (
+        <div className="space-y-6">
+          <PostScorecardTable posts={posts} timezone={timezone} />
 
-      <HashtagCharts posts={posts} />
+          <DimensionSlicer posts={posts} />
+
+          <div className="flex items-center gap-2 text-xs">
+            <span style={{ color: "var(--text-secondary)" }}>Metric:</span>
+            {(Object.keys(METRICS) as MetricKey[]).map((k) => (
+              <button
+                key={k}
+                onClick={() => setMetricKey(k)}
+                className="px-2 py-1 rounded cursor-pointer transition-colors"
+                style={{
+                  background:
+                    metricKey === k
+                      ? "var(--brand)"
+                      : "var(--bg-secondary)",
+                  color: metricKey === k ? "#fff" : "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {METRICS[k].label}
+              </button>
+            ))}
+            <span className="opacity-50 ml-2">
+              {metric.additive ? "stacked (additive)" : "grouped (rate)"}
+            </span>
+          </div>
+
+          <ChartCard
+            title={`${metric.label} by Theme × Post Type`}
+            tooltip={
+              metric.additive
+                ? `Each bar is a Content Theme (Recipes, Product, UGC, Sustainability, etc.) with segments showing how each Post Type contributed. Reads as "what creative themes drive the most ${metric.label.toLowerCase()}, and which formats deliver them?" Top 10 themes shown.`
+                : `Each bar is a Content Theme; segments show avg ${metric.label.toLowerCase()} by Post Type within that theme. Top 10 themes shown.`
+            }
+            headerAction={
+              <StatsPanel
+                stats={describe(
+                  themeData.datasets.flatMap((ds) =>
+                    (ds.data as number[]).filter((v) => v > 0),
+                  ),
+                )}
+                format={(v) =>
+                  metric.additive ? formatNumber(v) : `${v.toFixed(2)}%`
+                }
+                context={`${metric.label} cell-value distribution across Theme × Post Type`}
+              />
+            }
+          >
+            <Bar data={themeData} options={chartOptionsHorizontal} />
+          </ChartCard>
+
+          <ChartCard
+            title="Save Rate vs Share Rate"
+            tooltip="Intent signals — saves = personal value, shares = social value. Click a point to drill into the post."
+            headerAction={
+              <StatsPanel
+                stats={scatterSaveStats}
+                format={(v) => `${v.toFixed(2)}%`}
+                context="Save rate distribution (x-axis)"
+              />
+            }
+          >
+            <Scatter data={scatterData} options={scatterOptions} />
+          </ChartCard>
+        </div>
+      )}
+
+      {subTab === "audience" && (
+        <AudienceDemographics records={instagramAudience} />
+      )}
+
+      {subTab === "pinterest" && (
+        <PinterestTopPins
+          records={pinterestTopPins}
+          posts={posts}
+          timezone={timezone}
+        />
+      )}
+
+      {subTab === "hashtags" && (
+        <HashtagCharts
+          posts={posts}
+          onSelectHashtag={(tag, subset) =>
+            // Hashtag charts plot frequency + avg ER; ER is the more useful
+            // sort for inspecting which posts under a tag actually performed.
+            setDrilldown({
+              posts: subset,
+              label: `Hashtag #${tag}`,
+              metricLabel: "Engagement Rate",
+              getMetricValue: (r) => num(r.fields["Engagement Rate"]) * 100,
+              formatMetric: (v: number) => `${v.toFixed(2)}%`,
+            })
+          }
+        />
+      )}
+
+      {drilldown && (
+        <PostDrilldownPanel
+          posts={drilldown.posts}
+          bucketLabel={drilldown.label}
+          metricLabel={drilldown.metricLabel}
+          getMetricValue={drilldown.getMetricValue}
+          formatMetric={drilldown.formatMetric}
+          timezone={timezone}
+          headerAction={
+            drilldown.planSelection && onPlanFromSelection ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onPlanFromSelection(drilldown.planSelection!);
+                  setDrilldown(null);
+                }}
+                className="text-xs font-medium rounded px-2.5 py-1 cursor-pointer transition-colors hover:brightness-110"
+                style={{ background: "var(--brand)", color: "#fff" }}
+                title="Carry this theme + format into Planning's When-to-post heatmap"
+              >
+                Plan from this →
+              </button>
+            ) : undefined
+          }
+          onClose={() => setDrilldown(null)}
+        />
+      )}
     </div>
   );
 }
