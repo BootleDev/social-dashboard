@@ -1,55 +1,94 @@
 "use client";
 
 import { useMemo } from "react";
-import { Line, Bar } from "react-chartjs-2";
-import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
-import { getPlatformConfig } from "@/lib/platforms";
 import KPICard from "./KPICard";
-import ChartCard from "./ChartCard";
-import AlertsFeed from "./AlertsFeed";
-import WeeklySummary from "./WeeklySummary";
+import InfoTooltip from "./InfoTooltip";
+import Sparkline from "./Sparkline";
+import NeedsAttention from "./NeedsAttention";
+import TrendCharts from "./TrendCharts";
+import { glossaryFor } from "@/lib/metricGlossary";
+import { getPlatformConfig } from "@/lib/platforms";
 import {
-  num,
   str,
   formatNumber,
-  formatPercent,
   pctChange,
-  topPosts,
   sumField,
-  avgField,
+  recordReach,
+  sumReach,
+  hasRealReach,
+  hasRealImpressions,
+  latestFollowers,
   groupByPlatform,
   getPlatformKeys,
-  buildUnifiedDates,
-  alignToDateArray,
-  platformsReporting,
-  qualifiedMetricTitle,
+  postEngagement,
 } from "@/lib/utils";
-import { toPost } from "@/lib/types";
-import {
-  saveRate,
-  engagementScore,
-  reachScore,
-  type ReachNormalizers,
-} from "@/lib/derivedMetrics";
 import type { AirtableRecord } from "@/lib/utils";
+
+/**
+ * Sum platform-reported engagement across a set of posts. Delegates to the
+ * shared postEngagement (which reads the authoritative `Engagement` field per
+ * platform — see utils) so this never diverges from the single source of truth.
+ */
+function sumEngagement(records: AirtableRecord[]): number {
+  return records.reduce((s, p) => s + postEngagement(p), 0);
+}
+
+/**
+ * Build an ordered daily series for a post-level metric across the window, so
+ * the north-star sparkline shows the trend WITHIN the period (not a flat line).
+ * Days with no posts are 0 (a genuine zero — nothing was reaching/engaging that
+ * day), which is the honest read for a post-level volume metric. Returns the
+ * series oldest-first over the union of dates present in `posts`.
+ */
+function dailyPostSeries(
+  posts: AirtableRecord[],
+  metric: (records: AirtableRecord[]) => number,
+): number[] {
+  const byDay = new Map<string, AirtableRecord[]>();
+  for (const p of posts) {
+    const day = str(p.fields["Published At"]).split("T")[0];
+    if (!day) continue;
+    const bucket = byDay.get(day) ?? [];
+    bucket.push(p);
+    byDay.set(day, bucket);
+  }
+  const days = Array.from(byDay.keys()).sort((a, b) => a.localeCompare(b));
+  return days.map((d) => metric(byDay.get(d) ?? []));
+}
 
 interface OverviewProps {
   posts: AirtableRecord[];
+  /** Account-grain daily facts, date+platform filtered. */
   dailyMetrics: AirtableRecord[];
+  /** Account facts WITHOUT date filtering (platform only) — IG 30-day reads. */
+  periodFacts?: AirtableRecord[];
   alerts: AirtableRecord[];
   weeklySummaries: AirtableRecord[];
   prevPosts: AirtableRecord[];
   prevDailyMetrics: AirtableRecord[];
+  onSelectPost: (post: AirtableRecord) => void;
 }
 
+/**
+ * Overview — the 60-second executive read (rendered on the Pulse tab).
+ *
+ * Three stacked sections, zero raw tables:
+ *   1. North-star strip — Total Reach + Total Engagement, big number, bold
+ *      delta vs prior period, in-period sparkline.
+ *   2. At-a-glance KPI row — five compact cards with per-platform share pills.
+ *   3. Two side-by-side panels — per-platform account scorecards + the
+ *      "Needs attention" triage list.
+ *
+ * The analytical layer (quality scores, trend charts, Top 5, IG 30-day tiles)
+ * was lifted into the parked OverviewDeepDive component to keep this a scan.
+ */
 export default function Overview({
   posts,
   dailyMetrics,
   alerts,
-  weeklySummaries,
   prevPosts,
   prevDailyMetrics,
+  onSelectPost,
 }: OverviewProps) {
   const platformMap = useMemo(
     () => groupByPlatform(dailyMetrics),
@@ -60,245 +99,122 @@ export default function Overview({
     [dailyMetrics],
   );
 
-  // KPI calculations with proper period comparison
-  const kpis = useMemo(() => {
+  const model = useMemo(() => {
+    // --- North-star: post-level Total Reach + Total Engagement -------------
+    // Both are reported by every platform at the post level, so the sum is
+    // genuinely comparable across IG/FB/Pinterest. recordReach() applies the
+    // Pinterest impressions-as-reach substitution.
+    const totalReach = posts.reduce((s, p) => s + recordReach(p), 0);
+    const prevTotalReach = prevPosts.reduce((s, p) => s + recordReach(p), 0);
+    const totalEngagement = sumEngagement(posts);
+    const prevTotalEngagement = sumEngagement(prevPosts);
+
+    const reachSeries = dailyPostSeries(posts, (r) =>
+      r.reduce((s, p) => s + recordReach(p), 0),
+    );
+    const engagementSeries = dailyPostSeries(posts, sumEngagement);
+
+    // --- KPI row ------------------------------------------------------------
     const totalFollowers = platformKeys.reduce((sum, key) => {
       const metrics = platformMap.get(key) ?? [];
-      const latest = metrics[0];
-      return sum + (latest ? num(latest.fields["Followers"]) : 0);
+      return sum + (latestFollowers(metrics) ?? 0);
     }, 0);
-
     const prevMap = groupByPlatform(prevDailyMetrics);
     const prevFollowers = platformKeys.reduce((sum, key) => {
       const metrics = prevMap.get(key) ?? [];
-      const latest = metrics[0];
-      return sum + (latest ? num(latest.fields["Followers"]) : 0);
+      return sum + (latestFollowers(metrics) ?? 0);
     }, 0);
 
-    const avgER = avgField(posts, "Engagement Rate") * 100;
-    const prevAvgER = avgField(prevPosts, "Engagement Rate") * 100;
+    const postImpressions = sumField(posts, "Impressions");
+    const prevPostImpressions = sumField(prevPosts, "Impressions");
 
-    const totalReach = sumField(dailyMetrics, "Reach");
-    const totalImpressions = sumField(dailyMetrics, "Impressions");
+    // Per-platform post buckets for the share pills.
+    const postsByPlatform = new Map<string, AirtableRecord[]>();
+    for (const p of posts) {
+      const k = str(p.fields["Platform"]);
+      if (!k) continue;
+      if (!postsByPlatform.has(k)) postsByPlatform.set(k, []);
+      postsByPlatform.get(k)!.push(p);
+    }
 
-    // Not every platform reports every account metric (IG impressions is
-    // permanently retired; FB/Pinterest reach is not currently reported), so
-    // the Reach/Impressions KPI titles name the platforms actually summed —
-    // and the previous-period comparison uses that same platform scope, so
-    // the change % never compares against platforms the value excludes.
-    const reachPlatforms = platformsReporting(
-      platformKeys,
-      platformMap,
-      "Reach",
+    const breakdownFollowers = platformKeys.map((k) => ({
+      platform: k,
+      value: formatNumber(latestFollowers(platformMap.get(k) ?? []) ?? 0),
+    }));
+    const breakdownPostReach = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({
+        platform,
+        value: formatNumber(ps.reduce((s, p) => s + recordReach(p), 0)),
+      }),
     );
-    const impressionsPlatforms = platformsReporting(
-      platformKeys,
-      platformMap,
-      "Impressions",
+    const breakdownPostImpressions = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({
+        platform,
+        value: formatNumber(sumField(ps, "Impressions")),
+      }),
     );
-    const sumOverPlatforms = (
-      keys: string[],
-      map: Map<string, AirtableRecord[]>,
-      field: string,
-    ) => keys.reduce((sum, key) => sum + sumField(map.get(key) ?? [], field), 0);
-    const prevTotalReach = sumOverPlatforms(reachPlatforms, prevMap, "Reach");
-    const prevTotalImpressions = sumOverPlatforms(
-      impressionsPlatforms,
-      prevMap,
-      "Impressions",
+    const breakdownPostEngagement = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({
+        platform,
+        value: formatNumber(sumEngagement(ps)),
+      }),
+    );
+    const breakdownPosts = Array.from(postsByPlatform.entries()).map(
+      ([platform, ps]) => ({ platform, value: String(ps.length) }),
     );
 
-    const totalProfileViews = sumField(dailyMetrics, "Profile Views");
-
-    const totalLinkClicks = sumField(posts, "Link Clicks");
-    const prevTotalLinkClicks = sumField(prevPosts, "Link Clicks");
-
-    const totalVideoViews = sumField(posts, "Video Views");
-
-    // Save Rate: avg across posts that have reach > 0
-    const postsWithReach = posts.filter((p) => num(p.fields["Reach"]) > 0);
-    const avgSaveRate =
-      postsWithReach.length > 0
-        ? postsWithReach.reduce((sum, p) => {
-            const v = saveRate(toPost(p));
-            return sum + (v ?? 0);
-          }, 0) / postsWithReach.length
-        : undefined;
-
-    // Composite scores: median across posts that have enough data
-    const normalizers: ReachNormalizers = {
-      maxVideoViews: posts.reduce(
-        (m, p) => Math.max(m, num(p.fields["Video Views"])),
-        0,
-      ),
-      maxImpressions: posts.reduce(
-        (m, p) => Math.max(m, num(p.fields["Impressions"])),
-        0,
-      ),
-      avgFollowers:
-        totalFollowers > 0 && platformKeys.length > 0
-          ? totalFollowers / platformKeys.length
-          : 1,
-    };
-
-    const engScores = posts
-      .map((p) => engagementScore(toPost(p)))
-      .filter((v): v is number => v !== undefined);
-    const avgEngScore =
-      engScores.length > 0
-        ? engScores.reduce((a, b) => a + b, 0) / engScores.length
-        : undefined;
-
-    const reachScores = posts
-      .map((p) => reachScore(toPost(p), normalizers))
-      .filter((v): v is number => v !== undefined);
-    const avgReachScore =
-      reachScores.length > 0
-        ? reachScores.reduce((a, b) => a + b, 0) / reachScores.length
-        : undefined;
+    // --- Per-platform account scorecards -----------------------------------
+    // Each platform shows only its OWN real account metrics; a metric the
+    // platform doesn't publish renders as an em-dash (—), an intentional value.
+    const accountScorecards = platformKeys.map((k) => {
+      const m = platformMap.get(k) ?? [];
+      const realReach = m.filter(hasRealReach);
+      const realImpr = m.filter(hasRealImpressions);
+      return {
+        platform: k,
+        followers: latestFollowers(m),
+        reach: realReach.length > 0 ? sumReach(realReach) : null,
+        impressions:
+          realImpr.length > 0 ? sumField(realImpr, "Impressions") : null,
+      };
+    });
 
     return {
-      totalFollowers,
-      followersChange:
-        prevFollowers > 0
-          ? pctChange(totalFollowers, prevFollowers)
-          : undefined,
-      avgER,
-      erChange: prevAvgER > 0 ? pctChange(avgER, prevAvgER) : undefined,
       totalReach,
       reachChange:
         prevTotalReach > 0 ? pctChange(totalReach, prevTotalReach) : undefined,
-      reachPlatforms,
-      totalImpressions,
-      impressionsChange:
-        prevTotalImpressions > 0
-          ? pctChange(totalImpressions, prevTotalImpressions)
+      reachNew: prevTotalReach === 0 && totalReach > 0,
+      reachSeries,
+      totalEngagement,
+      engagementChange:
+        prevTotalEngagement > 0
+          ? pctChange(totalEngagement, prevTotalEngagement)
           : undefined,
-      impressionsPlatforms,
+      engagementNew: prevTotalEngagement === 0 && totalEngagement > 0,
+      engagementSeries,
+      totalFollowers,
+      followersChange:
+        prevFollowers > 0 ? pctChange(totalFollowers, prevFollowers) : undefined,
+      followersNew: prevFollowers === 0 && totalFollowers > 0,
+      postReach: totalReach,
+      postReachChange:
+        prevTotalReach > 0 ? pctChange(totalReach, prevTotalReach) : undefined,
+      postReachNew: prevTotalReach === 0 && totalReach > 0,
+      postImpressions,
+      postImpressionsChange:
+        prevPostImpressions > 0
+          ? pctChange(postImpressions, prevPostImpressions)
+          : undefined,
+      postImpressionsNew: prevPostImpressions === 0 && postImpressions > 0,
       postsPublished: posts.length,
-      avgSaveRate,
-      totalProfileViews,
-      totalLinkClicks,
-      linkClicksChange:
-        prevTotalLinkClicks > 0
-          ? pctChange(totalLinkClicks, prevTotalLinkClicks)
-          : undefined,
-      totalVideoViews,
-      avgEngScore,
-      avgReachScore,
+      breakdownFollowers,
+      breakdownPostReach,
+      breakdownPostImpressions,
+      breakdownPostEngagement,
+      breakdownPosts,
+      accountScorecards,
     };
-  }, [
-    posts,
-    dailyMetrics,
-    platformKeys,
-    platformMap,
-    prevPosts,
-    prevDailyMetrics,
-  ]);
-
-  // Unified date array from all platforms
-  const allDates = useMemo(
-    () =>
-      buildUnifiedDates(...platformKeys.map((k) => platformMap.get(k) ?? [])),
-    [platformKeys, platformMap],
-  );
-
-  // Follower growth chart — dynamic datasets per platform
-  const followerChartData = useMemo(() => {
-    const labels = allDates.map((d) => d.slice(5));
-
-    return {
-      labels,
-      datasets: platformKeys.map((key) => {
-        const config = getPlatformConfig(key);
-        const metrics = platformMap.get(key) ?? [];
-        return {
-          label: config.label,
-          // null gaps (not 0) so a missing day breaks the line instead of
-          // diving to zero. spanGaps:false keeps the break honest.
-          data: alignToDateArray(metrics, allDates, "Followers", null),
-          borderColor: config.color,
-          backgroundColor: config.colorFill,
-          fill: false,
-          tension: 0.3,
-          pointRadius: 0,
-          spanGaps: false,
-        };
-      }),
-    };
-  }, [platformKeys, platformMap, allDates]);
-
-  // Engagement rate trend — dynamic datasets per platform
-  const erChartData = useMemo(() => {
-    const labels = allDates.map((d) => d.slice(5));
-
-    return {
-      labels,
-      datasets: platformKeys.map((key) => {
-        const config = getPlatformConfig(key);
-        const metrics = platformMap.get(key) ?? [];
-        return {
-          label: `${config.label} ER`,
-          // Preserve null gaps through the *100 scaling (null*100 would be 0).
-          data: alignToDateArray(metrics, allDates, "Engagement Rate", null).map(
-            (v) => (v === null ? null : v * 100),
-          ),
-          borderColor: config.color,
-          tension: 0.3,
-          pointRadius: 0,
-          spanGaps: false,
-        };
-      }),
-    };
-  }, [platformKeys, platformMap, allDates]);
-
-  // Posts per week bar chart
-  const postsPerWeekData = useMemo(() => {
-    const weekCounts = new Map<string, number>();
-    for (const p of posts) {
-      const dateStr = str(p.fields["Published At"]);
-      if (!dateStr) continue;
-      const d = new Date(dateStr);
-      const weekStart = new Date(d);
-      weekStart.setUTCDate(d.getUTCDate() - d.getUTCDay());
-      const key = weekStart.toISOString().split("T")[0];
-      weekCounts.set(key, (weekCounts.get(key) ?? 0) + 1);
-    }
-
-    const sorted = Array.from(weekCounts.entries()).sort((a, b) =>
-      a[0].localeCompare(b[0]),
-    );
-
-    return {
-      labels: sorted.map(([w]) => w.slice(5)),
-      datasets: [
-        {
-          label: "Posts",
-          data: sorted.map(([, c]) => c),
-          backgroundColor: CHART_COLORS.purple + "60",
-          borderColor: CHART_COLORS.purple,
-          borderWidth: 1,
-        },
-      ],
-    };
-  }, [posts]);
-
-  // Top 5 posts by ER
-  const top5 = useMemo(() => topPosts(posts, "Engagement Rate", 5), [posts]);
-
-  // Follower counts move in a narrow band (e.g. 677–694). With a 0-based axis
-  // the line looks dead flat, so zoom the y-axis to the actual range.
-  const followerChartOptions = {
-    ...defaultOptions,
-    scales: {
-      ...defaultOptions.scales,
-      y: { ...defaultOptions.scales.y, beginAtZero: false },
-    },
-  };
-
-  const platformCountLabel = platformKeys
-    .map((k) => getPlatformConfig(k).label)
-    .join(" + ");
+  }, [posts, prevPosts, dailyMetrics, prevDailyMetrics, platformKeys, platformMap]);
 
   if (posts.length === 0 && dailyMetrics.length === 0) {
     return (
@@ -318,210 +234,285 @@ export default function Overview({
   }
 
   return (
-    <div className="space-y-6">
-      {/* KPI Row 1 — volume */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
+    <div className="space-y-5">
+      {/* ─── 1. NORTH-STAR STRIP ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <NorthStarCard
+          label="Total Reach"
+          grainNote="post-level · summed across this window"
+          value={formatNumber(model.totalReach)}
+          change={model.reachChange}
+          isNew={model.reachNew}
+          series={model.reachSeries}
+          tooltip={`${glossaryFor(
+            "Reach",
+          )} Summed across every post in the window, all platforms. Pinterest uses post impressions as its reach proxy. This is a POST-level total and intentionally differs from the account-level reach in the per-platform panel below — they measure different things and are not meant to match.`}
+        />
+        <NorthStarCard
+          label="Total Engagement"
+          grainNote="post-level · summed across this window"
+          value={formatNumber(model.totalEngagement)}
+          change={model.engagementChange}
+          isNew={model.engagementNew}
+          series={model.engagementSeries}
+          tooltip="Likes, comments, saves and shares summed across every post in the window, all platforms."
+        />
+      </div>
+
+      {/* ─── 2. AT-A-GLANCE KPI ROW ──────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KPICard
           title="Total Followers"
-          value={formatNumber(kpis.totalFollowers)}
-          change={kpis.followersChange}
-          tooltip={`Combined ${platformCountLabel} followers`}
+          value={formatNumber(model.totalFollowers)}
+          change={model.followersChange}
+          isNew={model.followersNew}
+          tooltip="Combined followers across all platforms (account-level)."
+          breakdown={model.breakdownFollowers}
         />
         <KPICard
-          title={qualifiedMetricTitle(
+          title="Post Reach"
+          value={formatNumber(model.postReach)}
+          change={model.postReachChange}
+          isNew={model.postReachNew}
+          tooltip={`${glossaryFor(
             "Reach",
-            kpis.reachPlatforms,
-            platformKeys,
-            (k) => getPlatformConfig(k).shortLabel,
-          )}
-          value={kpis.totalReach > 0 ? formatNumber(kpis.totalReach) : "—"}
-          change={kpis.totalReach > 0 ? kpis.reachChange : undefined}
-          tooltip="Per-day account reach summed across the platforms in the title; platforms not reporting account reach this period are excluded. Reach is Instagram's distribution metric (Meta retired IG account-level impressions)."
+          )} Summed across every post in the window, all platforms (post-level). Pinterest uses post impressions as its reach proxy. Differs from the account-level reach in the per-platform panel — different grain, not an error.`}
+          breakdown={model.breakdownPostReach}
         />
         <KPICard
-          title={qualifiedMetricTitle(
-            "Impressions",
-            kpis.impressionsPlatforms,
-            platformKeys,
-            (k) => getPlatformConfig(k).shortLabel,
-          )}
-          value={
-            kpis.totalImpressions > 0
-              ? formatNumber(kpis.totalImpressions)
-              : "—"
-          }
-          change={
-            kpis.totalImpressions > 0 ? kpis.impressionsChange : undefined
-          }
-          tooltip="Per-day account impressions summed across the platforms in the title. Instagram is permanently excluded: Meta retired IG account-level impressions and its 'views' replacement has no per-day variant — track IG distribution via Reach."
-        />
-        <KPICard title="Posts Published" value={String(kpis.postsPublished)} />
-      </div>
-
-      {/* KPI Row 2 — quality */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
-        <KPICard
-          title="Avg Engagement Rate"
-          value={formatPercent(kpis.avgER)}
-          change={kpis.erChange}
-          tooltip="Average across all posts in range"
+          title="Post Impressions"
+          value={formatNumber(model.postImpressions)}
+          change={model.postImpressionsChange}
+          isNew={model.postImpressionsNew}
+          tooltip="Total impressions summed across every post in the window, all platforms."
+          breakdown={model.breakdownPostImpressions}
         />
         <KPICard
-          title="Avg Save Rate"
-          value={
-            kpis.avgSaveRate !== undefined
-              ? formatPercent(kpis.avgSaveRate * 100)
-              : "—"
-          }
-          tooltip="Saves / Reach — strong signal for algorithmic distribution"
+          title="Total Engagement"
+          value={formatNumber(model.totalEngagement)}
+          change={model.engagementChange}
+          isNew={model.engagementNew}
+          tooltip="Likes + comments + saves + shares across every post in the window."
+          breakdown={model.breakdownPostEngagement}
         />
         <KPICard
-          title="Engagement Score"
-          value={
-            kpis.avgEngScore !== undefined ? kpis.avgEngScore.toFixed(1) : "—"
-          }
-          tooltip="Composite 0–100: 40% save rate + 35% ER + 25% comment rate"
-        />
-        <KPICard
-          title="Reach Score"
-          value={
-            kpis.avgReachScore !== undefined
-              ? kpis.avgReachScore.toFixed(1)
-              : "—"
-          }
-          tooltip="Composite 0–100: 50% reach rate + 30% video views + 20% impressions (relative to this period)"
+          title="Posts Published"
+          value={String(model.postsPublished)}
+          breakdown={model.breakdownPosts}
         />
       </div>
 
-      {/* Weekly Summary */}
-      <WeeklySummary summaries={weeklySummaries} />
+      {/* ─── 3. TWO SIDE-BY-SIDE PANELS ──────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
+        {/* Account metrics by platform */}
+        <div
+          className="rounded-xl p-4"
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid var(--border)",
+          }}
+        >
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <span
+              className="text-xs font-medium"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Account metrics by platform
+            </span>
+            <InfoTooltip
+              text="Account-level reach, impressions and followers as each platform reports them. This is ACCOUNT-level data and intentionally differs from the post-level Total Reach above — that one sums every post; this one is what the platform reports for the account. A blank (—) means the platform does not publish that metric at the account level (e.g. Facebook has no account reach; Instagram retired account impressions) — not a tracking gap. Pinterest reach/impressions are a pin-sum. See the Methodology page."
+              label="Why do platforms show different account metrics?"
+            />
+          </div>
+          <div
+            className="text-[10px] mb-3"
+            style={{ color: "var(--text-secondary)", opacity: 0.75 }}
+          >
+            account-level · as each platform reports — does not match the
+            post-level totals above
+          </div>
+          <div className="space-y-3">
+            {model.accountScorecards.map((sc) => {
+              const cfg = getPlatformConfig(sc.platform);
+              return (
+                <div
+                  key={sc.platform}
+                  className="rounded-lg p-3"
+                  style={{
+                    background: "var(--bg-secondary)",
+                    border: "1px solid var(--border)",
+                    borderLeftWidth: "3px",
+                    borderLeftColor: cfg.color,
+                  }}
+                >
+                  <span
+                    className="text-[11px] px-1.5 py-0.5 rounded font-semibold"
+                    style={{ background: cfg.colorBg, color: cfg.color }}
+                  >
+                    {cfg.label}
+                  </span>
+                  <div className="grid grid-cols-3 gap-2 mt-2.5">
+                    <ScoreCell
+                      label="Reach"
+                      value={sc.reach !== null ? formatNumber(sc.reach) : "—"}
+                    />
+                    <ScoreCell
+                      label="Impressions"
+                      value={
+                        sc.impressions !== null
+                          ? formatNumber(sc.impressions)
+                          : "—"
+                      }
+                    />
+                    <ScoreCell
+                      label="Followers"
+                      value={
+                        sc.followers !== null
+                          ? formatNumber(sc.followers)
+                          : "—"
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Follower Growth">
-          <Line data={followerChartData} options={followerChartOptions} />
-        </ChartCard>
-        <ChartCard title="Engagement Rate Trend (%)">
-          <Line data={erChartData} options={defaultOptions} />
-        </ChartCard>
+        {/* Needs attention */}
+        <NeedsAttention
+          posts={posts}
+          prevPosts={prevPosts}
+          dailyMetrics={dailyMetrics}
+          prevDailyMetrics={prevDailyMetrics}
+          alerts={alerts}
+          onSelectPost={onSelectPost}
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Posts Per Week">
-          <Bar data={postsPerWeekData} options={defaultOptions} />
-        </ChartCard>
-        <AlertsFeed alerts={alerts} />
-      </div>
+      {/* ─── 4. TRENDS OVER TIME ──────────────────────────────────────────── */}
+      {/* The north-star cards show only an in-period sparkline; this block adds
+          the period-over-period trend context a leader was missing (WEBDEV-182
+          item 11). Chart shaping is shared with OverviewDeepDive via the pure
+          trendSeries builders. */}
+      <TrendCharts posts={posts} dailyMetrics={dailyMetrics} />
+    </div>
+  );
+}
 
-      {/* Top 5 Posts */}
-      <div
-        className="rounded-xl p-5"
-        style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border)",
-        }}
-      >
-        <h3
-          className="text-sm font-medium mb-4"
+/** One reach/impressions/followers cell in a platform scorecard. */
+function ScoreCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+        {label}
+      </span>
+      <span className="text-base font-bold tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+interface NorthStarCardProps {
+  label: string;
+  /** Short grain/window caption shown under the label (e.g. "post-level · this window"). */
+  grainNote?: string;
+  value: string;
+  change?: number;
+  isNew?: boolean;
+  series: number[];
+  tooltip: string;
+}
+
+/**
+ * One of the two hero metrics. The number is the hero (large, tabular), the
+ * delta is bold and colour-coded (green up / red down), and a sparkline traces
+ * the in-period trend. When growth is from zero, "↑ new" replaces the percent.
+ */
+function NorthStarCard({
+  label,
+  grainNote,
+  value,
+  change,
+  isNew,
+  series,
+  tooltip,
+}: NorthStarCardProps) {
+  const isPositive = change !== undefined && change > 0;
+  const isNegative = change !== undefined && change < 0;
+  // Sparkline + delta share a colour: green when up (or new), red when down,
+  // neutral when flat / no prior data.
+  const accent = isPositive || isNew
+    ? "var(--success)"
+    : isNegative
+      ? "var(--danger)"
+      : "var(--text-secondary)";
+  const arrow = isPositive ? "▲" : isNegative ? "▼" : "";
+
+  return (
+    <div
+      className="rounded-xl p-5"
+      style={{
+        background: "var(--bg-card)",
+        border: "1px solid var(--border)",
+      }}
+    >
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span
+          className="text-xs font-medium"
           style={{ color: "var(--text-secondary)" }}
         >
-          Top 5 Posts by Engagement Rate
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {top5.map((post, i) => {
-            const caption = str(post.fields["Caption"]).slice(0, 120);
-            const platform = str(post.fields["Platform"]);
-            const postType = str(post.fields["Post Type"]);
-            const er = num(post.fields["Engagement Rate"]) * 100;
-            const reach = num(post.fields["Reach"]);
-            const likes = num(post.fields["Likes"]);
-            const saves = num(post.fields["Saves"]);
-            const shares = num(post.fields["Shares"]);
-            const comments = num(post.fields["Comments"]);
-            const mediaUrl = str(post.fields["Media URL"]);
-            const publishedAt = str(post.fields["Published At"]).split("T")[0];
-            const config = getPlatformConfig(platform);
+          {label}
+        </span>
+        <InfoTooltip text={tooltip} label={`What is ${label}?`} />
+      </div>
+      {grainNote ? (
+        <div
+          className="text-[10px] mb-1"
+          style={{ color: "var(--text-secondary)", opacity: 0.75 }}
+        >
+          {grainNote}
+        </div>
+      ) : null}
 
-            return (
-              <div
-                key={post.id || i}
-                className="rounded-lg p-4 space-y-3 flex flex-col"
-                style={{
-                  background: "var(--bg-secondary)",
-                  border: "1px solid var(--border)",
-                }}
+      <div className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-4xl font-bold tabular-nums leading-none">
+            {value}
+          </div>
+          <div className="mt-2 flex items-center gap-1.5">
+            {change !== undefined ? (
+              <span
+                className="text-sm font-semibold"
+                style={{ color: accent }}
               >
-                <div className="flex items-center justify-between">
-                  <span
-                    className="text-[10px] px-2 py-0.5 rounded font-semibold capitalize"
-                    style={{
-                      background: config.colorBg,
-                      color: config.color,
-                    }}
-                  >
-                    {config.label}
-                  </span>
-                  <span
-                    className="text-[10px] capitalize"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    {postType}
-                  </span>
-                </div>
-                <p
-                  className="text-xs leading-relaxed flex-1"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {caption}
-                  {caption.length >= 120 ? "..." : ""}
-                </p>
-                <div
-                  className="text-[10px]"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {publishedAt}
-                </div>
-                <div
-                  className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  <span>
-                    ER:{" "}
-                    <strong className="text-green-400">{er.toFixed(2)}%</strong>
-                  </span>
-                  <span>Reach: {formatNumber(reach)}</span>
-                  <span>Likes: {formatNumber(likes)}</span>
-                  <span>Saves: {formatNumber(saves)}</span>
-                  <span>Shares: {formatNumber(shares)}</span>
-                  <span>Comments: {formatNumber(comments)}</span>
-                </div>
-                {mediaUrl && (
-                  <a
-                    href={mediaUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] font-medium mt-auto pt-1 transition-opacity hover:opacity-80 cursor-pointer"
-                    style={{ color: config.color }}
-                  >
-                    View on {config.label}
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      aria-hidden="true"
-                    >
-                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                      <polyline points="15 3 21 3 21 9" />
-                      <line x1="10" y1="14" x2="21" y2="3" />
-                    </svg>
-                  </a>
-                )}
-              </div>
-            );
-          })}
+                {arrow} {Math.abs(change).toFixed(0)}%
+              </span>
+            ) : isNew ? (
+              <span
+                className="text-sm font-semibold"
+                style={{ color: "var(--success)" }}
+              >
+                ↑ new
+              </span>
+            ) : (
+              <span
+                className="text-sm"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                no prior data
+              </span>
+            )}
+            <span
+              className="text-xs"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              vs prior period
+            </span>
+          </div>
+        </div>
+
+        <div style={{ color: accent }} className="shrink-0">
+          <Sparkline data={series} width={120} height={40} fill />
         </div>
       </div>
     </div>

@@ -10,6 +10,10 @@ interface WeeklySummaryProps {
 }
 
 export default function WeeklySummary({ summaries }: WeeklySummaryProps) {
+  // Index into `summaries` of the report currently being shown. 0 = latest
+  // (summaries are pre-sorted newest-first). Older reports are reachable via
+  // the prev/next chevrons and the period dropdown.
+  const [selected, setSelected] = useState(0);
   const [expanded, setExpanded] = useState(false);
 
   if (summaries.length === 0) {
@@ -34,12 +38,29 @@ export default function WeeklySummary({ summaries }: WeeklySummaryProps) {
     );
   }
 
-  const latest = summaries[0];
-  const period = str(latest.fields["Period"]);
-  const postsAnalysed = num(latest.fields["Posts Analysed"]);
-  const topPost = str(latest.fields["Top Post"]);
-  const platformBreakdown = str(latest.fields["Platform Breakdown"]);
-  const report = str(latest.fields["Full Report"]);
+  // Clamp in case the array shrank (e.g. a tighter date filter) while a later
+  // index was selected.
+  const index = Math.min(selected, summaries.length - 1);
+  const current = summaries[index];
+  const period = str(current.fields["Period"]);
+  const postsAnalysed = num(current.fields["Posts Analysed"]);
+  const topPost = str(current.fields["Top Post"]);
+  const platformBreakdown = str(current.fields["Platform Breakdown"]);
+  const report = str(current.fields["Full Report"]);
+
+  const hasMultiple = summaries.length > 1;
+
+  // newer = lower index; older = higher index.
+  const goNewer = () => {
+    setSelected((i) => Math.max(0, Math.min(i, summaries.length - 1) - 1));
+    setExpanded(false);
+  };
+  const goOlder = () => {
+    setSelected((i) =>
+      Math.min(summaries.length - 1, Math.min(i, summaries.length - 1) + 1),
+    );
+    setExpanded(false);
+  };
 
   return (
     <div
@@ -49,22 +70,69 @@ export default function WeeklySummary({ summaries }: WeeklySummaryProps) {
         border: "1px solid var(--border)",
       }}
     >
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2">
         <h3
           className="text-sm font-medium"
           style={{ color: "var(--text-secondary)" }}
         >
           Weekly Report
         </h3>
-        <span
-          className="text-[10px] px-2 py-0.5 rounded"
-          style={{
-            background: "var(--bg-secondary)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          {period}
-        </span>
+
+        {hasMultiple ? (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={goNewer}
+              disabled={index === 0}
+              aria-label="Newer report"
+              className="text-xs px-1.5 py-0.5 rounded transition-colors disabled:opacity-30 disabled:cursor-default cursor-pointer hover:bg-surface-secondary"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {"‹"}
+            </button>
+            <select
+              value={index}
+              onChange={(e) => {
+                setSelected(Number(e.target.value));
+                setExpanded(false);
+              }}
+              aria-label="Select report period"
+              className="text-[10px] px-2 py-0.5 rounded cursor-pointer outline-none"
+              style={{
+                background: "var(--bg-secondary)",
+                color: "var(--text-secondary)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              {summaries.map((s, i) => (
+                <option key={s.id || i} value={i}>
+                  {str(s.fields["Period"]) || `Report ${i + 1}`}
+                  {i === 0 ? " (latest)" : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={goOlder}
+              disabled={index === summaries.length - 1}
+              aria-label="Older report"
+              className="text-xs px-1.5 py-0.5 rounded transition-colors disabled:opacity-30 disabled:cursor-default cursor-pointer hover:bg-surface-secondary"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {"›"}
+            </button>
+          </div>
+        ) : (
+          <span
+            className="text-[10px] px-2 py-0.5 rounded"
+            style={{
+              background: "var(--bg-secondary)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            {period}
+          </span>
+        )}
       </div>
 
       {/* Summary stats */}
@@ -109,13 +177,13 @@ export default function WeeklySummary({ summaries }: WeeklySummaryProps) {
           <button
             onClick={() => setExpanded((v) => !v)}
             className="text-xs font-medium transition-colors hover:opacity-80 cursor-pointer"
-            style={{ color: "var(--accent-purple)" }}
+            style={{ color: "var(--brand)" }}
           >
             {expanded ? "Hide full report" : "View full report"}
           </button>
           {expanded && (
             <div
-              className="mt-3 p-4 rounded-lg text-xs leading-relaxed overflow-y-auto"
+              className="report-body mt-3 p-4 rounded-lg text-xs leading-relaxed overflow-y-auto"
               style={{
                 background: "var(--bg-secondary)",
                 maxHeight: "400px",
@@ -127,14 +195,15 @@ export default function WeeklySummary({ summaries }: WeeklySummaryProps) {
         </>
       )}
 
-      {/* Older summaries count */}
-      {summaries.length > 1 && (
+      {/* Position indicator when viewing an older report */}
+      {hasMultiple && (
         <p
           className="text-[10px] mt-2"
           style={{ color: "var(--text-secondary)" }}
         >
-          {summaries.length - 1} older report{summaries.length > 2 ? "s" : ""}{" "}
-          available
+          {index === 0
+            ? `Latest of ${summaries.length} reports`
+            : `Report ${index + 1} of ${summaries.length}`}
         </p>
       )}
     </div>

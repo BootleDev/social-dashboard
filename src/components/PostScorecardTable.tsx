@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { num, str, formatNumber, formatPercent } from "@/lib/utils";
+import { num, str, formatNumber, formatPercent, formatLocalDate, recordReach } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
 import type { AirtableRecord } from "@/lib/utils";
 import { toPost } from "@/lib/types";
@@ -10,9 +10,10 @@ import {
   viewThroughRate,
   engagementScore,
   reachScore,
-  type ReachNormalizers,
 } from "@/lib/derivedMetrics";
 import { exportToCSV } from "@/lib/csv";
+import { glossaryFor } from "@/lib/metricGlossary";
+import InfoTooltip from "./InfoTooltip";
 
 type SortField =
   | "Published At"
@@ -26,22 +27,18 @@ type SortField =
   | "Save Rate"
   | "VTR"
   | "Engagement Score"
-  | "Reach Score";
+  | "Reach Score"
+  | "Skip Rate"
+  | "Reposts";
 
 interface PostScorecardTableProps {
   posts: AirtableRecord[];
-  normalizers?: ReachNormalizers;
+  timezone?: string;
 }
-
-const DEFAULT_NORMALIZERS: ReachNormalizers = {
-  maxVideoViews: 0,
-  maxImpressions: 0,
-  avgFollowers: 1,
-};
 
 export default function PostScorecardTable({
   posts,
-  normalizers = DEFAULT_NORMALIZERS,
+  timezone = "",
 }: PostScorecardTableProps) {
   const [sortBy, setSortBy] = useState<SortField>("Engagement Rate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -55,7 +52,7 @@ export default function PostScorecardTable({
     if (field === "Save Rate") return saveRate(post) ?? -1;
     if (field === "VTR") return viewThroughRate(post) ?? -1;
     if (field === "Engagement Score") return engagementScore(post) ?? -1;
-    if (field === "Reach Score") return reachScore(post, normalizers) ?? -1;
+    if (field === "Reach Score") return reachScore(post) ?? -1;
     return -1;
   }
 
@@ -66,17 +63,21 @@ export default function PostScorecardTable({
         ? getDerivedValue(a, sortBy)
         : sortBy === "Published At"
           ? str(a.fields[sortBy])
-          : num(a.fields[sortBy]);
+          : sortBy === "Reach"
+            ? recordReach(a)
+            : num(a.fields[sortBy]);
       const bVal = isDerived
         ? getDerivedValue(b, sortBy)
         : sortBy === "Published At"
           ? str(b.fields[sortBy])
-          : num(b.fields[sortBy]);
+          : sortBy === "Reach"
+            ? recordReach(b)
+            : num(b.fields[sortBy]);
       if (sortDir === "desc") return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
       return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts, sortBy, sortDir, normalizers]);
+  }, [posts, sortBy, sortDir]);
 
   function toggleSort(field: SortField) {
     if (sortBy === field) {
@@ -115,6 +116,8 @@ export default function PostScorecardTable({
               "VTR %",
               "Eng Score",
               "Reach Score",
+              "Skip Rate %",
+              "Reposts",
               "Saves",
               "Shares",
               "Likes",
@@ -133,13 +136,15 @@ export default function PostScorecardTable({
                 str(p.fields["Caption"]).replace(/\n/g, " "),
                 str(p.fields["Platform"]),
                 str(p.fields["Post Type"]),
-                str(p.fields["Published At"]).split("T")[0],
-                String(num(p.fields["Reach"])),
+                formatLocalDate(str(p.fields["Published At"]), timezone || undefined),
+                String(recordReach(p)),
                 (num(p.fields["Engagement Rate"]) * 100).toFixed(2),
                 ((saveRate(post) ?? 0) * 100).toFixed(2),
                 ((viewThroughRate(post) ?? 0) * 100).toFixed(1),
                 (engagementScore(post) ?? 0).toFixed(1),
-                (reachScore(post, normalizers) ?? 0).toFixed(1),
+                (reachScore(post) ?? 0).toFixed(1),
+                num(p.fields["Skip Rate"]).toFixed(1),
+                String(num(p.fields["Reposts"])),
                 String(num(p.fields["Saves"])),
                 String(num(p.fields["Shares"])),
                 String(num(p.fields["Likes"])),
@@ -185,6 +190,8 @@ export default function PostScorecardTable({
                 "VTR",
                 "Engagement Score",
                 "Reach Score",
+                "Skip Rate",
+                "Reposts",
                 "Saves",
                 "Shares",
                 "Likes",
@@ -201,6 +208,8 @@ export default function PostScorecardTable({
                 VTR: "VTR",
                 "Engagement Score": "Eng\u2191",
                 "Reach Score": "Reach\u2191",
+                "Skip Rate": "Skip%",
+                Reposts: "Reposts",
               };
               return (
                 <th
@@ -209,8 +218,20 @@ export default function PostScorecardTable({
                   className="text-right py-2 px-2 cursor-pointer hover:text-white transition-colors"
                   onClick={() => toggleSort(f)}
                 >
-                  {labels[f] ?? f}
-                  {sortBy === f && (sortDir === "desc" ? " \u2193" : " \u2191")}
+                  <span className="inline-flex items-center gap-0.5 justify-end">
+                    {labels[f] ?? f}
+                    {glossaryFor(f) && (
+                      // Stop propagation so tapping the info icon doesn't also
+                      // trigger the column's click-to-sort handler.
+                      <span
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-normal"
+                      >
+                        <InfoTooltip text={glossaryFor(f)!} label={`What is ${f}?`} />
+                      </span>
+                    )}
+                    {sortBy === f && (sortDir === "desc" ? " \u2193" : " \u2191")}
+                  </span>
                 </th>
               );
             })}
@@ -239,12 +260,37 @@ export default function PostScorecardTable({
                 {str(p.fields["Post Type"])}
               </td>
               <td className="py-2 px-2 text-right">
-                {str(p.fields["Published At"]).split("T")[0]}
+                <span>
+                  {formatLocalDate(str(p.fields["Published At"]), timezone || undefined)}
+                </span>
+                {(() => {
+                  // Show a small badge if the row hasn't been refreshed in
+                  // >7 days — its metrics are likely stale.
+                  const snap = str(p.fields["Snapshot Date"]);
+                  if (!snap) return null;
+                  const snapMs = new Date(snap + "T00:00:00Z").getTime();
+                  if (isNaN(snapMs)) return null;
+                  const ageDays = (Date.now() - snapMs) / 86400000;
+                  if (ageDays < 7) return null;
+                  return (
+                    <span
+                      className="ml-1 text-[9px] px-1 rounded align-middle"
+                      style={{
+                        background: "rgba(245, 158, 11, 0.15)",
+                        color: "rgb(245, 158, 11)",
+                        border: "1px solid rgba(245, 158, 11, 0.3)",
+                      }}
+                      title={`Metrics last refreshed ${Math.round(ageDays)}d ago (${snap}). Posts older than 60d (IG/FB) or 180d (Pinterest) aren't re-fetched.`}
+                    >
+                      {Math.round(ageDays)}d stale
+                    </span>
+                  );
+                })()}
               </td>
               <td className="py-2 px-2 text-right">
-                {formatNumber(num(p.fields["Reach"]))}
+                {formatNumber(recordReach(p))}
               </td>
-              <td className="py-2 px-2 text-right text-green-400 font-medium">
+              <td className="py-2 px-2 text-right text-success font-medium">
                 {formatPercent(num(p.fields["Engagement Rate"]) * 100)}
               </td>
               <td className="py-2 px-2 text-right">
@@ -257,7 +303,19 @@ export default function PostScorecardTable({
                 {(() => { const v = engagementScore(toPost(p)); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
               </td>
               <td className="py-2 px-2 text-right">
-                {(() => { const v = reachScore(toPost(p), normalizers); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
+                {(() => { const v = reachScore(toPost(p)); return v !== undefined ? v.toFixed(1) : "\u2014"; })()}
+              </td>
+              <td className="py-2 px-2 text-right">
+                {(() => {
+                  const v = num(p.fields["Skip Rate"]);
+                  if (v <= 0) return "\u2014";
+                  // Skip Rate is 0-100 (percentage). Tint red when >70% (poor hook).
+                  const cls = v > 70 ? "text-danger" : v > 50 ? "text-warning" : "";
+                  return <span className={cls}>{v.toFixed(1)}%</span>;
+                })()}
+              </td>
+              <td className="py-2 px-2 text-right">
+                {num(p.fields["Reposts"]) > 0 ? num(p.fields["Reposts"]) : "\u2014"}
               </td>
               <td className="py-2 px-2 text-right">{num(p.fields["Saves"])}</td>
               <td className="py-2 px-2 text-right">

@@ -3,19 +3,24 @@
 import { useMemo } from "react";
 import { Line, Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import { getPlatformConfig } from "@/lib/platforms";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
+import StatsPanel from "./StatsPanel";
 import {
   num,
   formatNumber,
   groupByPlatform,
   getPlatformKeys,
   sumField,
+  sumReach,
   buildUnifiedDates,
   alignToDateArray,
+  alignToDateArrayNullable,
+  trimTrailingZeroDay,
 } from "@/lib/utils";
+import { describe } from "@/lib/stats";
 import type { AirtableRecord } from "@/lib/utils";
 
 interface AudienceGrowthProps {
@@ -27,6 +32,8 @@ export default function AudienceGrowth({
   posts,
   dailyMetrics,
 }: AudienceGrowthProps) {
+  const { colors, defaultOptions, lineChartOptions } = useChartTheme();
+
   const platformMap = useMemo(
     () => groupByPlatform(dailyMetrics),
     [dailyMetrics],
@@ -36,14 +43,28 @@ export default function AudienceGrowth({
     [dailyMetrics],
   );
 
-  // Unified date array
+  // Unified date array — trim trailing day if no platform reported data yet
+  // (Meta cron often hasn't filled today's values when we read).
   const allDates = useMemo(
-    () =>
-      buildUnifiedDates(
+    () => {
+      const initial = buildUnifiedDates(
         ...platformKeys.map((k) => platformMap.get(k) ?? []),
-      ),
+      );
+      // For each platform, align Followers to the initial array, then check
+      // if every platform's trailing value is 0/null.
+      const series = platformKeys.map((k) =>
+        alignToDateArray(platformMap.get(k) ?? [], initial, "Followers"),
+      );
+      return trimTrailingZeroDay(initial, series);
+    },
     [platformKeys, platformMap],
   );
+
+  // Date before which IG follower values are known to be corrupted by the
+  // upsert-stomp bug fixed 2026-05-26. Pre-this-date values cannot be
+  // backfilled (Meta's API caps at 30 days), so we mask them with null so
+  // chart.js skips them rather than rendering inflated numbers.
+  const IG_CORRUPT_BEFORE = "2026-04-27";
 
   // Follower growth with daily change
   const followerGrowthData = useMemo(() => {
@@ -52,10 +73,17 @@ export default function AudienceGrowth({
     const followerDatasets = platformKeys.map((key) => {
       const config = getPlatformConfig(key);
       const metrics = platformMap.get(key) ?? [];
+      const raw = alignToDateArray(metrics, allDates, "Followers");
+      // Mask IG corrupted historical values.
+      const data =
+        key === "instagram"
+          ? raw.map((v, i) =>
+              allDates[i] && allDates[i] < IG_CORRUPT_BEFORE ? null : v,
+            )
+          : raw;
       return {
         label: `${config.label} Followers`,
-        // null gaps so a missing day breaks the line, not dives to zero.
-        data: alignToDateArray(metrics, allDates, "Followers", null),
+        data,
         borderColor: config.color,
         backgroundColor: config.colorFill,
         fill: false,
@@ -69,19 +97,23 @@ export default function AudienceGrowth({
     // Daily gain from first platform that has data (secondary axis)
     const firstKey = platformKeys[0];
     const firstMetrics = firstKey ? (platformMap.get(firstKey) ?? []) : [];
+    const rawGain = firstKey
+      ? alignToDateArray(firstMetrics, allDates, "Followers Gained")
+      : [];
+    const maskedGain =
+      firstKey === "instagram"
+        ? rawGain.map((v, i) =>
+            allDates[i] && allDates[i] < IG_CORRUPT_BEFORE ? null : v,
+          )
+        : rawGain;
     const gainDataset =
       firstKey && firstMetrics.length > 0
         ? [
             {
               label: `${getPlatformConfig(firstKey).label} Daily Gain`,
-              data: alignToDateArray(
-                firstMetrics,
-                allDates,
-                "Followers Gained",
-                null,
-              ),
-              borderColor: CHART_COLORS.green,
-              backgroundColor: CHART_COLORS.green + "20",
+              data: maskedGain,
+              borderColor: colors.series[3],
+              backgroundColor: colors.series[3] + "20",
               fill: true,
               tension: 0.3,
               pointRadius: 0,
@@ -95,23 +127,23 @@ export default function AudienceGrowth({
       labels,
       datasets: [...followerDatasets, ...gainDataset],
     };
-  }, [platformKeys, platformMap, allDates]);
+  }, [platformKeys, platformMap, allDates, colors]);
 
   const followerGrowthOptions = {
-    ...defaultOptions,
+    ...lineChartOptions,
     scales: {
-      ...defaultOptions.scales,
+      ...lineChartOptions.scales,
       y: {
-        ...defaultOptions.scales.y,
+        ...lineChartOptions.scales.y,
         position: "left" as const,
         beginAtZero: false,
-        title: { display: true, text: "Followers", color: CHART_COLORS.muted },
+        title: { display: true, text: "Followers", color: colors.axis },
       },
       y1: {
         position: "right" as const,
-        ticks: { color: CHART_COLORS.muted, font: { size: 10 } },
+        ticks: { color: colors.axis, font: { size: 10 } },
         grid: { drawOnChartArea: false },
-        title: { display: true, text: "Daily Gain", color: CHART_COLORS.muted },
+        title: { display: true, text: "Daily Gain", color: colors.axis },
       },
     },
   };
@@ -127,8 +159,8 @@ export default function AudienceGrowth({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: `${config.label} Reach`,
-          // null gaps so a missing day breaks the line, not dives to zero.
-          data: alignToDateArray(metrics, allDates, "Reach", null),
+          // Nullable: FB Reach is empty every day — gap, not a flat-zero line.
+          data: alignToDateArrayNullable(metrics, allDates, key === "pinterest" ? "Impressions" : "Reach"),
           borderColor: config.color,
           tension: 0.3,
           pointRadius: 0,
@@ -149,13 +181,54 @@ export default function AudienceGrowth({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: `${config.label} Profile Views`,
-          data: alignToDateArray(metrics, allDates, "Profile Views"),
+          // Nullable: IG has no honest per-day Profile Views (30d total only) —
+          // omit the bar rather than draw a row of zero bars.
+          data: alignToDateArrayNullable(metrics, allDates, "Profile Views"),
           backgroundColor: config.color + "60",
           borderColor: config.color,
           borderWidth: 1,
         };
       }),
     };
+  }, [platformKeys, platformMap, allDates]);
+
+  // Stats for the Stats panel on each chart. Lightweight — just the
+  // distribution shapes a power user might want when validating a chart's
+  // headline; no narrative.
+  const followerGainStats = useMemo(() => {
+    // Aggregate daily follower-gain values across all platforms, dropping
+    // IG values from the corrupt era so they don't skew the distribution.
+    const vals: number[] = [];
+    for (const key of platformKeys) {
+      const metrics = platformMap.get(key) ?? [];
+      const series = alignToDateArray(metrics, allDates, "Followers Gained");
+      series.forEach((v, i) => {
+        if (key === "instagram" && allDates[i] && allDates[i] < IG_CORRUPT_BEFORE)
+          return;
+        if (v > 0) vals.push(v);
+      });
+    }
+    return describe(vals);
+  }, [platformKeys, platformMap, allDates]);
+
+  const reachStats = useMemo(() => {
+    const vals: number[] = [];
+    for (const key of platformKeys) {
+      const metrics = platformMap.get(key) ?? [];
+      const series = alignToDateArray(metrics, allDates, key === "pinterest" ? "Impressions" : "Reach");
+      for (const v of series) if (v > 0) vals.push(v);
+    }
+    return describe(vals);
+  }, [platformKeys, platformMap, allDates]);
+
+  const profileViewsStats = useMemo(() => {
+    const vals: number[] = [];
+    for (const key of platformKeys) {
+      const metrics = platformMap.get(key) ?? [];
+      const series = alignToDateArray(metrics, allDates, "Profile Views");
+      for (const v of series) if (v > 0) vals.push(v);
+    }
+    return describe(vals);
   }, [platformKeys, platformMap, allDates]);
 
   // Per-platform KPIs
@@ -171,7 +244,7 @@ export default function AudienceGrowth({
     [platformKeys, platformMap],
   );
 
-  const totalReach = sumField(dailyMetrics, "Reach");
+  const totalReach = sumReach(dailyMetrics);
   const totalWebClicks = sumField(dailyMetrics, "Website Clicks");
   // Website Clicks is no longer written by Meta Graph API v22.0 (closest field
   // bundles website + email + phone + address taps and isn't a substitute).
@@ -238,16 +311,53 @@ export default function AudienceGrowth({
       </div>
 
       {/* Follower Growth Chart */}
-      <ChartCard title="Follower Growth (Daily)" height="350px">
+      <ChartCard
+        title="Follower Growth (Daily)"
+        height="350px"
+        headerAction={
+          <StatsPanel
+            stats={followerGainStats}
+            format={(v) => formatNumber(v)}
+            context="Daily follower-gain distribution (excludes IG pre-2026-04-27 corrupted values)"
+          />
+        }
+      >
         <Line data={followerGrowthData} options={followerGrowthOptions} />
       </ChartCard>
+      <p
+        className="text-[10px] -mt-2"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        Note: Instagram follower history before 2026-04-27 is hidden — those
+        values were corrupted by an upsert bug and Meta&apos;s API only retains
+        30 days of daily history, so they cannot be backfilled accurately.
+        Daily values from 2026-04-27 onward are accurate.
+      </p>
 
       {/* Reach + Profile Views */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Daily Reach by Platform">
-          <Line data={reachData} options={defaultOptions} />
+        <ChartCard
+          title="Daily Reach by Platform"
+          headerAction={
+            <StatsPanel
+              stats={reachStats}
+              format={(v) => formatNumber(v)}
+              context="Daily reach distribution across platforms"
+            />
+          }
+        >
+          <Line data={reachData} options={lineChartOptions} />
         </ChartCard>
-        <ChartCard title="Profile / Page Views">
+        <ChartCard
+          title="Profile / Page Views"
+          headerAction={
+            <StatsPanel
+              stats={profileViewsStats}
+              format={(v) => formatNumber(v)}
+              context="Daily profile-view distribution across platforms"
+            />
+          }
+        >
           <Bar data={profileViewsData} options={defaultOptions} />
         </ChartCard>
       </div>

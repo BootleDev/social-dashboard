@@ -74,7 +74,7 @@ export default function ChatBox() {
         aria-label={open ? "Close chat" : "Open AI chat"}
         className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-full text-sm font-medium shadow-lg transition-all hover:scale-105 cursor-pointer"
         style={{
-          background: open ? "var(--bg-secondary)" : "var(--accent-purple)",
+          background: open ? "var(--bg-secondary)" : "var(--brand)",
           color: open ? "var(--text-secondary)" : "#fff",
           border: "1px solid var(--border)",
         }}
@@ -100,7 +100,7 @@ export default function ChatBox() {
             {messages.length > 0 && (
               <span
                 className="inline-block w-2 h-2 rounded-full"
-                style={{ background: "#22c55e" }}
+                style={{ background: "var(--success)" }}
               />
             )}
           </>
@@ -176,12 +176,12 @@ export default function ChatBox() {
                 style={{
                   background:
                     msg.role === "user"
-                      ? "var(--accent-purple)"
+                      ? "var(--brand)"
                       : msg.isError
                         ? "rgba(239, 68, 68, 0.1)"
                         : "var(--bg-secondary)",
                   color: msg.isError
-                    ? "var(--accent-red)"
+                    ? "var(--danger)"
                     : "var(--text-primary)",
                   whiteSpace: "pre-wrap",
                 }}
@@ -222,7 +222,7 @@ export default function ChatBox() {
               onClick={handleSend}
               disabled={loading}
               className="px-4 py-2 rounded-lg text-sm font-medium transition-opacity disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              style={{ background: "var(--accent-purple)", color: "#fff" }}
+              style={{ background: "var(--brand)", color: "#fff" }}
             >
               Send
             </button>

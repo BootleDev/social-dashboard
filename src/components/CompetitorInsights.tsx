@@ -3,9 +3,11 @@
 import { useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
-import { CHART_COLORS, defaultOptions } from "@/lib/chartSetup";
+import { useChartTheme } from "@/lib/useChartTheme";
 import ChartCard from "./ChartCard";
+import StatsPanel from "./StatsPanel";
 import { num, str, formatNumber } from "@/lib/utils";
+import { describe } from "@/lib/stats";
 import type { AirtableRecord } from "@/lib/utils";
 import { exportToCSV } from "@/lib/csv";
 
@@ -20,6 +22,8 @@ export default function CompetitorInsights({
   loading,
   error,
 }: CompetitorInsightsProps) {
+  const { colors, defaultOptions } = useChartTheme();
+
   // Avg views by handle (brand comparison)
   const brandData = useMemo(() => {
     const groups = new Map<
@@ -61,13 +65,13 @@ export default function CompetitorInsights({
         {
           label: "Avg Views",
           data: brandData.map((b) => b.avgViews),
-          backgroundColor: CHART_COLORS.purple + "60",
-          borderColor: CHART_COLORS.purple,
+          backgroundColor: colors.series[0] + "60",
+          borderColor: colors.series[0],
           borderWidth: 1,
         },
       ],
     }),
-    [brandData],
+    [brandData, colors],
   );
 
   const brandERData = useMemo(
@@ -77,13 +81,13 @@ export default function CompetitorInsights({
         {
           label: "Like-to-View %",
           data: brandData.map((b) => b.avgER),
-          backgroundColor: CHART_COLORS.green + "60",
-          borderColor: CHART_COLORS.green,
+          backgroundColor: colors.series[1] + "60",
+          borderColor: colors.series[1],
           borderWidth: 1,
         },
       ],
     }),
-    [brandData],
+    [brandData, colors],
   );
 
   // Content theme breakdown (Topic field)
@@ -114,13 +118,13 @@ export default function CompetitorInsights({
         {
           label: "Posts",
           data: topicData.map((t) => t.count),
-          backgroundColor: CHART_COLORS.cyan + "60",
-          borderColor: CHART_COLORS.cyan,
+          backgroundColor: colors.series[2] + "60",
+          borderColor: colors.series[2],
           borderWidth: 1,
         },
       ],
     }),
-    [topicData],
+    [topicData, colors],
   );
 
   // Platform split
@@ -185,13 +189,13 @@ export default function CompetitorInsights({
         {
           label: "Avg Views",
           data: hookData.map((h) => h.avgViews),
-          backgroundColor: CHART_COLORS.amber + "60",
-          borderColor: CHART_COLORS.amber,
+          backgroundColor: colors.series[3] + "60",
+          borderColor: colors.series[3],
           borderWidth: 1,
         },
       ],
     }),
-    [hookData],
+    [hookData, colors],
   );
 
   // Top 20 posts table
@@ -218,7 +222,7 @@ export default function CompetitorInsights({
 
   if (error) {
     return (
-      <div className="rounded-xl p-6 border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
+      <div className="rounded-xl p-6 border border-danger bg-danger-soft text-danger text-sm">
         Error loading competitor data: {error}
       </div>
     );
@@ -240,6 +244,13 @@ export default function CompetitorInsights({
       </div>
     );
   }
+
+  // Views distribution across all scraped competitor content — powers the
+  // Stats panels on the four competitor charts.
+  const viewsStats = useMemo(
+    () => describe(records.map((r) => num(r.fields["Views"]))),
+    [records],
+  );
 
   return (
     <div className="space-y-6">
@@ -360,8 +371,12 @@ export default function CompetitorInsights({
               <th scope="col" className="text-left py-2 px-2">
                 Hook
               </th>
-              <th scope="col" className="text-left py-2 px-2">
-                Date
+              <th
+                scope="col"
+                className="text-left py-2 px-2"
+                title="Post date as reported by the source (UTC calendar date)"
+              >
+                Date (UTC)
               </th>
             </tr>
           </thead>
@@ -410,6 +425,13 @@ export default function CompetitorInsights({
         <ChartCard
           title="Avg Views by Account"
           tooltip="Average views per post for each competitor account"
+          headerAction={
+            <StatsPanel
+              stats={describe(brandData.map((b) => b.avgViews))}
+              format={(v) => formatNumber(v)}
+              context="Avg views per account distribution"
+            />
+          }
         >
           <Bar
             data={brandChartData}
@@ -419,6 +441,13 @@ export default function CompetitorInsights({
         <ChartCard
           title="Like-to-View Ratio by Account"
           tooltip="Higher ratio = more engaging content relative to reach"
+          headerAction={
+            <StatsPanel
+              stats={describe(brandData.map((b) => b.avgER))}
+              format={(v) => `${v.toFixed(2)}%`}
+              context="Like-to-view ratio across accounts"
+            />
+          }
         >
           <Bar
             data={brandERData}
@@ -431,6 +460,13 @@ export default function CompetitorInsights({
         <ChartCard
           title="Top Content Topics"
           tooltip="Most common AI-tagged topics across competitor content"
+          headerAction={
+            <StatsPanel
+              stats={describe(topicData.map((t) => t.count))}
+              format={(v) => v.toFixed(0)}
+              context="Post-count distribution across top topics"
+            />
+          }
         >
           <Bar
             data={topicChartData}
@@ -440,6 +476,13 @@ export default function CompetitorInsights({
         <ChartCard
           title="Hook Structure Performance"
           tooltip="Avg views by hook type — which openings perform best?"
+          headerAction={
+            <StatsPanel
+              stats={describe(hookData.map((h) => h.avgViews))}
+              format={(v) => formatNumber(v)}
+              context="Avg views distribution across hook structures"
+            />
+          }
         >
           <Bar
             data={hookChartData}
@@ -447,6 +490,13 @@ export default function CompetitorInsights({
           />
         </ChartCard>
       </div>
+
+      {viewsStats && (
+        <div className="text-[10px] text-right" style={{ color: "var(--text-secondary)" }}>
+          Total views distribution: median {formatNumber(viewsStats.median)} · max{" "}
+          {formatNumber(viewsStats.max)} across {records.length} posts
+        </div>
+      )}
     </div>
   );
 }

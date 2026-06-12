@@ -1,0 +1,41 @@
+{
+  "_comment": "Rolling content-output plan. The dashboard expands `weekly` across the selected date range and matches each target slot to a real post in the same ISO week (platform + post type required; pillar is a soft signal). Edit this file to change the cadence; it is version-controlled with the dashboard. `platform`, `postType`, and `pillar` MUST use the exact Airtable enum strings from the Posts table so matching is a direct comparison: platform = instagram|facebook|pinterest|youtube; postType = reel|carousel|static|story|video|pin|short; pillar = Versatility|Cleanliness|Intentional Ownership|Creative Drinking (omit `pillar` to leave a slot pillar-agnostic).",
+  "_source": "Derived from the vault content schedule (notes/marketing/operations/instagram-content-schedule.md + pinterest-content-schedule.md), Instagram Cadence B (Balanced/Conversion) as the default cadence. Switch to Cadence A (Reel-heavy: R1 Tue, R2 Thu, R3 Sat + carousels Wed/Fri) during launches, restocks, or paid pushes by editing `weekly`.",
+  "_cadence_notes": "Instagram = the focus channel, main-account FEED posts only (Stories are ephemeral / not in the scraped Posts table; Trial Reels live on a separate account not in this data). Cadence B main feed: Tue carousel/image, Wed reel (R1), Thu reel (R2.5, conditional — modelled as a reel here), Fri reel (R2), Sat static/CTA-or-carousel. Pinterest = at least 1 pin/day (schedule targets 7-10/wk, 1-2/day; modelled here as the 7/wk floor). Facebook is intentionally NOT planned: it is an automatic crosspost from Instagram, so planning/measuring it separately would double-count. TikTok is not yet planned (coming later, mostly IG crossposts).",
+  "_pillar_note": "Pillars are the canonical four from marketing strategy (content-principles.md): Versatility, Cleanliness, Intentional Ownership, Creative Drinking. Airtable field + AI enrichment reconciled to these 2026-05-29. Per strategy, content rotates across all four rather than fixing a pillar per slot, so IG slots are pillar-agnostic and pillar balance is tracked via monthlyPillarMix only.",
+  "effectiveFrom": "2026-05-01",
+  "_pinterest_note": "Pinterest slots omit postType (wildcard): a pin counts regardless of its media type. The Posts table tags Pinterest media as 'static' or 'video' (not 'pin'), and either fulfils the daily pin slot. The cadence goal is 'ship a pin that day', not a specific format.",
+  "_facebook_note": "Facebook 'video' slots mirror the main-channel Instagram reels (Wed/Thu/Fri). Reels auto-cross-post to Facebook as video, so these slots verify the cross-post actually landed. Only the main-channel reels mirror — trial/non-follower reels are a separate account, not cross-posted.",
+  "_story_note": "Instagram Story slots are marked informational:true — shown on the calendar daily as a reminder but EXCLUDED from hit rate and all adherence counts. Stories are not captured by the scraper (ephemeral, 24h, separate Graph API surface), so they can't be matched against data; counting them would create permanent false misses. Remove informational:true if/when Story scraping is added upstream.",
+  "weekly": [
+    { "day": "Mon", "platform": "pinterest" },
+    { "day": "Tue", "platform": "pinterest" },
+    { "day": "Wed", "platform": "pinterest" },
+    { "day": "Thu", "platform": "pinterest" },
+    { "day": "Fri", "platform": "pinterest" },
+    { "day": "Sat", "platform": "pinterest" },
+    { "day": "Sun", "platform": "pinterest" },
+    { "day": "Tue", "platform": "instagram", "postType": "carousel" },
+    { "day": "Wed", "platform": "instagram", "postType": "reel" },
+    { "day": "Thu", "platform": "instagram", "postType": "reel" },
+    { "day": "Fri", "platform": "instagram", "postType": "reel" },
+    { "day": "Sat", "platform": "instagram", "postType": "static" },
+    { "day": "Wed", "platform": "facebook", "postType": "video" },
+    { "day": "Thu", "platform": "facebook", "postType": "video" },
+    { "day": "Fri", "platform": "facebook", "postType": "video" },
+    { "day": "Mon", "platform": "instagram", "postType": "story", "informational": true },
+    { "day": "Tue", "platform": "instagram", "postType": "story", "informational": true },
+    { "day": "Wed", "platform": "instagram", "postType": "story", "informational": true },
+    { "day": "Thu", "platform": "instagram", "postType": "story", "informational": true },
+    { "day": "Fri", "platform": "instagram", "postType": "story", "informational": true },
+    { "day": "Sat", "platform": "instagram", "postType": "story", "informational": true },
+    { "day": "Sun", "platform": "instagram", "postType": "story", "informational": true }
+  ],
+  "monthlyPillarMix": {
+    "Creative Drinking": 0.3,
+    "Versatility": 0.25,
+    "Cleanliness": 0.25,
+    "Intentional Ownership": 0.2
+  },
+  "overrides": []
+}

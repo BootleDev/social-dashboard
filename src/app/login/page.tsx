@@ -70,7 +70,7 @@ export default function LoginPage() {
           {error && (
             <p
               className="text-sm mb-3"
-              style={{ color: "var(--accent-red)" }}
+              style={{ color: "var(--danger)" }}
               aria-live="polite"
             >
               {error}
@@ -80,7 +80,7 @@ export default function LoginPage() {
             type="submit"
             disabled={loading}
             className="w-full py-3 rounded-lg text-sm font-medium transition-opacity"
-            style={{ background: "var(--accent-blue)", color: "#fff" }}
+            style={{ background: "var(--brand)", color: "#fff" }}
           >
             {loading ? "..." : "Sign in"}
           </button>

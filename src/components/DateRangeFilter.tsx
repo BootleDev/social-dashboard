@@ -125,7 +125,7 @@ export default function DateRangeFilter({ value, onChange }: Props) {
                 style={{
                   color:
                     value.label === p.label
-                      ? "var(--accent-blue)"
+                      ? "var(--brand)"
                       : "var(--text-primary)",
                   fontWeight: value.label === p.label ? 600 : 400,
                 }}
@@ -173,7 +173,7 @@ export default function DateRangeFilter({ value, onChange }: Props) {
               onClick={applyCustom}
               disabled={!customStart || !customEnd}
               className="w-full py-1.5 rounded-md text-xs font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              style={{ background: "var(--accent-blue)" }}
+              style={{ background: "var(--brand)" }}
             >
               Apply
             </button>
