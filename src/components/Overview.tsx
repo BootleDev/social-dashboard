@@ -214,12 +214,15 @@ export default function Overview({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: config.label,
-          data: alignToDateArray(metrics, allDates, "Followers"),
+          // null gaps (not 0) so a missing day breaks the line instead of
+          // diving to zero. spanGaps:false keeps the break honest.
+          data: alignToDateArray(metrics, allDates, "Followers", null),
           borderColor: config.color,
           backgroundColor: config.colorFill,
           fill: false,
           tension: 0.3,
           pointRadius: 0,
+          spanGaps: false,
         };
       }),
     };
@@ -236,12 +239,14 @@ export default function Overview({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: `${config.label} ER`,
-          data: alignToDateArray(metrics, allDates, "Engagement Rate").map(
-            (v) => v * 100,
+          // Preserve null gaps through the *100 scaling (null*100 would be 0).
+          data: alignToDateArray(metrics, allDates, "Engagement Rate", null).map(
+            (v) => (v === null ? null : v * 100),
           ),
           borderColor: config.color,
           tension: 0.3,
           pointRadius: 0,
+          spanGaps: false,
         };
       }),
     };

@@ -182,12 +182,14 @@ export default function PlatformCompare({
         const metrics = metricsMap.get(key) ?? [];
         return {
           label: `${config.label} ER`,
-          data: alignToDateArray(metrics, allDates, "Engagement Rate").map(
-            (v) => v * 100,
+          // null gaps preserved through *100 (null*100 would be a false 0).
+          data: alignToDateArray(metrics, allDates, "Engagement Rate", null).map(
+            (v) => (v === null ? null : v * 100),
           ),
           borderColor: config.color,
           tension: 0.3,
           pointRadius: 0,
+          spanGaps: false,
         };
       }),
     };
@@ -209,12 +211,14 @@ export default function PlatformCompare({
           const metrics = metricsMap.get(key) ?? [];
           return {
             label: `${config.label} ${field}`,
-            data: alignToDateArray(metrics, allDates, field),
+            // null gaps so a missing day breaks the line, not dives to zero.
+            data: alignToDateArray(metrics, allDates, field, null),
             borderColor: config.color,
             backgroundColor: config.colorFill,
             fill: true,
             tension: 0.3,
             pointRadius: 0,
+            spanGaps: false,
           };
         },
       ),

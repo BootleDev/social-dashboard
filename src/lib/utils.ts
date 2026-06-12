@@ -316,13 +316,21 @@ export function hashtagFrequency(
     .sort((a, b) => b.count - a.count);
 }
 
-/** Align metric values to a shared date array, filling gaps with a default. */
-export function alignToDateArray(
+/**
+ * Align metric values to a shared date array, filling gaps with a default.
+ *
+ * For LINE/TREND charts pass `defaultVal = null` so a missing day renders as a
+ * gap (with Chart.js `spanGaps`) instead of a value of 0 — a 0 drags the line
+ * to the floor and reads as a real crash to zero, which is misleading when the
+ * platform simply had no record that day. For BAR/COUNT charts keep the default
+ * 0, where "no posts that week" genuinely is 0.
+ */
+export function alignToDateArray<D extends number | null = number>(
   metrics: AirtableRecord[],
   dates: string[],
   field: string,
-  defaultVal = 0,
-): number[] {
+  defaultVal: D = 0 as D,
+): (number | D)[] {
   const byDate = new Map<string, number>();
   for (const r of metrics) {
     const d = str(r.fields["Date"]).split("T")[0];

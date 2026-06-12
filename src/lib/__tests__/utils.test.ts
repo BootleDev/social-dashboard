@@ -463,6 +463,17 @@ describe("alignToDateArray", () => {
     const result = alignToDateArray(metrics, dates, "Reach", -1);
     expect(result).toEqual([-1]);
   });
+
+  it("fills gaps with null when asked (for line charts)", () => {
+    const metrics = [
+      makeRecord({ Date: "2026-01-01T00:00:00Z", Reach: 100 }),
+      makeRecord({ Date: "2026-01-03T00:00:00Z", Reach: 300 }),
+    ];
+    const dates = ["2026-01-01", "2026-01-02", "2026-01-03"];
+    const result = alignToDateArray(metrics, dates, "Reach", null);
+    // Missing 2026-01-02 is null (a line-chart gap), NOT 0 (a false floor).
+    expect(result).toEqual([100, null, 300]);
+  });
 });
 
 // --- groupByDimension ---

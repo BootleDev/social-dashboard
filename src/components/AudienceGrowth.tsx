@@ -54,13 +54,15 @@ export default function AudienceGrowth({
       const metrics = platformMap.get(key) ?? [];
       return {
         label: `${config.label} Followers`,
-        data: alignToDateArray(metrics, allDates, "Followers"),
+        // null gaps so a missing day breaks the line, not dives to zero.
+        data: alignToDateArray(metrics, allDates, "Followers", null),
         borderColor: config.color,
         backgroundColor: config.colorFill,
         fill: false,
         tension: 0.3,
         pointRadius: 0,
         yAxisID: "y",
+        spanGaps: false,
       };
     });
 
@@ -76,6 +78,7 @@ export default function AudienceGrowth({
                 firstMetrics,
                 allDates,
                 "Followers Gained",
+                null,
               ),
               borderColor: CHART_COLORS.green,
               backgroundColor: CHART_COLORS.green + "20",
@@ -124,10 +127,12 @@ export default function AudienceGrowth({
         const metrics = platformMap.get(key) ?? [];
         return {
           label: `${config.label} Reach`,
-          data: alignToDateArray(metrics, allDates, "Reach"),
+          // null gaps so a missing day breaks the line, not dives to zero.
+          data: alignToDateArray(metrics, allDates, "Reach", null),
           borderColor: config.color,
           tension: 0.3,
           pointRadius: 0,
+          spanGaps: false,
         };
       }),
     };

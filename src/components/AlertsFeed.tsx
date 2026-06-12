@@ -52,7 +52,10 @@ export default function AlertsFeed({ alerts }: AlertsFeedProps) {
       <div className="space-y-2 max-h-[340px] overflow-y-auto">
         {recent.map((alert, i) => {
           const type = str(alert.fields["Type"]);
-          const severity = str(alert.fields["Severity"]);
+          // Normalize casing: Airtable stores UPPERCASE but the migrated
+          // Supabase rows may arrive lowercase ("high"/"spike"). Upper-case the
+          // lookup key so severity color + label don't silently fall back to LOW.
+          const severity = str(alert.fields["Severity"]).toUpperCase();
           const platform = str(alert.fields["Platform"]);
           const message = str(alert.fields["Message"]);
           const date = str(alert.fields["Alert Date"]);
@@ -62,8 +65,16 @@ export default function AlertsFeed({ alerts }: AlertsFeedProps) {
           return (
             <div key={alert.id || i} className={`rounded-lg px-3 py-2 border text-xs ${colorClass}`}>
               <div className="flex items-center justify-between mb-1">
-                <span className="font-medium">
-                  {icon} {type}
+                <span className="font-medium flex items-center gap-1.5">
+                  {/* Severity as text, not color alone \u2014 color-blind-safe. */}
+                  {severity && (
+                    <span className="px-1 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border border-current/40">
+                      {severity}
+                    </span>
+                  )}
+                  <span>
+                    {icon} {type}
+                  </span>
                 </span>
                 <span className="opacity-70">{date?.split("T")[0]}</span>
               </div>
