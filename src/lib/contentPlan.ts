@@ -296,6 +296,45 @@ export interface PlanComparison {
   }>;
   /** Planned vs actual pillar share over the range (actual = matched + unplanned posts). */
   pillarMix: Array<{ pillar: string; planned: number; actual: number }>;
+  /**
+   * Per-channel adherence rollup, ordered by planned volume desc then name.
+   * Includes platforms with no plan slots that still shipped posts (all
+   * unplanned), so real output never disappears from the channel read.
+   */
+  perPlatform: Array<{
+    platform: string;
+    planned: number;
+    hit: number;
+    missed: number;
+    /** hit / planned, 0..1; 0 when nothing planned. */
+    hitRate: number;
+    unplanned: number;
+    /** This platform's per-ISO-week adherence, oldest-first. */
+    perWeek: Array<{ weekKey: string; planned: number; hit: number; hitRate: number }>;
+  }>;
+}
+
+/**
+ * Restrict a plan to the selected platforms (lowercase keys, matching the
+ * dashboard's global platform filter). An empty selection means "all
+ * platforms". Pure: always returns a fresh plan and never shares or mutates
+ * the input's arrays, so callers may freely treat the result as their own.
+ * Apply this BEFORE comparePlanToActual/buildCalendar when the post set is
+ * platform-filtered, otherwise every filtered-out platform's slots read as
+ * false misses.
+ */
+export function filterPlanPlatforms(
+  plan: ContentPlan,
+  selected: Set<string>,
+): ContentPlan {
+  if (selected.size === 0) {
+    return { ...plan, weekly: [...plan.weekly], overrides: [...plan.overrides] };
+  }
+  return {
+    ...plan,
+    weekly: plan.weekly.filter((s) => selected.has(s.platform)),
+    overrides: plan.overrides.filter((s) => selected.has(s.platform)),
+  };
 }
 
 function postPlatform(p: AirtableRecord): string {
@@ -440,7 +479,62 @@ export function comparePlanToActual(
   // with a pillar tagged (matched + unplanned both count as real output).
   const pillarMix = buildPillarMix(plan, posts);
 
-  return { matched, unplanned, totals, perWeek, perSlot, pillarMix };
+  // Per-platform rollup (scored slots + unplanned posts). Platforms that only
+  // appear via unplanned output still get a row, so a channel shipping outside
+  // the plan is visible rather than silently folded into the overall numbers.
+  const platformAgg = new Map<
+    string,
+    {
+      planned: number;
+      hit: number;
+      unplanned: number;
+      weeks: Map<string, { planned: number; hit: number }>;
+    }
+  >();
+  const platformEntry = (key: string) => {
+    const existing = platformAgg.get(key);
+    if (existing) return existing;
+    const fresh = { planned: 0, hit: 0, unplanned: 0, weeks: new Map() };
+    platformAgg.set(key, fresh);
+    return fresh;
+  };
+  for (const m of scored) {
+    const a = platformEntry(m.target.platform);
+    a.planned += 1;
+    if (m.status === "hit") a.hit += 1;
+    const w = a.weeks.get(m.target.weekKey) ?? { planned: 0, hit: 0 };
+    a.weeks.set(m.target.weekKey, {
+      planned: w.planned + 1,
+      hit: w.hit + (m.status === "hit" ? 1 : 0),
+    });
+  }
+  for (const p of unplanned) {
+    const key = postPlatform(p);
+    if (!key) continue;
+    platformEntry(key).unplanned += 1;
+  }
+  const perPlatform = [...platformAgg.entries()]
+    .map(([platform, a]) => ({
+      platform,
+      planned: a.planned,
+      hit: a.hit,
+      missed: a.planned - a.hit,
+      hitRate: a.planned > 0 ? a.hit / a.planned : 0,
+      unplanned: a.unplanned,
+      perWeek: [...a.weeks.entries()]
+        .sort((x, y) => x[0].localeCompare(y[0]))
+        .map(([weekKey, w]) => ({
+          weekKey,
+          planned: w.planned,
+          hit: w.hit,
+          hitRate: w.planned > 0 ? w.hit / w.planned : 0,
+        })),
+    }))
+    .sort(
+      (x, y) => y.planned - x.planned || x.platform.localeCompare(y.platform),
+    );
+
+  return { matched, unplanned, totals, perWeek, perSlot, pillarMix, perPlatform };
 }
 
 function buildPillarMix(
