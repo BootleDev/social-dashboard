@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   num,
   count,
+  numNonNeg,
   hasRealAccountVolume,
   hasRealReach,
   hasRealImpressions,
@@ -107,6 +108,27 @@ describe("count", () => {
     expect(count(null)).toBe(0);
     expect(count(undefined)).toBe(0);
     expect(count("abc")).toBe(0);
+  });
+});
+
+describe("numNonNeg (fractional-safe non-negative parser)", () => {
+  it("KEEPS fractions (modeled conversions are decimals)", () => {
+    expect(numNonNeg(12.7)).toBeCloseTo(12.7, 9);
+    expect(numNonNeg("0.6")).toBeCloseTo(0.6, 9);
+    expect(numNonNeg(2.0)).toBe(2);
+  });
+  it("clamps negatives to 0", () => {
+    expect(numNonNeg(-3.2)).toBe(0);
+  });
+  it("returns 0 for non-finite / non-numeric", () => {
+    expect(numNonNeg(NaN)).toBe(0);
+    expect(numNonNeg(Infinity)).toBe(0);
+    expect(numNonNeg(null)).toBe(0);
+    expect(numNonNeg("abc")).toBe(0);
+  });
+  it("differs from count() precisely by not flooring", () => {
+    expect(count(0.6)).toBe(0); // count floors → drops the conversion
+    expect(numNonNeg(0.6)).toBeCloseTo(0.6, 9); // preserved
   });
 });
 

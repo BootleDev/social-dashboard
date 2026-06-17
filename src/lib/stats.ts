@@ -138,6 +138,42 @@ export function pearson(
   return num / Math.sqrt(denomX * denomY);
 }
 
+export interface ProportionInterval {
+  /** Point estimate successes / trials. */
+  p: number;
+  low: number;
+  high: number;
+}
+
+/**
+ * Wilson score confidence interval for a binomial proportion (successes /
+ * trials). Far more honest than the naive normal interval for small samples or
+ * extreme proportions (e.g. 5 conversions on 2624 clicks), and it never escapes
+ * [0, 1]. `z` defaults to 1.96 (95%). Returns undefined for non-positive or
+ * non-finite trials, or when successes is out of [0, trials].
+ *
+ * This is what makes a CVR built on a handful of conversions honest: the point
+ * estimate alone hides that the true rate could be meaningfully higher or lower.
+ */
+export function wilsonInterval(
+  successes: number,
+  trials: number,
+  z = 1.96,
+): ProportionInterval | undefined {
+  if (!Number.isFinite(successes) || !Number.isFinite(trials)) return undefined;
+  if (trials <= 0 || successes < 0 || successes > trials) return undefined;
+  const p = successes / trials;
+  const z2 = z * z;
+  const denom = 1 + z2 / trials;
+  const centre = p + z2 / (2 * trials);
+  const margin = z * Math.sqrt((p * (1 - p)) / trials + z2 / (4 * trials * trials));
+  return {
+    p,
+    low: Math.max(0, (centre - margin) / denom),
+    high: Math.min(1, (centre + margin) / denom),
+  };
+}
+
 /**
  * Percent change with explicit handling for the zero-baseline trap.
  * Returns undefined when `from` is 0 (Δ% is not defined), so callers can

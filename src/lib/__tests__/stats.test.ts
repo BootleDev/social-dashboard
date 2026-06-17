@@ -7,6 +7,7 @@ import {
   pctChange,
   formatPct,
   trendVerdict,
+  wilsonInterval,
 } from "../stats";
 
 describeTest("quantile", () => {
@@ -116,5 +117,46 @@ describeTest("trendVerdict", () => {
     expect(trendVerdict(4.9)).toBe("flat");
     expect(trendVerdict(5)).toBe("accelerating");
     expect(trendVerdict(-5)).toBe("decelerating");
+  });
+});
+
+describeTest("wilsonInterval", () => {
+  it("brackets the point estimate and stays within [0,1]", () => {
+    const w = wilsonInterval(5, 2624)!;
+    expect(w.p).toBeCloseTo(5 / 2624, 9);
+    expect(w.low).toBeGreaterThan(0);
+    expect(w.low).toBeLessThan(w.p);
+    expect(w.high).toBeGreaterThan(w.p);
+    expect(w.high).toBeLessThanOrEqual(1);
+  });
+
+  it("is WIDE for a tiny conversion sample (the whole point)", () => {
+    // 5/2624 = 0.19%. The true rate could plausibly be ~2.5x lower or higher.
+    const w = wilsonInterval(5, 2624)!;
+    // Relative width: high should be well over 2x low for n=5.
+    expect(w.high / w.low).toBeGreaterThan(2);
+  });
+
+  it("tightens as the sample grows", () => {
+    const small = wilsonInterval(5, 2624)!;
+    const big = wilsonInterval(500, 262400)!; // same proportion, 100x volume
+    expect(big.high - big.low).toBeLessThan(small.high - small.low);
+  });
+
+  it("never escapes [0,1] at the extremes", () => {
+    const zero = wilsonInterval(0, 100)!;
+    expect(zero.low).toBe(0);
+    expect(zero.high).toBeGreaterThan(0);
+    const all = wilsonInterval(100, 100)!;
+    expect(all.high).toBeCloseTo(1, 10);
+    expect(all.high).toBeLessThanOrEqual(1);
+    expect(all.low).toBeLessThan(1);
+  });
+
+  it("returns undefined for invalid inputs", () => {
+    expect(wilsonInterval(5, 0)).toBeUndefined();
+    expect(wilsonInterval(-1, 100)).toBeUndefined();
+    expect(wilsonInterval(101, 100)).toBeUndefined();
+    expect(wilsonInterval(5, NaN)).toBeUndefined();
   });
 });
