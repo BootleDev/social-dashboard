@@ -490,12 +490,12 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
                 tip="VAT as a percent of the gross AOV (enter 20 for 20%, UK default). Net AOV = AOV ÷ (1 + VAT). Bootle has no single rate (DE 19, FR 20, IT 22, IE 23, UK 20; variance absorbed at one price band) — adjust to model a specific market. Set 0 for ex-VAT (e.g. US) pricing."
               />
               <NumField
-                label="LTV multiplier (M)"
+                label="Lifetime value ×"
                 value={ltvMultiplier}
                 onChange={setLtvMultiplier}
                 step={0.05}
                 min={1}
-                tip="Repeat-value multiplier on gross profit, M = 1 + repeat rate (1.0 = no repeat). Captures backend / accessory sales on the modular product. Only affects the '(with LTV)' figures."
+                tip="Average lifetime gross profit per acquired customer, as a multiple of their FIRST order (1.0 = no repeat; 1.3 = the cohort's lifetime profit is 1.3× first-order profit). It's a population average per customer — fractional is fine (like '2.3 kids per household'), no single customer buys 0.3 times. CAVEAT: it assumes repeat orders carry the SAME margin/value as the first. For Bootle, repeats are often cheap inner-sets / seal replacements (~€12), so set this LOWER than a naive repeat-order count would suggest. Only affects the '(with LTV)' figures."
               />
             </div>
           </div>

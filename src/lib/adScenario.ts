@@ -199,9 +199,16 @@ export interface Scenario {
    */
   grossMargin: number;
   /**
-   * Lifetime repeat multiplier M = 1 + repeatPurchaseRate (1.0 = no repeat,
-   * front-end only). Scales gross profit to capture backend accessory sales on
-   * a modular product. M >= 1.
+   * Lifetime value multiplier M: average lifetime gross profit per ACQUIRED
+   * CUSTOMER as a multiple of their first order (M = 1 + repeatPurchaseRate;
+   * 1.0 = no repeat). A population average applied per customer — fractional is
+   * statistically valid (expected conversions are already fractional), it does
+   * not claim a single customer makes a fractional purchase. M >= 1.
+   *
+   * CAVEAT: multiplying first-order gross profit by M assumes repeat orders carry
+   * the same margin/value as the first. For a modular product whose repeats are
+   * often low-value accessory/replacement parts, M should be set below a naive
+   * repeat-order-count multiple. Front-end only otherwise.
    */
   ltvMultiplier: number;
 
