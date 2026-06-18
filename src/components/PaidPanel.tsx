@@ -16,6 +16,7 @@ import { rankCandidates, type CandidateSortKey } from "@/lib/adCandidate";
 import { toPost } from "@/lib/types";
 import { resolveViewUrl } from "@/lib/viewUrl";
 import { getPlatformConfig } from "@/lib/platforms";
+import { usePersistedState } from "@/lib/usePersistedState";
 import InfoTooltip from "./InfoTooltip";
 import Collapsible from "./paid/Collapsible";
 import LeveragePanel from "./paid/LeveragePanel";
@@ -66,20 +67,22 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
   // 2%); money fields hold euros. The engine consumes decimals, so we divide
   // percents by 100 at the override boundary (see the useMemo below). This keeps
   // every rate input consistent and matches how Meta / Google display them.
-  const [model, setModel] = useState<PricingModel>("cps");
-  const [budget, setBudget] = useState(500);
+  // Scenario inputs persist to localStorage so a tuned scenario survives reloads
+  // and tab switches (keys namespaced under "paid_*").
+  const [model, setModel] = usePersistedState<PricingModel>("paid_model", "cps");
+  const [budget, setBudget] = usePersistedState("paid_budget", 500);
   // Target CPA (€) for the conversion-bid model. Empty = use baseline-implied.
-  const [targetCpaOverride, setTargetCpaOverride] = useState("");
-  const [grossMarginPct, setGrossMarginPct] = useState(65);
-  const [vatRatePct, setVatRatePct] = useState(DEFAULT_VAT_RATE * 100);
-  const [ltvMultiplier, setLtvMultiplier] = useState(1.0);
+  const [targetCpaOverride, setTargetCpaOverride] = usePersistedState("paid_targetCpa", "");
+  const [grossMarginPct, setGrossMarginPct] = usePersistedState("paid_grossMarginPct", 65);
+  const [vatRatePct, setVatRatePct] = usePersistedState("paid_vatRatePct", DEFAULT_VAT_RATE * 100);
+  const [ltvMultiplier, setLtvMultiplier] = usePersistedState("paid_ltv", 1.0);
   // Optional manual overrides (empty string = use the baseline value). CVR / CTR
   // overrides are in PERCENT (e.g. "2" = 2%); cpc/cpm/aov are euros.
-  const [cvrOverride, setCvrOverride] = useState("");
-  const [ctrOverride, setCtrOverride] = useState("");
-  const [cpcOverride, setCpcOverride] = useState("");
-  const [cpmOverride, setCpmOverride] = useState("");
-  const [aovOverride, setAovOverride] = useState("");
+  const [cvrOverride, setCvrOverride] = usePersistedState("paid_cvr", "");
+  const [ctrOverride, setCtrOverride] = usePersistedState("paid_ctr", "");
+  const [cpcOverride, setCpcOverride] = usePersistedState("paid_cpc", "");
+  const [cpmOverride, setCpmOverride] = usePersistedState("paid_cpm", "");
+  const [aovOverride, setAovOverride] = usePersistedState("paid_aov", "");
 
   useEffect(() => {
     let alive = true;
