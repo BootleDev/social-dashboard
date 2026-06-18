@@ -414,11 +414,16 @@ export const DEFAULT_BANDS: SensitivityBands = {
 /**
  * Meta learning-phase exit threshold: an ad set needs ~50 optimization events
  * (the chosen conversion event — purchases when optimizing for Purchase, pixel +
- * CAPI + modeled) per rolling 7-day window to stabilize and leave "Learning
- * Limited". This is per AD SET, not per ad, and is unchanged in 2025-2026,
- * including under Advantage+. Used to derive a minimum daily budget =
- * (conversions/windowDays) * CPA — the concrete "you need €X/day per ad set to
- * keep the algorithm out of Learning Limited" figure.
+ * CAPI + modeled) per rolling 7-day window to leave "Learning Limited". This is
+ * per AD SET, not per ad, and the 50-events/7-day THRESHOLD is unchanged in 2026,
+ * including under Advantage+ (verified against current Meta guidance). Used to
+ * derive a minimum daily budget = (conversions/windowDays) * CPA.
+ *
+ * CAVEAT (2026 "Andromeda" update): while the threshold is unchanged, typical
+ * real-world EXIT TIME stretched from ~4–7 days to ~7–14 days for many accounts.
+ * So days-derived-from-this constant (see daysToLearningPhase) is a FLOOR — the
+ * minimum days to accumulate 50 events at a given rate — not a promise that the
+ * ad set stabilizes that fast. Treat it as "no sooner than", and present it so.
  *
  * (Was 25 before 2026-06; corrected to 50 after a sourced audit — the 25 value
  * understated the required budget by ~2×.)

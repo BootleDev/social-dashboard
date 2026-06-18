@@ -873,15 +873,15 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
           {/* Meta's learning phase is a separate question (the algorithm, not a test). */}
           <div className="mt-3 text-[11px] flex items-center gap-1.5" style={{ color: "var(--text-secondary)" }}>
             <span>
-              Meta needs ~50 sales/ad set/week to exit its learning phase —{" "}
+              Meta needs ~50 sales/ad set per 7 days to exit its learning phase —{" "}
               <strong>
                 {forecast.daysToLearningPhase === undefined
                   ? "not reachable at this spend"
-                  : `about ${humanDuration(forecast.daysToLearningPhase)} here`}
+                  : `at least ${humanDuration(forecast.daysToLearningPhase)} here`}
               </strong>
-              .
+              {forecast.daysToLearningPhase !== undefined && ", likely longer in practice"}.
             </span>
-            <InfoTooltip text="Below ~50 conversions per ad set per 7 days, Meta's delivery stays 'Learning Limited' and under-optimises. This is about the algorithm getting enough signal, separate from whether YOU can read an A/B result." label="What is the learning phase?" />
+            <InfoTooltip text="Below ~50 conversions per ad set per rolling 7 days, Meta's delivery stays 'Learning Limited' and under-optimises (threshold unchanged in 2026, incl. Advantage+). The figure shown is a FLOOR — the minimum time to accumulate 50 sales at this rate. Real exit is typically slower: Meta's 2026 'Andromeda' update stretched typical stabilisation to ~7–14 days for many accounts. This is about the algorithm getting enough signal — separate from whether YOU can read an A/B result." label="What is the learning phase?" />
           </div>
           <p className="mt-2 text-[11px]" style={{ color: "var(--text-secondary)" }}>
             A/B durations target a 20% relative lift at 95% confidence and scale linearly from
