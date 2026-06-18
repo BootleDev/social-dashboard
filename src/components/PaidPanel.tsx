@@ -109,6 +109,40 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
 
   const baseline = api?.baseline ?? null;
 
+  // Bidirectional CPA↔CVR for conversion-bid mode: typing a Target CPA fills the
+  // CVR field with the rate that target REQUIRES (CPC ÷ CPA), so inputs and
+  // outputs stay consistent — you're explicitly modeling the funnel that hits
+  // your target. "Reset to actuals" clears both back to live data. (The reverse,
+  // CVR → achievable CPA placeholder, already happens in the sim useMemo.)
+  const onTargetCpaChange = (next: string) => {
+    setTargetCpaOverride(next);
+    const cpa = Number(next);
+    const cpc = baseline?.cpc.value;
+    if (next.trim() !== "" && Number.isFinite(cpa) && cpa > 0 && cpc !== undefined) {
+      const requiredCvrPct = (cpc / cpa) * 100; // percent, matching the CVR field unit
+      setCvrOverride(requiredCvrPct.toFixed(2));
+    } else if (next.trim() === "") {
+      // Clearing the CPA returns CVR to live-driven (empty = provisional default).
+      setCvrOverride("");
+    }
+  };
+
+  // Reset every scenario lever back to live/measured actuals.
+  const resetToActuals = () => {
+    setTargetCpaOverride("");
+    setCvrOverride("");
+    setAovOverride("");
+    setCpcOverride("");
+    setCpmOverride("");
+    setCtrOverride("");
+  };
+
+  // Whether the user has diverged from live actuals (enables the reset button).
+  const hasOverrides =
+    [targetCpaOverride, cvrOverride, aovOverride, cpcOverride, cpmOverride, ctrOverride].some(
+      (s) => s.trim() !== "",
+    );
+
   // Run the simulation whenever inputs change. Errors (e.g. missing baseline
   // input with no override) are surfaced, not thrown into render.
   const { ranged, leverage, forecast, simError } = useMemo(() => {
@@ -164,9 +198,16 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
       cpm: num(cpmOverride),
       aov: effectiveAov,
     };
-    // The CPA the funnel can actually deliver at the effective CVR — the
-    // achievability gate for conversion-bid mode. Same basis as the seed.
-    const achievableCpa = achievableCpaSeed;
+    // Achievability anchor = the CPA the funnel ACTUALLY delivers today, from the
+    // live MEASURED rate (baseline ad CVR if present, else provisional Shopify) —
+    // NOT the CVR field, which may have been auto-filled from a pinned Target CPA.
+    // This keeps the verdict's reality check ("your funnel can only deliver €X,
+    // needs an N× lift") honest even when you're modeling an optimistic CVR.
+    const measuredCvr = baseline.clickCvr.value ?? PROVISIONAL_SESSION_CVR;
+    const achievableCpa =
+      baseline.cpc.value !== undefined && measuredCvr > 0
+        ? baseline.cpc.value / measuredCvr
+        : undefined;
     try {
       const scenario = resolveScenario(baseline, overrides);
       const lev = analyzeLeverage(scenario, { achievableCpa });
@@ -391,8 +432,9 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
         title="Scenario — adjust the model"
         tip="Rates are entered as percents (margin 65, VAT 20, CVR 2); money fields are euros. Overrides left blank fall back to the measured baseline. Default mode is conversion-bid — how Meta is actually bought in 2026: you set a budget and a target CPA, and CPM/CPC/CTR are auction outcomes."
       >
-        {/* Bidding basis spans both groups. */}
-        <div className="mb-4 max-w-xs">
+        {/* Bidding basis + reset-to-actuals. */}
+        <div className="mb-4 flex items-end justify-between gap-3">
+          <div className="max-w-xs flex-1">
           <Field
             label="Bidding basis"
             tip="How spend turns into outcomes. Conversion bid (Meta default): you set budget + a target CPA (cost cap / ROAS goal); conversions = budget ÷ CPA, and CPM/CPC are auction OUTCOMES, not inputs. Pay-per-click: clicks = budget ÷ CPC (search-style). Pay-per-impression: impressions = budget ÷ CPM × 1000, then clicks = impressions × CTR. The CPC/CPM modes are diagnostic — for back-of-envelope click economics."
@@ -408,6 +450,23 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
               <option value="cpm">Pay per 1,000 impressions (CPM) · diagnostic</option>
             </select>
           </Field>
+          </div>
+          <button
+            type="button"
+            onClick={resetToActuals}
+            disabled={!hasOverrides}
+            className="text-xs px-2.5 py-1 rounded transition-colors shrink-0"
+            style={{
+              background: hasOverrides ? "var(--bg-secondary)" : "transparent",
+              color: hasOverrides ? "var(--text-primary, var(--text-secondary))" : "var(--text-secondary)",
+              border: "1px solid var(--border)",
+              cursor: hasOverrides ? "pointer" : "default",
+              opacity: hasOverrides ? 1 : 0.5,
+            }}
+            title="Clear all overrides and return every input to live / measured data"
+          >
+            ↺ Reset to actuals
+          </button>
         </div>
 
         <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2">
@@ -429,9 +488,9 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
                 <TextField
                   label="Target CPA (€)"
                   value={targetCpaOverride}
-                  onChange={setTargetCpaOverride}
+                  onChange={onTargetCpaChange}
                   placeholder={`${eur(impliedBaselineCpa)} (CVR-driven)`}
-                  tip="The cost cap / target CPA you'd set on Meta (€). Conversions = budget ÷ target CPA. BLANK = driven live by your funnel: it tracks the achievable CPA (CPC ÷ conversion rate), so raising CVR moves the projection. Type a number to pin a hypothetical instead (e.g. your break-even CPA). Above break-even, every sale loses money."
+                  tip="The cost cap / target CPA you'd set on Meta (€). Conversions = budget ÷ target CPA. Type one and the conversion rate it REQUIRES (CPC ÷ target CPA) fills the CVR field automatically — inputs and outputs stay consistent. Leave blank to let CVR drive the achievable CPA instead. 'Reset to actuals' returns both to live data."
                 />
               )}
               {model === "cpc" && (
@@ -475,7 +534,7 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
                 value={cvrOverride}
                 onChange={setCvrOverride}
                 placeholder={pctPlain(PROVISIONAL_SESSION_CVR)}
-                tip={`Session→purchase conversion rate, in percent. Defaults to ${pct(PROVISIONAL_SESSION_CVR)} — Shopify's all-traffic storefront funnel over the trailing 90 days (to ${PROVISIONAL_CVR_AS_OF}), NOT ad-attributed and provisional until live GA4 attribution lands. In conversion-bid mode this DRIVES the achievable CPA (CPC ÷ CVR) and therefore the projection. Override with your own measured rate.`}
+                tip={`Session→purchase conversion rate, in percent. Defaults to ${pct(PROVISIONAL_SESSION_CVR)} — Shopify's all-traffic storefront funnel over the trailing 90 days (to ${PROVISIONAL_CVR_AS_OF}), provisional until live GA4 attribution lands. Drives the achievable CPA (CPC ÷ CVR). Auto-fills when you set a Target CPA so inputs match outputs. The verdict's reality check always compares against your live MEASURED rate, not this field — so an optimistic CVR here won't hide that the funnel can't deliver it. 'Reset to actuals' clears it.`}
               />
               <TextField
                 label="AOV (€)"
