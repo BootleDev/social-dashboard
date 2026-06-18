@@ -218,6 +218,21 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
     baseline?.cpc.value !== undefined && effectiveCvrDisplay > 0
       ? baseline.cpc.value / effectiveCvrDisplay
       : undefined;
+  // Reverse lookup: when a Target CPA is pinned, the CVR the funnel must hit to
+  // deliver it (achievable CPA = CPC ÷ CVR ⇒ requiredCvr = CPC ÷ targetCPA).
+  const pinnedTargetCpa =
+    targetCpaOverride.trim() !== "" && Number.isFinite(Number(targetCpaOverride))
+      ? Number(targetCpaOverride)
+      : undefined;
+  const requiredCvrForTarget =
+    pinnedTargetCpa !== undefined && pinnedTargetCpa > 0 && baseline?.cpc.value !== undefined
+      ? baseline.cpc.value / pinnedTargetCpa
+      : undefined;
+  // How far that required CVR is from the current/provisional CVR.
+  const requiredCvrMultiple =
+    requiredCvrForTarget !== undefined && effectiveCvrDisplay > 0
+      ? requiredCvrForTarget / effectiveCvrDisplay
+      : undefined;
 
   // Staleness: how old is the latest active ad spend? Shopify is fresh, but the
   // ad price (CPC/CPM/CTR) baseline comes from possibly-months-old spend.
@@ -450,7 +465,7 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
                 tip={`Session→purchase conversion rate, in percent. Defaults to ${pct(PROVISIONAL_SESSION_CVR)} — Shopify's all-traffic storefront funnel over the trailing 90 days (to ${PROVISIONAL_CVR_AS_OF}), NOT ad-attributed and provisional until live GA4 attribution lands. In conversion-bid mode this DRIVES the achievable CPA (CPC ÷ CVR) and therefore the projection. Override with your own measured rate.`}
               />
               <TextField
-                label="AOV override (€)"
+                label="AOV (€)"
                 value={aovOverride}
                 onChange={setAovOverride}
                 placeholder={eur(api?.freshShopifyAov?.value ?? baseline?.aov.value)}
@@ -505,17 +520,28 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
               break-even CPA <strong>{eur(breakEvenCpaDisplay)}</strong>
             </span>
             <span className="basis-full" />
-            {targetCpaOverride.trim() === "" ? (
+            {pinnedTargetCpa === undefined ? (
               <span>
                 The projection uses the <strong>achievable</strong> CPA, so moving conversion
                 rate moves the result. Raise CVR until achievable drops below break-even to
-                turn a profit. Type a Target CPA to pin a hypothetical instead.
+                turn a profit. Type a Target CPA to pin one and see the CVR it requires.
               </span>
             ) : (
               <span>
-                Pinned to your typed Target CPA of <strong>€{targetCpaOverride.trim()}</strong>{" "}
-                — conversion rate no longer moves the projection. Clear it to go back to the
-                CVR-driven achievable CPA.
+                Pinned to a Target CPA of <strong>€{pinnedTargetCpa.toFixed(2)}</strong> — to
+                actually hit it your funnel must convert at{" "}
+                <strong>{pct(requiredCvrForTarget)}</strong>{" "}
+                <span className="opacity-70">(CPC {eur(baseline?.cpc.value)} ÷ target CPA)</span>
+                {requiredCvrMultiple !== undefined && (
+                  <>
+                    , {requiredCvrMultiple > 1.05
+                      ? `~${requiredCvrMultiple.toFixed(1)}× your current ${pct(effectiveCvrDisplay)}`
+                      : requiredCvrMultiple < 0.95
+                        ? `below your current ${pct(effectiveCvrDisplay)} — comfortably reachable`
+                        : `about your current ${pct(effectiveCvrDisplay)}`}
+                  </>
+                )}
+                . Clear the field to go back to the live CVR-driven CPA.
               </span>
             )}
           </div>
