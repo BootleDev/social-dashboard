@@ -33,6 +33,16 @@ describe("toPost — new fields", () => {
     expect(p.videoViewTotalTimeSec).toBe(0);
     expect(p.reposts).toBe(0);
   });
+
+  it("maps the platform-native Post ID into nativePostId (not the record id)", () => {
+    const p = toPost(rec({ "Post ID": "pinterest_1097893215423369870" }));
+    expect(p.nativePostId).toBe("pinterest_1097893215423369870");
+    expect(p.id).toBe("rec123"); // record id stays separate
+  });
+
+  it("defaults nativePostId to empty string when the feed has no Post ID", () => {
+    expect(toPost(rec({})).nativePostId).toBe("");
+  });
 });
 
 describe("toAudienceDemographic", () => {

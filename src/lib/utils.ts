@@ -43,6 +43,24 @@ export function count(val: unknown): number {
   return n > 0 ? Math.floor(n) : 0;
 }
 
+/**
+ * Parse a non-negative metric that may legitimately be FRACTIONAL — e.g. Meta's
+ * modeled/attributed ad conversions (pixel + CAPI + modeled), which Ads Manager
+ * reports as decimals (12.7 purchases). Unlike `count()`, this does NOT floor:
+ * flooring would drop the fractional part on every row and zero any row with
+ * <1 modeled conversion (0.6 → 0), biasing conversion counts downward — which
+ * deflates CVR and, because purchase VALUE keeps its decimals, inflates AOV.
+ *
+ * Clamps negatives to 0 (a negative conversion count is a data error) and
+ * inherits num()'s NaN/Infinity rejection. Use for ad-attributed purchase
+ * counts; use `count()` only for genuine integer tallies (clicks, impressions,
+ * orders, social engagement).
+ */
+export function numNonNeg(val: unknown): number {
+  const n = num(val);
+  return n > 0 ? n : 0;
+}
+
 export function str(val: unknown): string {
   if (typeof val === "string") return val;
   return String(val ?? "");

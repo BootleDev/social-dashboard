@@ -5,6 +5,7 @@ import { Line, Bar } from "react-chartjs-2";
 import "@/lib/chartSetup";
 import { useChartTheme } from "@/lib/useChartTheme";
 import { getPlatformConfig, platformSortOrder } from "@/lib/platforms";
+import { resolveViewUrl } from "@/lib/viewUrl";
 import KPICard from "./KPICard";
 import ChartCard from "./ChartCard";
 import InfoTooltip from "./InfoTooltip";
@@ -527,7 +528,11 @@ export default function OverviewDeepDive({
                 </div>
                 {mediaUrl && (
                   <a
-                    href={mediaUrl}
+                    href={resolveViewUrl(
+                      platform,
+                      str(post.fields["Post ID"]),
+                      mediaUrl,
+                    )}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] font-medium mt-auto pt-1 transition-opacity hover:opacity-80 cursor-pointer"

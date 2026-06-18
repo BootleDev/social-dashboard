@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { num, str, formatNumber, formatPercent, formatLocalDate, recordReach } from "@/lib/utils";
 import { getPlatformConfig } from "@/lib/platforms";
+import { resolveViewUrl } from "@/lib/viewUrl";
 import type { AirtableRecord } from "@/lib/utils";
 import { toPost } from "@/lib/types";
 import {
@@ -338,7 +339,11 @@ export default function PostScorecardTable({
               <td className="py-2 px-2 text-center">
                 {str(p.fields["Media URL"]) ? (
                   <a
-                    href={str(p.fields["Media URL"])}
+                    href={resolveViewUrl(
+                      str(p.fields["Platform"]),
+                      str(p.fields["Post ID"]),
+                      str(p.fields["Media URL"]),
+                    )}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center justify-center transition-opacity hover:opacity-80 cursor-pointer"

@@ -138,6 +138,75 @@ export function pearson(
   return num / Math.sqrt(denomX * denomY);
 }
 
+export interface ProportionInterval {
+  /** Point estimate successes / trials. */
+  p: number;
+  low: number;
+  high: number;
+}
+
+/**
+ * Wilson score confidence interval for a binomial proportion (successes /
+ * trials). Far more honest than the naive normal interval for small samples or
+ * extreme proportions (e.g. 5 conversions on 2624 clicks), and it never escapes
+ * [0, 1]. `z` defaults to 1.96 (95%). Returns undefined for non-positive or
+ * non-finite trials, or when successes is out of [0, trials].
+ *
+ * This is what makes a CVR built on a handful of conversions honest: the point
+ * estimate alone hides that the true rate could be meaningfully higher or lower.
+ */
+export function wilsonInterval(
+  successes: number,
+  trials: number,
+  z = 1.96,
+): ProportionInterval | undefined {
+  if (!Number.isFinite(successes) || !Number.isFinite(trials)) return undefined;
+  if (trials <= 0 || successes < 0 || successes > trials) return undefined;
+  const p = successes / trials;
+  const z2 = z * z;
+  const denom = 1 + z2 / trials;
+  const centre = p + z2 / (2 * trials);
+  const margin = z * Math.sqrt((p * (1 - p)) / trials + z2 / (4 * trials * trials));
+  return {
+    p,
+    low: Math.max(0, (centre - margin) / denom),
+    high: Math.min(1, (centre + margin) / denom),
+  };
+}
+
+/**
+ * Sample size PER VARIANT to detect a relative lift on a proportion in an A/B
+ * test, using the standard two-proportion planning approximation:
+ *
+ *   n_per_variant ≈ (z_α/2 + z_β)² · 2 · p̄(1−p̄) / (p₂ − p₁)²
+ *
+ * where p₁ = baseRate, p₂ = baseRate·(1 + mde), p̄ = (p₁+p₂)/2, and (z_α/2, z_β)
+ * are the confidence/power z-scores (defaults: 95% two-sided, 80% power). This
+ * is the textbook planning formula — a deliberately approximate "how big a test
+ * do I need?" number, NOT an exact frequentist design. It blows up (→ huge) as
+ * the baseline rate or the effect shrink, which is exactly the honest signal: a
+ * 0.2% conversion rate needs an enormous sample to test on conversions.
+ *
+ * Returns undefined for a non-positive/≥1 baseRate or a non-positive mde — there
+ * is no finite planning number then. Pure; no I/O.
+ */
+export function abTestSampleSizePerVariant(
+  baseRate: number,
+  mde: number,
+  zAlpha = 1.96,
+  zBeta = 0.84,
+): number | undefined {
+  if (!Number.isFinite(baseRate) || baseRate <= 0 || baseRate >= 1) return undefined;
+  if (!Number.isFinite(mde) || mde <= 0) return undefined;
+  const p1 = baseRate;
+  const p2 = Math.min(1, baseRate * (1 + mde));
+  const delta = p2 - p1;
+  if (delta <= 0) return undefined;
+  const pBar = (p1 + p2) / 2;
+  const z = zAlpha + zBeta;
+  return (z * z * 2 * pBar * (1 - pBar)) / (delta * delta);
+}
+
 /**
  * Percent change with explicit handling for the zero-baseline trap.
  * Returns undefined when `from` is 0 (Δ% is not defined), so callers can

@@ -7,6 +7,7 @@ import ContentAnalysis from "@/components/ContentAnalysis";
 import PostDrilldownPanel from "@/components/PostDrilldownPanel";
 import PlanningPanel from "@/components/PlanningPanel";
 import OpsPanel from "@/components/OpsPanel";
+import PaidPanel from "@/components/PaidPanel";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import type { DateRange } from "@/components/DateRangeFilter";
 import PlatformFilter from "@/components/PlatformFilter";
@@ -32,7 +33,7 @@ import type { PlanSelection } from "@/lib/planSelection";
  * Old tabs (overview/content/audience/pinterest/compare/competitors/tagging)
  * are merged into the four above; component reuse is preserved.
  */
-type Tab = "pulse" | "insights" | "planning" | "ops";
+type Tab = "pulse" | "insights" | "planning" | "paid" | "ops";
 
 interface DashboardData {
   posts: AirtableRecord[];
@@ -296,6 +297,11 @@ export default function DashboardPage() {
       description: "Content production: when to post, what to make, who to reach, who to learn from",
     },
     {
+      key: "paid",
+      label: "Paid",
+      description: "Ad spend decision tool: scale-or-hold verdict, break-even, profit from budget, and ad-candidate content",
+    },
+    {
       key: "ops",
       label: "Ops",
       description: "Tagging, platform comparison, pipeline health",
@@ -365,21 +371,27 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
-          {data && (
-            <DateRangeFilter value={dateRange} onChange={setDateRange} />
-          )}
+          {/* Data-scope controls grouped together, set apart from section nav. */}
+          <div
+            className="flex items-center gap-2 sm:gap-3 flex-wrap rounded-lg px-2 py-1"
+            style={{ background: "var(--bg-secondary)" }}
+          >
+            {data && (
+              <DateRangeFilter value={dateRange} onChange={setDateRange} />
+            )}
 
-          {activePlatforms.length > 1 && (
-            <PlatformFilter
-              platforms={activePlatforms}
-              selected={selectedPlatforms}
-              onChange={setSelectedPlatforms}
-            />
-          )}
+            {activePlatforms.length > 1 && (
+              <PlatformFilter
+                platforms={activePlatforms}
+                selected={selectedPlatforms}
+                onChange={setSelectedPlatforms}
+              />
+            )}
 
-          <TimezoneSelector value={timezone} onChange={setTimezone} />
+            <TimezoneSelector value={timezone} onChange={setTimezone} />
 
-          <ThemeToggle />
+            <ThemeToggle />
+          </div>
 
           <nav
             className="flex gap-1 rounded-lg p-1"
@@ -408,6 +420,21 @@ export default function DashboardPage() {
           </nav>
         </div>
       </header>
+
+      {/* Active-tab caption: always say what the current section is for, so the
+          terse pill labels (Pulse / Insights / …) are self-explanatory. */}
+      <div
+        className="px-4 sm:px-6 py-2 text-xs"
+        style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)", borderBottom: "1px solid var(--border)" }}
+      >
+        <span className="max-w-[1400px] mx-auto block">
+          <strong style={{ color: "var(--text-primary, var(--text-secondary))" }}>
+            {tabs.find((t) => t.key === tab)?.label}
+          </strong>
+          {" — "}
+          {tabs.find((t) => t.key === tab)?.description}
+        </span>
+      </div>
 
       {/* Content. Extra bottom padding on small screens so the last card clears
           the fixed "Ask AI" FAB (bottom-6 + button height); on sm+ the FAB sits
@@ -474,6 +501,7 @@ export default function DashboardPage() {
                   onClearPlanSelection={() => setPlanSelection(null)}
                 />
               )}
+              {tab === "paid" && <PaidPanel posts={data.posts} />}
               {tab === "ops" && (
                 <OpsPanel
                   posts={filteredPosts}

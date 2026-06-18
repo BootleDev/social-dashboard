@@ -5,7 +5,7 @@ import { num, str } from "@/lib/utils";
 export async function POST(request: Request) {
   // Auth is enforced by middleware for all /api/* except /api/auth
 
-  let body: { message?: unknown; history?: unknown };
+  let body: { message?: unknown; history?: unknown; pageContext?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -15,11 +15,19 @@ export async function POST(request: Request) {
     );
   }
 
-  const { message, history } = body;
+  const { message, history, pageContext } = body;
 
   if (!message || typeof message !== "string") {
     return NextResponse.json({ error: "No message" }, { status: 400 });
   }
+
+  // Optional live context from the active tab (currently the Paid simulator),
+  // so the assistant can reason about the exact scenario the user is viewing.
+  // Bounded so a malformed client can't bloat the prompt.
+  const activeContext =
+    typeof pageContext === "string" && pageContext.length > 0
+      ? pageContext.slice(0, 4000)
+      : null;
 
   if (message.length > 4000) {
     return NextResponse.json(
@@ -111,7 +119,11 @@ ${JSON.stringify(recentAlerts, null, 2)}
 
 Answer the user's question concisely. Use specific numbers from the data. If recommending actions, be specific and actionable.
 Focus on engagement rate trends, content performance patterns, follower growth, and platform comparison.
-Industry benchmarks for reference: Instagram avg ER 1-3%, Facebook avg ER 0.5-1.5%, Pinterest avg ER 0.2-1%, TikTok avg ER 3-9%, YouTube avg ER 1-3%.`;
+Industry benchmarks for reference: Instagram avg ER 1-3%, Facebook avg ER 0.5-1.5%, Pinterest avg ER 0.2-1%, TikTok avg ER 3-9%, YouTube avg ER 1-3%.${
+      activeContext
+        ? `\n\n---\nThe user is currently viewing this tool. If their question is about it (e.g. "why HOLD?", "what should I change?", "is this profitable?"), answer using THESE figures and explain the reasoning plainly:\n\n${activeContext}`
+        : ""
+    }`;
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

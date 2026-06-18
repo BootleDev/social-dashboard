@@ -7,6 +7,8 @@ import {
   pctChange,
   formatPct,
   trendVerdict,
+  wilsonInterval,
+  abTestSampleSizePerVariant,
 } from "../stats";
 
 describeTest("quantile", () => {
@@ -116,5 +118,76 @@ describeTest("trendVerdict", () => {
     expect(trendVerdict(4.9)).toBe("flat");
     expect(trendVerdict(5)).toBe("accelerating");
     expect(trendVerdict(-5)).toBe("decelerating");
+  });
+});
+
+describeTest("wilsonInterval", () => {
+  it("brackets the point estimate and stays within [0,1]", () => {
+    const w = wilsonInterval(5, 2624)!;
+    expect(w.p).toBeCloseTo(5 / 2624, 9);
+    expect(w.low).toBeGreaterThan(0);
+    expect(w.low).toBeLessThan(w.p);
+    expect(w.high).toBeGreaterThan(w.p);
+    expect(w.high).toBeLessThanOrEqual(1);
+  });
+
+  it("is WIDE for a tiny conversion sample (the whole point)", () => {
+    // 5/2624 = 0.19%. The true rate could plausibly be ~2.5x lower or higher.
+    const w = wilsonInterval(5, 2624)!;
+    // Relative width: high should be well over 2x low for n=5.
+    expect(w.high / w.low).toBeGreaterThan(2);
+  });
+
+  it("tightens as the sample grows", () => {
+    const small = wilsonInterval(5, 2624)!;
+    const big = wilsonInterval(500, 262400)!; // same proportion, 100x volume
+    expect(big.high - big.low).toBeLessThan(small.high - small.low);
+  });
+
+  it("never escapes [0,1] at the extremes", () => {
+    const zero = wilsonInterval(0, 100)!;
+    expect(zero.low).toBe(0);
+    expect(zero.high).toBeGreaterThan(0);
+    const all = wilsonInterval(100, 100)!;
+    expect(all.high).toBeCloseTo(1, 10);
+    expect(all.high).toBeLessThanOrEqual(1);
+    expect(all.low).toBeLessThan(1);
+  });
+
+  it("returns undefined for invalid inputs", () => {
+    expect(wilsonInterval(5, 0)).toBeUndefined();
+    expect(wilsonInterval(-1, 100)).toBeUndefined();
+    expect(wilsonInterval(101, 100)).toBeUndefined();
+    expect(wilsonInterval(5, NaN)).toBeUndefined();
+  });
+});
+
+describeTest("abTestSampleSizePerVariant", () => {
+  it("matches the textbook two-proportion planning size (±5%)", () => {
+    // p=2%, 20% relative MDE (2.0%→2.4%), 95%/80%. Reference ≈ 21,000/variant.
+    const n = abTestSampleSizePerVariant(0.02, 0.2)!;
+    expect(n).toBeGreaterThan(19_000);
+    expect(n).toBeLessThan(23_000);
+  });
+
+  it("scales roughly inversely with the baseline rate (tiny rate → huge sample)", () => {
+    const nLow = abTestSampleSizePerVariant(0.002, 0.2)!; // 0.2%
+    const nHigh = abTestSampleSizePerVariant(0.02, 0.2)!; // 2.0%
+    // ~10× lower rate → ~10× the sample (the honest 'you can't test purchases').
+    expect(nLow / nHigh).toBeGreaterThan(8);
+    expect(nLow / nHigh).toBeLessThan(12);
+  });
+
+  it("needs far more samples for a smaller detectable effect", () => {
+    const small = abTestSampleSizePerVariant(0.02, 0.1)!; // detect 10% lift
+    const big = abTestSampleSizePerVariant(0.02, 0.4)!; // detect 40% lift
+    expect(small).toBeGreaterThan(big);
+  });
+
+  it("returns undefined for degenerate inputs", () => {
+    expect(abTestSampleSizePerVariant(0, 0.2)).toBeUndefined();
+    expect(abTestSampleSizePerVariant(1, 0.2)).toBeUndefined();
+    expect(abTestSampleSizePerVariant(0.02, 0)).toBeUndefined();
+    expect(abTestSampleSizePerVariant(NaN, 0.2)).toBeUndefined();
   });
 });
