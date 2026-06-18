@@ -182,7 +182,9 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
   const [candidateSort, setCandidateSort] = useState<CandidateSortKey>("viralityIndex");
   const candidates = useMemo(() => {
     const parsed = posts.map(toPost);
-    return rankCandidates(parsed, { sortBy: candidateSort }).slice(0, 12);
+    // Pass nowMs so recent creative outranks stale (recency decay). Captured at
+    // render; candidates re-rank if the post set or sort changes.
+    return rankCandidates(parsed, { sortBy: candidateSort, nowMs: Date.now() }).slice(0, 12);
   }, [posts, candidateSort]);
 
   // Effective defaults (render scope, mirror the useMemo): CVR = provisional

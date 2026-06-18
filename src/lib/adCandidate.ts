@@ -47,11 +47,28 @@ import {
 
 export const CANDIDATE_WEIGHTS = {
   /**
-   * Reach at which the log-dampened volume factor reaches 1.0 (full credit).
-   * Below it, the factor scales down; above it, it's capped at 1.0 so a viral
-   * post isn't rewarded twice. Tuned to Bootle's IG p90 reach (~620).
+   * Reach at which the volume factor reaches 1.0 (full credit). volumeFactor is
+   * a CONFIDENCE guard: a rate earned on a handful of reach is untrustworthy, so
+   * it scales down below this anchor; at/above it the factor is 1.0. It is NOT a
+   * "more reach is better" gradient — that would reward accumulated reach, which
+   * correlates with post AGE and biased the ranking toward stale posts. Tuned to
+   * Bootle's IG p90 reach (~620): clear it and your rate is trusted, full stop.
    */
   volumeFullCreditReach: 620,
+  /**
+   * Recency half-life in days. The recency factor is 0.5^(ageDays / halfLife):
+   * a post at the half-life scores half as a candidate as an identical post
+   * today. For AD CREATIVE we want current messaging/product, so a fresh strong
+   * performer beats a stale one with the same rate — without erasing a proven
+   * older winner (decay, not a cliff). ~75d ≈ a strong post stays competitive
+   * for a quarter, then fades. Tunable.
+   */
+  recencyHalfLifeDays: 75,
+  /**
+   * Floor on the recency factor so a genuinely old but exceptional post is
+   * dampened, never zeroed (it can still surface if its rate dominates).
+   */
+  recencyFloor: 0.15,
   /**
    * View B volume floor: a post needs at least this much reach AND this many
    * likes for its (saves+shares)/likes ratio to be trusted. Below either, the
@@ -83,16 +100,39 @@ export const CANDIDATE_WEIGHTS = {
 // ===========================================================================
 
 /**
- * Log-dampened volume factor in (0, 1]. Uses log1p so reach 0 → 0 and the
- * curve flattens as reach approaches the full-credit anchor, capped at 1.0.
- * Rewards posts that earned their rate on real reach without letting a single
- * viral post dominate linearly.
+ * Volume CONFIDENCE factor in (0, 1]. Below the full-credit reach anchor a rate
+ * is statistically thin, so it's log-dampened toward 0; AT or ABOVE the anchor
+ * the factor is capped at 1.0 — so it does NOT keep rewarding ever-larger
+ * accumulated reach (which correlates with post age). It answers "is there
+ * enough reach to trust this rate?", not "did this post reach more people".
  */
 export function volumeFactor(reach: number): number {
   if (!Number.isFinite(reach) || reach <= 0) return 0;
   const full = CANDIDATE_WEIGHTS.volumeFullCreditReach;
   const factor = Math.log1p(reach) / Math.log1p(full);
   return Math.min(1, factor);
+}
+
+// ===========================================================================
+// Recency factor
+// ===========================================================================
+
+/**
+ * Recency factor in [recencyFloor, 1]: 0.5^(ageDays / halfLifeDays), clamped to
+ * the floor. A post published `now` scores 1.0; one a half-life old scores 0.5;
+ * older posts decay toward the floor (dampened, never erased). This removes the
+ * stale-post bias — for ad creative, a recent strong performer should outrank an
+ * old one with the same engagement rate (current product + messaging, no retired
+ * claims). `nowMs` is injected for testability; the app passes Date.now().
+ * Undated posts get full credit (1.0) — never penalized for missing data.
+ */
+export function recencyFactor(publishedAt: string, nowMs: number): number {
+  const t = Date.parse(publishedAt);
+  if (!Number.isFinite(t)) return 1;
+  const ageDays = (nowMs - t) / 86_400_000;
+  if (ageDays <= 0) return 1; // future-dated or today
+  const decay = Math.pow(0.5, ageDays / CANDIDATE_WEIGHTS.recencyHalfLifeDays);
+  return Math.max(CANDIDATE_WEIGHTS.recencyFloor, decay);
 }
 
 // ===========================================================================
@@ -174,6 +214,12 @@ function normalizeShares(
  * has no per-post demographics). So demo-fit is a constant multiplier across
  * posts for a given target — it ranks the whole library's fit, and becomes
  * per-post automatically if/when per-post demographics ever land.
+ *
+ * DEFERRED: the live Paid tab does not yet pass `target`/`audience`, so this
+ * weight is currently neutral (1.0) — the hook is wired but inert. Audience-fit
+ * targeting (rank off-target high-engagement posts lower) is a future input,
+ * pending a reliable target profile + per-post audience data. The recency factor
+ * is the active de-biasing lever today.
  */
 export function demoFitWeight(
   audience: ReadonlyArray<AudienceDemographic>,
@@ -307,20 +353,27 @@ function viralityRatioByLikes(post: Post): number | undefined {
 /**
  * Score one post on both views. `demo` is the precomputed demo-fit (constant
  * across posts for a given target), passed in so the caller computes it once.
- * `retention` is an optional per-post video retention signal.
+ * `retention` is an optional per-post video retention signal. `nowMs` is the
+ * reference time for the recency factor (defaults to a neutral no-decay value so
+ * existing callers that omit it are unaffected); the app passes Date.now().
  */
 export function scoreCandidate(
   post: Post,
   demo: { weight: number; flagged: boolean },
   retention?: RetentionSignal,
+  nowMs?: number,
 ): CandidateScore {
   const reach = effectiveReach(post);
   const vf = volumeFactor(reach);
   const rf = retentionFactor(retention);
+  // Recency decay only applies when a reference time is supplied; without it
+  // (legacy two/three-arg callers, tests) recency is neutral 1.0.
+  const recf = nowMs === undefined ? 1 : recencyFactor(post.publishedAt, nowMs);
   const { points: intentBase, components } = intentPoints(post);
 
-  // Combined multiplicative weighting applied to every view.
-  const weight = vf * demo.weight * rf;
+  // Combined multiplicative weighting applied to every view: volume confidence ×
+  // demo-fit × video retention × recency.
+  const weight = vf * demo.weight * rf * recf;
 
   // View A: benchmark intent points × weights, kept on a 0–100 scale.
   const intentScore = intentBase === undefined ? undefined : intentBase * weight;
@@ -377,13 +430,20 @@ export function rankCandidates(
     target?: TargetAudienceProfile;
     /** Per-post-id video retention signals (hook/hold), when available. */
     retention?: Readonly<Record<string, RetentionSignal>>;
+    /**
+     * Reference time (ms) for recency decay. The app passes Date.now() so recent
+     * creative outranks stale; omit it to disable recency (neutral 1.0).
+     */
+    nowMs?: number;
   } = {},
 ): CandidateScore[] {
   const sortBy = options.sortBy ?? "intentScore";
   const demo = demoFitWeight(options.audience ?? [], options.target);
   const retention = options.retention ?? {};
 
-  const scored = posts.map((p) => scoreCandidate(p, demo, retention[p.id]));
+  const scored = posts.map((p) =>
+    scoreCandidate(p, demo, retention[p.id], options.nowMs),
+  );
   const ranked = scored
     .filter((s) => s[sortBy] !== undefined)
     .sort((a, b) => (b[sortBy] as number) - (a[sortBy] as number));

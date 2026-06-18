@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   volumeFactor,
+  recencyFactor,
   retentionFactor,
   demoFitWeight,
   scoreCandidate,
@@ -68,6 +69,36 @@ describe("volumeFactor", () => {
   });
   it("is monotonic increasing below the cap", () => {
     expect(volumeFactor(50)).toBeLessThan(volumeFactor(300));
+  });
+  it("does NOT keep rewarding accumulated reach above the anchor (anti-age-bias)", () => {
+    // A post with months of reach (50k) must not beat one at the anchor — both
+    // are 'enough reach to trust the rate', so volume stops differentiating.
+    expect(volumeFactor(50000)).toBe(volumeFactor(100000));
+    expect(volumeFactor(CANDIDATE_WEIGHTS.volumeFullCreditReach * 5)).toBe(1);
+  });
+});
+
+describe("recencyFactor", () => {
+  const NOW = Date.parse("2026-06-17T00:00:00Z");
+  const daysAgo = (n: number) =>
+    new Date(NOW - n * 86_400_000).toISOString();
+
+  it("is 1.0 for a post published now / today / future", () => {
+    expect(recencyFactor(new Date(NOW).toISOString(), NOW)).toBe(1);
+    expect(recencyFactor(daysAgo(-3), NOW)).toBe(1); // future-dated
+  });
+  it("halves at the half-life", () => {
+    expect(recencyFactor(daysAgo(CANDIDATE_WEIGHTS.recencyHalfLifeDays), NOW)).toBeCloseTo(0.5, 6);
+  });
+  it("decays monotonically with age", () => {
+    expect(recencyFactor(daysAgo(30), NOW)).toBeGreaterThan(recencyFactor(daysAgo(120), NOW));
+  });
+  it("clamps to the floor for very old posts (dampened, not erased)", () => {
+    expect(recencyFactor(daysAgo(2000), NOW)).toBe(CANDIDATE_WEIGHTS.recencyFloor);
+  });
+  it("gives full credit to an undated/unparseable post (no penalty for missing data)", () => {
+    expect(recencyFactor("", NOW)).toBe(1);
+    expect(recencyFactor("not-a-date", NOW)).toBe(1);
   });
 });
 
@@ -220,6 +251,33 @@ describe("rankCandidates", () => {
   it("ranks by intentScore by default, strongest first", () => {
     const ranked = rankCandidates(posts, { sortBy: "intentScore" });
     expect(ranked[0].postId).toBe("hi");
+  });
+
+  it("with recency (nowMs), a fresh post outranks an OLDER one of equal rate", () => {
+    // The reported bug: old posts win on time-in-market. Two identical-rate
+    // posts, one recent, one 6 months old; recency must put the fresh one first.
+    const NOW = Date.parse("2026-06-17T00:00:00Z");
+    const old = makePost({
+      id: "old", caption: "old creative", mediaUrl: "https://m/old",
+      publishedAt: new Date(NOW - 180 * 86_400_000).toISOString(),
+      reach: 2000, saves: 40, shares: 15, comments: 20, likes: 60,
+    });
+    const fresh = makePost({
+      id: "fresh", caption: "fresh creative", mediaUrl: "https://m/fresh",
+      publishedAt: new Date(NOW - 5 * 86_400_000).toISOString(),
+      reach: 2000, saves: 40, shares: 15, comments: 20, likes: 60,
+    });
+    // Without recency they tie (old may win on stable sort); WITH it, fresh wins.
+    const ranked = rankCandidates([old, fresh], { sortBy: "viralityIndex", nowMs: NOW });
+    expect(ranked[0].postId).toBe("fresh");
+    expect(ranked[0].viralityIndex as number).toBeGreaterThan(ranked[1].viralityIndex as number);
+  });
+
+  it("omitting nowMs disables recency (back-compat — equal-rate posts keep input order)", () => {
+    const a = makePost({ id: "a", caption: "a", mediaUrl: "https://m/a", publishedAt: "2025-01-01T00:00:00Z", reach: 2000, saves: 40, shares: 15 });
+    const b = makePost({ id: "b", caption: "b", mediaUrl: "https://m/b", publishedAt: "2026-06-01T00:00:00Z", reach: 2000, saves: 40, shares: 15 });
+    const ranked = rankCandidates([a, b], { sortBy: "viralityIndex" });
+    expect(ranked[0].viralityIndex).toBeCloseTo(ranked[1].viralityIndex as number, 9);
   });
 
   it("drops posts that are unscoreable on the chosen view", () => {
