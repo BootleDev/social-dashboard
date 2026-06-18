@@ -327,7 +327,8 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
         title="Scenario — adjust the model"
         tip="Rates are entered as percents (margin 65, VAT 20, CVR 2); money fields are euros. Overrides left blank fall back to the measured baseline. Default mode is conversion-bid — how Meta is actually bought in 2026: you set a budget and a target CPA, and CPM/CPC/CTR are auction outcomes."
       >
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* Bidding basis spans both groups. */}
+        <div className="mb-4 max-w-xs">
           <Field
             label="Bidding basis"
             tip="How spend turns into outcomes. Conversion bid (Meta default): you set budget + a target CPA (cost cap / ROAS goal); conversions = budget ÷ CPA, and CPM/CPC are auction OUTCOMES, not inputs. Pay-per-click: clicks = budget ÷ CPC (search-style). Pay-per-impression: impressions = budget ÷ CPM × 1000, then clicks = impressions × CTR. The CPC/CPM modes are diagnostic — for back-of-envelope click economics."
@@ -343,102 +344,145 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
               <option value="cpm">Pay per 1,000 impressions (CPM) · diagnostic</option>
             </select>
           </Field>
-          <NumField
-            label="Budget (€)"
-            value={budget}
-            onChange={setBudget}
-            step={50}
-            min={0}
-            tip="Total ad spend to model. Assumes full delivery (spend = budget)."
-          />
-          <NumField
-            label="Gross margin (%)"
-            value={grossMarginPct}
-            onChange={setGrossMarginPct}
-            step={1}
-            min={0}
-            max={100}
-            tip="Gross profit as a percent of NET (ex-VAT) revenue — the standard COGS margin (enter 65 for 65%). Applied to net AOV, not gross, so VAT is never counted as profit."
-          />
-          <NumField
-            label="VAT rate (%)"
-            value={vatRatePct}
-            onChange={setVatRatePct}
-            step={1}
-            min={0}
-            max={100}
-            tip="VAT as a percent of the gross AOV (enter 20 for 20%, UK default). Net AOV = AOV ÷ (1 + VAT). Bootle has no single rate (DE 19, FR 20, IT 22, IE 23, UK 20; variance absorbed at one price band) — adjust to model a specific market. Set 0 for ex-VAT (e.g. US) pricing."
-          />
-          <NumField
-            label="LTV multiplier (M)"
-            value={ltvMultiplier}
-            onChange={setLtvMultiplier}
-            step={0.05}
-            min={1}
-            tip="Repeat-value multiplier on gross profit, M = 1 + repeat rate (1.0 = no repeat). Captures backend / accessory sales on the modular product. Only affects the '(with LTV)' figures."
-          />
-          {model === "cps" && (
-            <TextField
-              label="Target CPA (€)"
-              value={targetCpaOverride}
-              onChange={setTargetCpaOverride}
-              placeholder={eur(impliedBaselineCpa)}
-              tip="The cost cap / target CPA you'd set on Meta (€). Conversions = budget ÷ target CPA. Blank = model the CPA your funnel can ACTUALLY deliver today (CPC ÷ conversion rate) so the projection is realistic. Type a number to explore a hypothetical (e.g. your break-even CPA below). Above the break-even line, every sale loses money."
-            />
-          )}
-          <TextField
-            label="Conversion rate (%)"
-            value={cvrOverride}
-            onChange={setCvrOverride}
-            placeholder={pctPlain(PROVISIONAL_SESSION_CVR)}
-            tip={`Session→purchase conversion rate, in percent. Defaults to ${pct(PROVISIONAL_SESSION_CVR)} — Shopify's all-traffic storefront funnel over the trailing 90 days (to ${PROVISIONAL_CVR_AS_OF}), NOT ad-attributed and provisional until live GA4 attribution lands. In conversion-bid mode this sets the achievable CPA (CPC ÷ CVR). Override with your own measured rate.`}
-          />
-          {model === "cpc" && (
-            <TextField
-              label="CPC override (€)"
-              value={cpcOverride}
-              onChange={setCpcOverride}
-              placeholder={eur(baseline?.cpc.value)}
-              tip="Override the cost per click (€). Used by the pay-per-click diagnostic model. Leave blank to use the baseline CPC."
-            />
-          )}
-          {model === "cpm" && (
-            <>
-              <TextField
-                label="CPM override (€)"
-                value={cpmOverride}
-                onChange={setCpmOverride}
-                placeholder={eur(baseline?.cpm.value)}
-                tip="Override the cost per 1,000 impressions (€). Used by the pay-per-impression diagnostic model. Leave blank to use the baseline CPM."
-              />
-              <TextField
-                label="Link CTR override (%)"
-                value={ctrOverride}
-                onChange={setCtrOverride}
-                placeholder={pctPlain(baseline?.ctr.value)}
-                tip="Override the LINK / outbound CTR, in percent (enter 1 for 1%) — clicks that leave Meta for your site, NOT 'All CTR' (which is ~3-5× higher and includes likes/expands). Median link CTR is ~1%. Leave blank to use the baseline."
-              />
-            </>
-          )}
-          <TextField
-            label="AOV override (€)"
-            value={aovOverride}
-            onChange={setAovOverride}
-            placeholder={eur(api?.freshShopifyAov?.value ?? baseline?.aov.value)}
-            tip="Average order value (€), GROSS / incl. VAT. Defaults to the fresh, comp-excluded Shopify store AOV (current, runs past the stale ad window). Net is derived via the VAT rate. Override to model a different basket."
-          />
         </div>
-        {model === "cps" && targetCpaOverride.trim() === "" && (
-          <p className="mt-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-            Modeling your funnel&apos;s <strong>achievable</strong> CPA of{" "}
-            <strong>{eur(impliedBaselineCpa)}</strong> (CPC {eur(baseline?.cpc.value)} ÷
-            conversion rate {pct(effectiveCvrDisplay)}). Break-even CPA is{" "}
-            <strong>{eur(breakEvenCpaDisplay)}</strong> (net AOV × margin) — the most you
-            could pay and not lose money. You can only profit once the achievable CPA
-            drops below break-even, i.e. by raising conversion rate. Conversion rate is
-            the provisional Shopify figure; AOV is fresh Shopify. Type a target CPA above
-            to explore a hypothetical.
-          </p>
+
+        <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2">
+          {/* GROUP 1: what you tell the ad platform to do. */}
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--text-secondary)" }}>
+              What you bid
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <NumField
+                label="Budget (€)"
+                value={budget}
+                onChange={setBudget}
+                step={50}
+                min={0}
+                tip="Total ad spend to model. Assumes full delivery (spend = budget)."
+              />
+              {model === "cps" && (
+                <TextField
+                  label="Target CPA (€)"
+                  value={targetCpaOverride}
+                  onChange={setTargetCpaOverride}
+                  placeholder={`${eur(impliedBaselineCpa)} (CVR-driven)`}
+                  tip="The cost cap / target CPA you'd set on Meta (€). Conversions = budget ÷ target CPA. BLANK = driven live by your funnel: it tracks the achievable CPA (CPC ÷ conversion rate), so raising CVR moves the projection. Type a number to pin a hypothetical instead (e.g. your break-even CPA). Above break-even, every sale loses money."
+                />
+              )}
+              {model === "cpc" && (
+                <TextField
+                  label="CPC override (€)"
+                  value={cpcOverride}
+                  onChange={setCpcOverride}
+                  placeholder={eur(baseline?.cpc.value)}
+                  tip="Override the cost per click (€). Used by the pay-per-click diagnostic model. Leave blank to use the baseline CPC."
+                />
+              )}
+              {model === "cpm" && (
+                <>
+                  <TextField
+                    label="CPM override (€)"
+                    value={cpmOverride}
+                    onChange={setCpmOverride}
+                    placeholder={eur(baseline?.cpm.value)}
+                    tip="Override the cost per 1,000 impressions (€). Used by the pay-per-impression diagnostic model. Leave blank to use the baseline CPM."
+                  />
+                  <TextField
+                    label="Link CTR override (%)"
+                    value={ctrOverride}
+                    onChange={setCtrOverride}
+                    placeholder={pctPlain(baseline?.ctr.value)}
+                    tip="Override the LINK / outbound CTR, in percent (enter 1 for 1%) — clicks that leave Meta for your site, NOT 'All CTR' (which is ~3-5× higher and includes likes/expands). Median link CTR is ~1%. Leave blank to use the baseline."
+                  />
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* GROUP 2: properties of your funnel + economics. */}
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--text-secondary)" }}>
+              Your funnel &amp; economics
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <TextField
+                label="Conversion rate (%)"
+                value={cvrOverride}
+                onChange={setCvrOverride}
+                placeholder={pctPlain(PROVISIONAL_SESSION_CVR)}
+                tip={`Session→purchase conversion rate, in percent. Defaults to ${pct(PROVISIONAL_SESSION_CVR)} — Shopify's all-traffic storefront funnel over the trailing 90 days (to ${PROVISIONAL_CVR_AS_OF}), NOT ad-attributed and provisional until live GA4 attribution lands. In conversion-bid mode this DRIVES the achievable CPA (CPC ÷ CVR) and therefore the projection. Override with your own measured rate.`}
+              />
+              <TextField
+                label="AOV override (€)"
+                value={aovOverride}
+                onChange={setAovOverride}
+                placeholder={eur(api?.freshShopifyAov?.value ?? baseline?.aov.value)}
+                tip="Average order value (€), GROSS / incl. VAT. Defaults to the fresh, comp-excluded Shopify store AOV (current, runs past the stale ad window). Net is derived via the VAT rate. Override to model a different basket."
+              />
+              <NumField
+                label="Gross margin (%)"
+                value={grossMarginPct}
+                onChange={setGrossMarginPct}
+                step={1}
+                min={0}
+                max={100}
+                tip="Gross profit as a percent of NET (ex-VAT) revenue — the standard COGS margin (enter 65 for 65%). Applied to net AOV, not gross, so VAT is never counted as profit."
+              />
+              <NumField
+                label="VAT rate (%)"
+                value={vatRatePct}
+                onChange={setVatRatePct}
+                step={1}
+                min={0}
+                max={100}
+                tip="VAT as a percent of the gross AOV (enter 20 for 20%, UK default). Net AOV = AOV ÷ (1 + VAT). Bootle has no single rate (DE 19, FR 20, IT 22, IE 23, UK 20; variance absorbed at one price band) — adjust to model a specific market. Set 0 for ex-VAT (e.g. US) pricing."
+              />
+              <NumField
+                label="LTV multiplier (M)"
+                value={ltvMultiplier}
+                onChange={setLtvMultiplier}
+                step={0.05}
+                min={1}
+                tip="Repeat-value multiplier on gross profit, M = 1 + repeat rate (1.0 = no repeat). Captures backend / accessory sales on the modular product. Only affects the '(with LTV)' figures."
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Live cause→effect readout: the CVR → achievable CPA chain, visible. */}
+        {model === "cps" && (
+          <div
+            className="mt-4 rounded-lg p-3 text-xs flex flex-wrap items-center gap-x-2 gap-y-1"
+            style={{ background: "var(--bg-primary)", color: "var(--text-secondary)" }}
+          >
+            <span>
+              Conversion rate <strong>{pct(effectiveCvrDisplay)}</strong>
+            </span>
+            <span aria-hidden>→</span>
+            <span>
+              achievable CPA <strong>{eur(impliedBaselineCpa)}</strong>
+              <span className="opacity-70"> (CPC {eur(baseline?.cpc.value)} ÷ CVR)</span>
+            </span>
+            <span aria-hidden>·</span>
+            <span>
+              break-even CPA <strong>{eur(breakEvenCpaDisplay)}</strong>
+            </span>
+            <span className="basis-full" />
+            {targetCpaOverride.trim() === "" ? (
+              <span>
+                The projection uses the <strong>achievable</strong> CPA, so moving conversion
+                rate moves the result. Raise CVR until achievable drops below break-even to
+                turn a profit. Type a Target CPA to pin a hypothetical instead.
+              </span>
+            ) : (
+              <span>
+                Pinned to your typed Target CPA of <strong>€{targetCpaOverride.trim()}</strong>{" "}
+                — conversion rate no longer moves the projection. Clear it to go back to the
+                CVR-driven achievable CPA.
+              </span>
+            )}
+          </div>
         )}
       </Collapsible>
 
