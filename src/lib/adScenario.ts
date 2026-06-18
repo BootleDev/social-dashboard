@@ -191,13 +191,20 @@ export interface Scenario {
    */
   vatRate?: number;
   /**
-   * Gross margin as a decimal (0.65 = 65%). Gross profit per conversion is
-   * netAov * gm (margin is measured on NET, ex-VAT, revenue — the standard COGS
-   * convention); break-even and profit are computed against gross profit, NOT
-   * revenue. Required for profit/break-even; defaults to 1 (treat net AOV as
-   * pure margin) only if a caller explicitly opts out.
+   * CONTRIBUTION margin as a decimal (0.50 = 50%) — net AOV retained after ALL
+   * variable per-order costs: COGS + payment-processing fees + shipping /
+   * fulfillment + pick-pack + a returns provision. NOT gross margin (COGS only):
+   * an incremental ad-driven sale incurs those other variable costs too, so the
+   * margin that decides whether the sale pays for its ad cost is contribution,
+   * not gross. Using gross margin here would overstate per-sale profit and make
+   * break-even CPA read too permissively (the dangerous direction).
+   *
+   * Measured on NET (ex-VAT) revenue. Contribution per conversion = netAov × this;
+   * break-even and profit are computed against that contribution, not revenue.
+   * Required for profit/break-even; defaults to 1 (treat net AOV as pure
+   * contribution) only if a caller explicitly opts out.
    */
-  grossMargin: number;
+  contributionMargin: number;
   /**
    * Lifetime value multiplier M: average lifetime gross profit per ACQUIRED
    * CUSTOMER as a multiple of their first order (M = 1 + repeatPurchaseRate;
@@ -244,27 +251,27 @@ export interface Projection {
    * `revenue` when vatRate is 0/undefined.
    */
   netRevenue: number | undefined;
-  /** Gross profit on the front end, conversions * netAov * grossMargin (no M). */
+  /** Gross profit on the front end, conversions * netAov * contributionMargin (no M). */
   grossProfit: number | undefined;
   /** Cost per acquisition, EUR. Undefined when conversions are 0. */
   cpa: number | undefined;
   /** Return on ad spend, revenue / spend. Undefined when spend is 0. */
   roas: number | undefined;
   /**
-   * Front-end net profit per sale, EUR: aov*grossMargin − cpa. Negative when
+   * Front-end net profit per sale, EUR: aov*contributionMargin − cpa. Negative when
    * CPA exceeds gross profit per unit (you lose money on the first sale).
    */
   profitPerSale: number | undefined;
   /**
    * Lifetime net profit per sale including the repeat multiplier:
-   * aov*grossMargin*ltvMultiplier − cpa.
+   * aov*contributionMargin*ltvMultiplier − cpa.
    */
   profitPerSaleLtv: number | undefined;
   /** Total front-end net profit, EUR: grossProfit − spend. */
   totalProfit: number | undefined;
   /**
    * Click-grain CVR at which front-end profit = 0, given price and gross
-   * profit per unit: effectiveCpc / (aov*grossMargin).
+   * profit per unit: effectiveCpc / (aov*contributionMargin).
    */
   breakEvenCvr: number | undefined;
   /** Same break-even CVR but crediting lifetime value (divides by *M). */
@@ -306,7 +313,20 @@ export interface RangedProjection {
 export interface TrafficForecast {
   /** The daily budget the forecast is built on, EUR. */
   dailyBudget: number;
-  /** Sessions/clicks per day, week, month (30d). undefined for cps (no traffic stage). */
+  /**
+   * SITE VISITORS the spend buys per day/week/month = dailyBudget ÷ effective
+   * CPC. Computed in EVERY mode, including conversion-bid: ad spend drives real
+   * clicks/visitors regardless of how you're billed, and not every visitor
+   * converts — this is the number that decides whether an on-SITE A/B test can
+   * reach significance. undefined when no CPC is known.
+   */
+  visitorsPerDay: number | undefined;
+  visitorsPerWeek: number | undefined;
+  visitorsPerMonth: number | undefined;
+  /**
+   * Engaged sessions = visitors × (1 − bounce). Equals visitors when no bounce
+   * rate is modeled. The denominator for an on-site conversion A/B test.
+   */
   sessionsPerDay: number | undefined;
   sessionsPerWeek: number | undefined;
   sessionsPerMonth: number | undefined;
@@ -326,6 +346,16 @@ export interface TrafficForecast {
    * learning phase. undefined when conversions/day is 0.
    */
   daysToReadableSample: number | undefined;
+  /**
+   * A/B-TEST FEASIBILITY at this spend. `siteTestDays` = days until enough
+   * VISITORS land to detect the configured effect on an on-site test (e.g. a PDP
+   * change moving add-to-cart); `conversionTestDays` = days until enough
+   * CONVERSIONS to detect the effect on the purchase rate itself. Each undefined
+   * when the rate is 0 or inputs are unknown. These answer "is testing even
+   * worth it at this budget, or will it take months?".
+   */
+  siteTestDays: number | undefined;
+  conversionTestDays: number | undefined;
 }
 
 // ===========================================================================
@@ -406,6 +436,28 @@ export const LEARNING_PHASE = {
 } as const;
 
 /**
+ * A/B-test planning defaults. The sample size to detect an effect on a
+ * proportion (conversion rate, add-to-cart rate) depends on the baseline rate
+ * and the minimum effect you care about. We use the standard two-proportion
+ * planning approximation (95% confidence, 80% power):
+ *   n per variant ≈ (z_α/2 + z_β)² · 2 · p(1−p) / (p·mde)²
+ * with (1.96 + 0.84)² ≈ 7.85. See abTestSampleSizePerVariant in stats.ts.
+ *
+ * `minDetectableEffect` is the RELATIVE lift you want to be able to detect
+ * (0.20 = a 20% relative improvement, e.g. 2.0% → 2.4%). Smaller = far more
+ * samples. 0.20 is a pragmatic e-commerce default — detecting sub-10% lifts on a
+ * low-traffic store is rarely feasible, and a 20% lift is what's worth shipping.
+ */
+export const AB_TEST_DEFAULTS = {
+  /** Relative effect to power for (0.20 = detect a 20% relative lift). */
+  minDetectableEffect: 0.2,
+  /** z for 95% two-sided confidence. */
+  zAlpha: 1.96,
+  /** z for 80% power. */
+  zBeta: 0.84,
+} as const;
+
+/**
  * Default VAT rate applied to the gross AOV to derive net (ex-VAT) revenue for
  * profit/break-even. 0.20 = UK 20%. Bootle has no single rate across markets
  * (DE 19, FR 20, IT 22, IE 23; variance absorbed at one price band), so this is
@@ -415,6 +467,24 @@ export const LEARNING_PHASE = {
  * resolveScenario and PaidPanel.
  */
 export const DEFAULT_VAT_RATE = 0.2;
+
+/**
+ * Default CONTRIBUTION margin (decimal) — net AOV kept after ALL variable
+ * per-order costs, used as the UI default until Bootle's measured figure is
+ * recorded in the pricing config.
+ *
+ * DERIVED ESTIMATE (replace with the real number when available):
+ *   gross margin (after COGS)          ~0.65   (the figure quoted historically)
+ *   − payment processing (~2.5% of rev) ~0.025
+ *   − shipping / fulfillment / pick-pack ~0.10  (~€5-7 on a ~€55 net AOV via 3PL)
+ *   − returns provision                 ~0.025  (~3-5% return rate, restock loss)
+ *   = contribution margin              ≈0.50
+ * This is intentionally below the gross figure so break-even reads honestly
+ * (gross margin would overstate per-sale profit). 0.50 is an ASSUMPTION, not a
+ * measurement — adjust the field, and ideally pin the real value in
+ * bootle-vault/_meta/config/pricing/ and feed it here.
+ */
+export const DEFAULT_CONTRIBUTION_MARGIN = 0.5;
 
 /**
  * Provisional storefront conversion rate used as the default CVR until live GA4
@@ -434,6 +504,17 @@ export const PROVISIONAL_SESSION_CVR = 0.002;
 /** Date the PROVISIONAL_SESSION_CVR was read from Shopify Analytics. */
 export const PROVISIONAL_CVR_AS_OF = "2026-06-17";
 
+/**
+ * Provisional session → add-to-cart rate (~2.3%), from Shopify's storefront
+ * funnel — the binding leak tracked in WEBDEV-149 (sessions → ATC is where the
+ * funnel loses most people, well before checkout). Used ONLY to power the
+ * "site / CRO test" feasibility read: an on-site change (e.g. a PDP tweak) is
+ * judged on add-to-cart, a higher rate than purchase, so it needs far fewer
+ * visitors to test than a purchase-rate change. Provisional until live GA4
+ * funnel data lands; editable assumption, not a measured ad-attributed rate.
+ */
+export const PROVISIONAL_ATC_RATE = 0.023;
+
 // ===========================================================================
 // Input sentinels — boundary guards (pattern ported from rateSentinel.ts)
 // ===========================================================================
@@ -444,7 +525,7 @@ const FRACTION_FIELDS: ReadonlyArray<keyof Scenario> = [
   "bounceRate",
   "sessionCvr",
   "clickCvr",
-  "grossMargin",
+  "contributionMargin",
   "vatRate",
 ];
 

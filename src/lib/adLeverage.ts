@@ -13,9 +13,9 @@
  *
  * THE MATH (closed form, no search):
  *   At break-even, front-end profit = 0, i.e. grossProfit = spend, where
- *   grossProfit = conversions × netAov × grossMargin.
- *   - CVR, AOV, grossMargin are LINEAR in grossProfit. To bring grossProfit up
- *     to spend, multiply the lever by  spend / grossProfit. (grossMargin is
+ *   grossProfit = conversions × netAov × contributionMargin.
+ *   - CVR, AOV, contributionMargin are LINEAR in grossProfit. To bring grossProfit up
+ *     to spend, multiply the lever by  spend / grossProfit. (contributionMargin is
  *     additionally capped at 1.0 — you can't have >100% margin — so its required
  *     factor may be unreachable.)
  *   - The COST lever (targetCpa for cps; effective CPC for cpc/cpm) is INVERSE:
@@ -34,7 +34,7 @@ export type LeverUnit = "pct" | "eur";
 /** A lever the operator can move, with its break-even threshold + profit sensitivity. */
 export interface Lever {
   /** Stable key for the lever. */
-  key: "cvr" | "aov" | "grossMargin" | "cost";
+  key: "cvr" | "aov" | "contributionMargin" | "cost";
   /** Human label for the UI. */
   label: string;
   /** Display unit for currentValue / breakEvenValue. */
@@ -82,8 +82,18 @@ export interface Verdict {
    * it's the same ratio (<1, headroom). undefined when grossProfit is 0/unknown.
    */
   multipleFromBreakeven: number | undefined;
-  /** The lever with the smallest reachable required change — what to fix first. */
+  /**
+   * The reachable lever to fix/watch first, or undefined when NO lever can reach
+   * break-even on its own (a deeply-losing run). When undefined, the UI shows a
+   * "no single lever fixes this" banner instead of highlighting one — never point
+   * the operator at an impossible lever (e.g. a >100% margin) as the thing to do.
+   */
   bindingConstraintKey: Lever["key"] | undefined;
+  /**
+   * True when no lever is reachable on its own — the funnel needs structural work,
+   * not a single tune. Drives the banner + suppresses the "watch" highlight.
+   */
+  noReachableLever: boolean;
   /** Verbatim summary string for the UI. */
   summary: string;
 }
@@ -172,8 +182,23 @@ function currentCvr(scenario: Scenario): number | undefined {
  *    cost. These give honest, lever-specific numbers (CVR/AOV/margin share a
  *    factor but differ in real units and €/step), breaking the apparent tie.
  */
-function buildLevers(scenario: Scenario, projection: Projection): Lever[] {
-  const gp = projection.grossProfit;
+function buildLevers(
+  scenario: Scenario,
+  projection: Projection,
+  context: LeverageContext = {},
+): Lever[] {
+  // In conversion-bid (cps) the scenario's targetCpa is DERIVED from the CVR
+  // field, which may be optimistic — so `projection` can describe a funnel that
+  // doesn't exist. For lever purposes we want the MEASURED reality: re-run the
+  // funnel at the achievable CPA the funnel actually delivers, so every lever
+  // (lift factors AND the CVR slope) is anchored to the same real funnel and the
+  // table can't simultaneously say "AOV is nearly fine" (optimistic) and "CVR is
+  // hopeless" (measured). For cpc/cpm, `projection` already IS the reality.
+  const basis =
+    scenario.model === "cps" && context.achievableCpa !== undefined
+      ? runProjection({ ...scenario, targetCpa: context.achievableCpa })
+      : projection;
+  const gp = basis.grossProfit;
   const spend = scenario.spend;
   const haveRatio = gp !== undefined && gp > 0 && spend > 0;
   const linearFactor = haveRatio ? spend / (gp as number) : undefined;
@@ -184,7 +209,7 @@ function buildLevers(scenario: Scenario, projection: Projection): Lever[] {
     f !== undefined && f <= LEVERAGE_GUARDS.maxLiftFactor;
 
   const reqMargin =
-    linearFactor === undefined ? undefined : scenario.grossMargin * linearFactor;
+    linearFactor === undefined ? undefined : scenario.contributionMargin * linearFactor;
   const marginReachable =
     reqMargin !== undefined && reqMargin <= 1 && liftReachable(linearFactor);
   const costReachable =
@@ -237,10 +262,10 @@ function buildLevers(scenario: Scenario, projection: Projection): Lever[] {
       : []),
     lift("aov", "Average order value", "eur", scenario.aov, 1, liftReachable(linearFactor)),
     lift(
-      "grossMargin",
-      "Gross margin",
+      "contributionMargin",
+      "Contribution margin",
       "pct",
-      scenario.grossMargin,
+      scenario.contributionMargin,
       0.01,
       marginReachable,
       reqMargin !== undefined && reqMargin > 1
@@ -249,7 +274,41 @@ function buildLevers(scenario: Scenario, projection: Projection): Lever[] {
     ),
   ];
 
-  if (cost !== undefined) {
+  // CONVERSION-RATE lever for conversion-bid (cps). The CPA there is DERIVED from
+  // CVR (achievable CPA = CPC ÷ CVR), so a "target CPA" lever is self-referential
+  // and contradicts the verdict ("the constraint is conversion rate"). Instead,
+  // when the caller supplies the measured CVR + achievable CPA, express the real
+  // lever: the funnel's CURRENT CVR vs the CVR it must reach to break even.
+  //   required CVR = measuredCVR × (achievableCPA ÷ break-even CPA)
+  // (achievable CPA ∝ 1/CVR, so to bring achievable down to break-even CPA, CVR
+  // must rise by that ratio). This is the honest, controllable constraint.
+  if (scenario.model === "cps") {
+    const beCpa = breakEvenCpa(scenario);
+    const measured = context.measuredCvr;
+    const achievable = context.achievableCpa;
+    if (measured !== undefined && measured > 0 && achievable !== undefined && beCpa !== undefined && beCpa > 0) {
+      const requiredCvr = measured * (achievable / beCpa);
+      const factor = requiredCvr / measured; // >1 = must rise
+      const reachable = factor <= LEVERAGE_GUARDS.maxLiftFactor;
+      // Profit moves linearly with CVR (more conversions for the same budget);
+      // per +1pp, dProfit ≈ grossProfit/CVR × 0.01 at the modeled rate.
+      const slope = g !== undefined ? (g / measured) * 0.01 : undefined;
+      levers.push({
+        key: "cvr",
+        label: "Conversion rate",
+        unit: "pct",
+        currentValue: measured,
+        breakEvenValue: requiredCvr,
+        profitPerStep: slope,
+        stepLabel: "+1pp",
+        factor,
+        reachable,
+        binding: false,
+        note: liftNote(measured, requiredCvr, slope, "pct"),
+      });
+    }
+  } else if (cost !== undefined) {
+    // Traffic models (cpc/cpm): the cost lever IS a real input (CPC / CPM price).
     const breakEvenCost =
       costFactor !== undefined ? cost * costFactor : undefined;
     const slope = g !== undefined && cost > 0 ? -g / cost : undefined; // dProfit/dCost < 0
@@ -324,15 +383,27 @@ function costNote(
 }
 
 /**
- * Rank levers for "what to fix first": reachable levers before unreachable ones,
- * then by smallest required change (closest to 1.0 wins). Stable, immutable.
+ * Rank levers by REAL-WORLD margin of safety — the lever whose one natural step
+ * (+1pp CVR/margin, +€1 AOV/cost) moves profit the most is the one to watch
+ * first. This is the honest "binding constraint": all three LIFT levers share
+ * the same multiplicative break-even `factor` (moving any of them by the same
+ * fraction has identical effect), so ranking on `factor` ties them and the pick
+ * collapses to array order. `profitPerStep` is genuinely lever-specific — it's
+ * the €-impact of the unit the operator actually controls (you move CVR by
+ * points, not by multiplying it) — so it breaks the tie meaningfully.
+ *
+ * Reachability still leads: a lever you cannot move on its own is never the
+ * thing to "fix first", so reachable levers rank ahead of unreachable ones.
+ * Within a reachability tier, larger |profitPerStep| wins (most sensitive to a
+ * one-step real-world move). Levers with no computable sensitivity sort last.
+ * Stable, immutable.
  */
 function rankLevers(levers: Lever[]): Lever[] {
-  const distance = (l: Lever) =>
-    l.factor === undefined ? Infinity : Math.abs(Math.log(l.factor));
+  const sensitivity = (l: Lever) =>
+    l.profitPerStep === undefined ? -Infinity : Math.abs(l.profitPerStep);
   return [...levers].sort((a, b) => {
     if (a.reachable !== b.reachable) return a.reachable ? -1 : 1;
-    return distance(a) - distance(b);
+    return sensitivity(b) - sensitivity(a);
   });
 }
 
@@ -348,6 +419,14 @@ export interface LeverageContext {
    * of how profitable that target *would* be. Undefined when not known.
    */
   achievableCpa?: number;
+  /**
+   * The funnel's MEASURED conversion rate (decimal). In conversion-bid (cps)
+   * mode the CPA is derived from CVR, not a free input — so the honest lever is
+   * conversion rate, not "target CPA". When supplied (with achievableCpa), the
+   * cps lever table shows a real Conversion-rate row (now vs the rate needed to
+   * break even) instead of the derived, self-referential Target-CPA row.
+   */
+  measuredCvr?: number;
 }
 
 /**
@@ -377,31 +456,47 @@ export function analyzeLeverage(
   else if (totalProfit >= -band) status = "marginal";
   else status = "hold";
 
-  // ACHIEVABILITY GATE (conversion-bid): a target CPA only matters if the funnel
-  // can hit it. If the achievable CPA (CPC ÷ CVR) is materially above the target,
-  // the "profitable at this target" reading is a mirage — force HOLD.
+  // ACHIEVABILITY GATE (conversion-bid). The honest question is: can the funnel
+  // deliver a PROFITABLE cost per sale? That's `achievable CPA ≤ break-even CPA`.
+  // We key the gate off break-even — NOT off the scenario's targetCpa — because
+  // targetCpa is now DERIVED from the (possibly optimistic) CVR field, so
+  // comparing achievable-vs-target reduced to "is the CVR field above the
+  // measured rate?", which made the gate a no-op in the common default state
+  // (CVR field == measured) and only fire when the user typed an optimistic CVR.
+  // Comparing against break-even makes the "your funnel can't pay for ads"
+  // verdict fire whenever it's actually true, regardless of what CVR is modeled.
   const targetCpa = scenario.targetCpa;
   const achievableCpa = context.achievableCpa;
+  const beCpaForGate = breakEvenCpa(scenario);
   const targetUnachievable =
     scenario.model === "cps" &&
-    targetCpa !== undefined &&
     achievableCpa !== undefined &&
-    achievableCpa > targetCpa * (1 + LEVERAGE_GUARDS.marginalBand);
+    beCpaForGate !== undefined &&
+    beCpaForGate > 0 &&
+    achievableCpa > beCpaForGate * (1 + LEVERAGE_GUARDS.marginalBand);
   if (targetUnachievable) status = "hold";
 
-  const built = buildLevers(scenario, projection);
+  const built = buildLevers(scenario, projection, context);
   const ranked = rankLevers(built);
-  // Binding = the lever to watch/fix first: thinnest margin of safety. When
-  // profitable, that's the lever closest to its break-even threshold; when
-  // losing, the smallest reachable required change. rankLevers already orders by
-  // |log(factor)| within reachability, so the first entry is the binding one.
-  // The cost lever and a lift lever can tie on |log(factor)| (reciprocal); break
-  // the tie toward the lever the operator can actually move (cost for cps).
-  const bindingLever = ranked.find((l) => l.reachable) ?? ranked[0];
+  // Binding = the lever to watch/fix first.
+  //
+  // ACHIEVABILITY OVERRIDE (cps): when the gate has fired, the funnel's
+  // conversion rate IS the constraint — the verdict says so, so the CVR row must
+  // be the highlighted one even though it's "unreachable" (it's the answer, not
+  // a tuning knob). This keeps the headline and the table in agreement.
+  //
+  // Otherwise: the reachable lever whose one natural step moves profit the most
+  // (rankLevers orders reachable levers by descending |profitPerStep|). When NO
+  // lever is reachable on its own, there is no honest single thing to "watch" —
+  // mark none and let the UI show the "needs structural work" banner instead of
+  // pointing at an impossible lever.
+  const cvrRow = targetUnachievable ? ranked.find((l) => l.key === "cvr") : undefined;
+  const bindingLever = cvrRow ?? ranked.find((l) => l.reachable);
+  const noReachableLever = bindingLever === undefined;
   const binding = bindingLever
     ? { ...bindingLever, binding: true }
     : undefined;
-  // Re-mark the binding lever in the ranked list (immutable).
+  // Re-mark the binding lever in the ranked list (immutable). No-op when none.
   const leversOut = ranked.map((l) =>
     l.key === binding?.key ? { ...l, binding: true } : l,
   );
@@ -410,11 +505,19 @@ export function analyzeLeverage(
     verdict: {
       status,
       multipleFromBreakeven,
+      // When the achievability gate fires, conversion rate is the constraint by
+      // definition — report it as binding even if the caller didn't supply the
+      // measured CVR needed to render a CVR row.
       bindingConstraintKey: targetUnachievable ? "cvr" : binding?.key,
+      // The CVR row carries the message when the gate fires, so it's not a
+      // "no single lever" situation — the banner only shows when truly nothing
+      // is the answer.
+      noReachableLever: binding === undefined && !targetUnachievable ? noReachableLever : false,
       summary: buildSummary(status, multipleFromBreakeven, binding, scenario, {
         targetUnachievable,
         targetCpa,
         achievableCpa,
+        noReachableLever,
       }),
     },
     levers: leversOut,
@@ -502,24 +605,17 @@ function buildSummary(
     targetUnachievable: boolean;
     targetCpa: number | undefined;
     achievableCpa: number | undefined;
+    noReachableLever?: boolean;
   } = { targetUnachievable: false, targetCpa: undefined, achievableCpa: undefined },
 ): string {
   // Conversion-bid: target is profitable on paper but the funnel can't deliver it.
+  // Keep this to ONE plain sentence — the recommendation below carries the numbers
+  // (target CPA, required CVR lift) and the lever table shows now → needs. Saying
+  // the same figures here too is what made the panel read as redundant.
   if (achievability.targetUnachievable) {
-    const eur = (v: number | undefined) =>
-      v === undefined ? "—" : `€${v.toLocaleString("en-IE", { maximumFractionDigits: 0 })}`;
-    const mult =
-      achievability.achievableCpa !== undefined &&
-      achievability.targetCpa !== undefined &&
-      achievability.targetCpa > 0
-        ? ` (~${(achievability.achievableCpa / achievability.targetCpa).toFixed(0)}× too costly)`
-        : "";
     return (
-      `Below break-even — do not scale spend. A target CPA of ` +
-      `${eur(achievability.targetCpa)} would be profitable, but your current ` +
-      `funnel can only deliver ~${eur(achievability.achievableCpa)} per sale${mult}. ` +
-      `The binding constraint is conversion rate, not ad pricing — fix the funnel ` +
-      `before scaling.`
+      "Your funnel can't pay for ads yet. Conversion rate is too low to hit a " +
+      "profitable cost per sale — fix the funnel before spending (details below)."
     );
   }
   if (status === "scale") {
@@ -533,14 +629,18 @@ function buildSummary(
   }
   // hold
   const x =
-    multiple !== undefined ? `~${multiple.toFixed(multiple >= 10 ? 0 : 1)}× below break-even` : "below break-even";
-  const lever = binding
-    ? ` The binding constraint is ${binding.label.toLowerCase()} (${binding.note}).`
-    : "";
-  const costName = scenario.model === "cps" ? "the target CPA" : "ad pricing";
-  const efficiencyAside =
-    binding && binding.key !== "cost"
-      ? ` ${costName[0].toUpperCase()}${costName.slice(1)} is already efficient, so tuning it won't help.`
-      : "";
-  return `Below break-even — do not scale spend (${x}).${lever}${efficiencyAside}`;
+    multiple !== undefined
+      ? `${multiple.toFixed(multiple >= 10 ? 0 : 1)}× below break-even`
+      : "below break-even";
+
+  // No reachable lever: the funnel needs structural work, not a single tune.
+  // Keep it to one clean sentence — the lever table shows the per-lever figures
+  // and the banner spells out "no single lever fixes this".
+  if (achievability.noReachableLever || !binding) {
+    return `Below break-even (${x}) — do not scale. No single input can cross the line on its own; the funnel needs structural work before paid pays off.`;
+  }
+
+  // One reachable binding lever: name it, its current→target, and its leverage.
+  // binding.note already reads "must reach €X (now €Y) · +1pp → +€Z profit".
+  return `Below break-even (${x}) — do not scale. Highest-leverage fix: ${binding.label.toLowerCase()} — ${binding.note}.`;
 }

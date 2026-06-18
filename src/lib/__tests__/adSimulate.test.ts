@@ -35,7 +35,7 @@ function baseline(overrides: Partial<Baseline> = {}): Baseline {
 }
 
 function overrides(o: Partial<ScenarioOverrides> = {}): ScenarioOverrides {
-  return { model: "cpc", budget: 500, grossMargin: 0.65, ...o };
+  return { model: "cpc", budget: 500, contributionMargin: 0.65, ...o };
 }
 
 describe("resolveScenario — overrides onto baseline", () => {

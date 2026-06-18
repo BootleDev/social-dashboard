@@ -175,6 +175,39 @@ export function wilsonInterval(
 }
 
 /**
+ * Sample size PER VARIANT to detect a relative lift on a proportion in an A/B
+ * test, using the standard two-proportion planning approximation:
+ *
+ *   n_per_variant ≈ (z_α/2 + z_β)² · 2 · p̄(1−p̄) / (p₂ − p₁)²
+ *
+ * where p₁ = baseRate, p₂ = baseRate·(1 + mde), p̄ = (p₁+p₂)/2, and (z_α/2, z_β)
+ * are the confidence/power z-scores (defaults: 95% two-sided, 80% power). This
+ * is the textbook planning formula — a deliberately approximate "how big a test
+ * do I need?" number, NOT an exact frequentist design. It blows up (→ huge) as
+ * the baseline rate or the effect shrink, which is exactly the honest signal: a
+ * 0.2% conversion rate needs an enormous sample to test on conversions.
+ *
+ * Returns undefined for a non-positive/≥1 baseRate or a non-positive mde — there
+ * is no finite planning number then. Pure; no I/O.
+ */
+export function abTestSampleSizePerVariant(
+  baseRate: number,
+  mde: number,
+  zAlpha = 1.96,
+  zBeta = 0.84,
+): number | undefined {
+  if (!Number.isFinite(baseRate) || baseRate <= 0 || baseRate >= 1) return undefined;
+  if (!Number.isFinite(mde) || mde <= 0) return undefined;
+  const p1 = baseRate;
+  const p2 = Math.min(1, baseRate * (1 + mde));
+  const delta = p2 - p1;
+  if (delta <= 0) return undefined;
+  const pBar = (p1 + p2) / 2;
+  const z = zAlpha + zBeta;
+  return (z * z * 2 * pBar * (1 - pBar)) / (delta * delta);
+}
+
+/**
  * Percent change with explicit handling for the zero-baseline trap.
  * Returns undefined when `from` is 0 (Δ% is not defined), so callers can
  * render "new" or "—" rather than Infinity.

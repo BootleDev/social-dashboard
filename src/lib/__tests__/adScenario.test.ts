@@ -15,7 +15,7 @@ function clickScenario(overrides: Partial<Scenario> = {}): Scenario {
     spend: 500,
     cpc: 0.4,
     aov: 45,
-    grossMargin: 0.65,
+    contributionMargin: 0.65,
     ltvMultiplier: 1,
     clickCvr: 0.015,
     ...overrides,

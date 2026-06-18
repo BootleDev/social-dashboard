@@ -8,6 +8,7 @@ import {
   formatPct,
   trendVerdict,
   wilsonInterval,
+  abTestSampleSizePerVariant,
 } from "../stats";
 
 describeTest("quantile", () => {
@@ -158,5 +159,35 @@ describeTest("wilsonInterval", () => {
     expect(wilsonInterval(-1, 100)).toBeUndefined();
     expect(wilsonInterval(101, 100)).toBeUndefined();
     expect(wilsonInterval(5, NaN)).toBeUndefined();
+  });
+});
+
+describeTest("abTestSampleSizePerVariant", () => {
+  it("matches the textbook two-proportion planning size (±5%)", () => {
+    // p=2%, 20% relative MDE (2.0%→2.4%), 95%/80%. Reference ≈ 21,000/variant.
+    const n = abTestSampleSizePerVariant(0.02, 0.2)!;
+    expect(n).toBeGreaterThan(19_000);
+    expect(n).toBeLessThan(23_000);
+  });
+
+  it("scales roughly inversely with the baseline rate (tiny rate → huge sample)", () => {
+    const nLow = abTestSampleSizePerVariant(0.002, 0.2)!; // 0.2%
+    const nHigh = abTestSampleSizePerVariant(0.02, 0.2)!; // 2.0%
+    // ~10× lower rate → ~10× the sample (the honest 'you can't test purchases').
+    expect(nLow / nHigh).toBeGreaterThan(8);
+    expect(nLow / nHigh).toBeLessThan(12);
+  });
+
+  it("needs far more samples for a smaller detectable effect", () => {
+    const small = abTestSampleSizePerVariant(0.02, 0.1)!; // detect 10% lift
+    const big = abTestSampleSizePerVariant(0.02, 0.4)!; // detect 40% lift
+    expect(small).toBeGreaterThan(big);
+  });
+
+  it("returns undefined for degenerate inputs", () => {
+    expect(abTestSampleSizePerVariant(0, 0.2)).toBeUndefined();
+    expect(abTestSampleSizePerVariant(1, 0.2)).toBeUndefined();
+    expect(abTestSampleSizePerVariant(0.02, 0)).toBeUndefined();
+    expect(abTestSampleSizePerVariant(NaN, 0.2)).toBeUndefined();
   });
 });

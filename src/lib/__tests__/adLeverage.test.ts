@@ -12,7 +12,7 @@ function losing(overrides: Partial<Scenario> = {}): Scenario {
     cpc: 0.33,
     aov: 37.53,
     vatRate: 0.2,
-    grossMargin: 0.65,
+    contributionMargin: 0.65,
     ltvMultiplier: 1,
     clickCvr: 0.0006, // ~0.06%, far below break-even
     ...overrides,
@@ -75,21 +75,42 @@ describe("lever factors are the real break-even points (apply back, profit ≈ 0
     expect(p.totalProfit).toBeCloseTo(0, 4);
   });
 
-  it("cps target-CPA cost factor: shrinking targetCpa by it zeroes totalProfit", () => {
+  it("cps surfaces a CONVERSION-RATE lever (not a derived target-CPA lever) with the right break-even target", () => {
+    // cps CPA is derived from CVR, so the honest lever is conversion rate: the
+    // funnel's current CVR vs the CVR needed to break even. With measured CVR +
+    // achievable CPA in context, the table shows that — no "cost" row.
     const s: Scenario = {
       model: "cps",
       budget: 500,
       spend: 500,
-      targetCpa: 80, // way above break-even contribution → losing
-      aov: 37.53,
+      targetCpa: 20,
+      aov: 67.85,
       vatRate: 0.2,
-      grossMargin: 0.65,
+      contributionMargin: 0.5,
       ltvMultiplier: 1,
     };
-    const costLever = analyzeLeverage(s).levers.find((l) => l.key === "cost")!;
-    const f = costLever.factor as number;
-    const p = runProjection({ ...s, targetCpa: (s.targetCpa as number) * f });
-    expect(p.totalProfit).toBeCloseTo(0, 4);
+    const r = analyzeLeverage(s, { achievableCpa: 179, measuredCvr: 0.002 });
+    expect(r.levers.some((l) => l.key === "cost")).toBe(false); // no derived CPA lever
+    const cvr = r.levers.find((l) => l.key === "cvr")!;
+    expect(cvr.currentValue).toBeCloseTo(0.002, 6);
+    // required CVR = measuredCVR × (achievableCPA ÷ break-even CPA).
+    // break-even CPA = net AOV × CM = (67.85/1.2) × 0.5 ≈ 28.27.
+    const beCpa = (67.85 / 1.2) * 0.5;
+    expect(cvr.breakEvenValue).toBeCloseTo(0.002 * (179 / beCpa), 6);
+    expect(cvr.reachable).toBe(false); // ~7.9× lift → structural
+  });
+
+  it("cps without measured-CVR context shows no cost/cvr row (nothing to fake)", () => {
+    // No context → can't build an honest CVR lever and won't show a derived CPA
+    // one, so cps falls back to just the lift levers (AOV, contribution margin).
+    const s: Scenario = {
+      model: "cps", budget: 500, spend: 500, targetCpa: 20,
+      aov: 67.85, vatRate: 0.2, contributionMargin: 0.5, ltvMultiplier: 1,
+    };
+    const keys = analyzeLeverage(s).levers.map((l) => l.key);
+    expect(keys).not.toContain("cost");
+    expect(keys).not.toContain("cvr");
+    expect(keys).toContain("aov");
   });
 });
 
@@ -101,16 +122,30 @@ describe("reachability + ranking", () => {
   });
 
   it("a margin needing >100% is flagged unreachable with an explicit note", () => {
-    const marginLever = analyzeLeverage(losing()).levers.find((l) => l.key === "grossMargin")!;
+    const marginLever = analyzeLeverage(losing()).levers.find((l) => l.key === "contributionMargin")!;
     expect(marginLever.reachable).toBe(false);
     expect(marginLever.note).toMatch(/impossible|>100%|100%/);
   });
 
-  it("when no lever is reachable, the binding constraint is still the smallest-change one", () => {
+  it("when NO lever is reachable, marks none binding and flags noReachableLever", () => {
+    // Deeply-losing run (CVR ~0.06%): every lever needs an impossible move, so
+    // there is no honest single thing to 'watch' — never point at the impossible
+    // margin lever just because it has the highest raw sensitivity.
     const report = analyzeLeverage(losing());
-    expect(report.verdict.bindingConstraintKey).toBeDefined();
-    // levers are ranked; first is the best-leverage (smallest change) lever.
-    expect(report.levers[0]).toBeDefined();
+    expect(report.levers.every((l) => !l.reachable)).toBe(true);
+    expect(report.verdict.noReachableLever).toBe(true);
+    expect(report.verdict.bindingConstraintKey).toBeUndefined();
+    expect(report.levers.some((l) => l.binding)).toBe(false);
+    expect(report.verdict.summary).toMatch(/no single input|funnel needs structural work/i);
+  });
+
+  it("when SOME lever is reachable, that reachable lever is binding (never an impossible one)", () => {
+    // A milder scenario where levers can cross the line on their own.
+    const report = analyzeLeverage(losing({ clickCvr: 0.02 }));
+    const binding = report.levers.find((l) => l.binding);
+    expect(binding).toBeDefined();
+    expect(binding!.reachable).toBe(true);
+    expect(report.verdict.noReachableLever).toBe(false);
   });
 
   it("drops the cost lever when the model has no cost basis", () => {
@@ -134,7 +169,7 @@ describe("conversion-bid achievability gate", () => {
       targetCpa: (37.53 / 1.2) * 0.65, // ≈ €20.33 = break-even
       aov: 37.53,
       vatRate: 0.2,
-      grossMargin: 0.65,
+      contributionMargin: 0.65,
       ltvMultiplier: 1,
     };
   }
@@ -154,6 +189,42 @@ describe("conversion-bid achievability gate", () => {
     // achievable €18 < target €20.33 → reachable, stays marginal/scale.
     const r = analyzeLeverage(cpsAtBreakeven(), { achievableCpa: 18 });
     expect(r.verdict.status).not.toBe("hold");
+  });
+
+  it("fires in the DEFAULT state (target == achievable, both above break-even)", () => {
+    // Regression: the gate used to compare achievable-vs-target, which reduced to
+    // 'is the CVR field above the measured rate?'. So in the common default state
+    // (CVR field == measured → targetCpa == achievableCpa) it NEVER fired, and the
+    // broken funnel fell through to a generic 'structural work' message. It must
+    // now fire off achievable-vs-BREAK-EVEN: a funnel whose achievable CPA is far
+    // above break-even is unviable regardless of what CVR is modeled.
+    const s: Scenario = {
+      model: "cps", budget: 500, spend: 500,
+      targetCpa: 179, // == achievable (seeded from the measured CVR)
+      aov: 67.85, vatRate: 0.2, contributionMargin: 0.5, ltvMultiplier: 1,
+    };
+    const r = analyzeLeverage(s, { achievableCpa: 179, measuredCvr: 0.0019 });
+    expect(r.verdict.status).toBe("hold");
+    expect(r.verdict.bindingConstraintKey).toBe("cvr");
+    expect(r.verdict.summary).toMatch(/funnel can('|’)t pay|conversion rate/i);
+  });
+
+  it("levers are anchored to MEASURED reality, not an optimistic CVR field", () => {
+    // Regression: lift levers (AOV/margin) were computed from the optimistic
+    // projection while the CVR row used the measured rate, so the table could say
+    // 'AOV nearly fine' and 'CVR hopeless' at once. Now an unviable funnel reads
+    // consistently — no lift lever is 'reachable' when the funnel can't pay.
+    const optimistic: Scenario = {
+      model: "cps", budget: 500, spend: 500,
+      targetCpa: 17, // optimistic (from a typed 2% CVR) → CPC 0.34 / 0.02
+      aov: 67.85, vatRate: 0.2, contributionMargin: 0.5, ltvMultiplier: 1,
+    };
+    const r = analyzeLeverage(optimistic, { achievableCpa: 179, measuredCvr: 0.0019 });
+    const aov = r.levers.find((l) => l.key === "aov")!;
+    const cvr = r.levers.find((l) => l.key === "cvr")!;
+    // Both describe the SAME (measured) broken funnel → both unreachable.
+    expect(aov.reachable).toBe(false);
+    expect(cvr.reachable).toBe(false);
   });
 });
 
@@ -197,6 +268,32 @@ describe("profitable run", () => {
     const bound = report.levers.filter((l) => l.binding);
     expect(bound).toHaveLength(1);
   });
+
+  it("binding lever is the most sensitive reachable lever, not an array-order artifact", () => {
+    // Regression: all lift levers share the multiplicative break-even factor, so
+    // ranking on factor alone tied them and the binding pick collapsed to array
+    // order (always the first lever). The binding lever must now be the reachable
+    // lever with the largest |profitPerStep| — the one a single natural step
+    // (+1pp / +€1) moves profit the most.
+    const report = analyzeLeverage(winning());
+    const binding = report.levers.find((l) => l.binding)!;
+    const reachable = report.levers.filter((l) => l.reachable && l.profitPerStep !== undefined);
+    const maxSensitivity = Math.max(
+      ...reachable.map((l) => Math.abs(l.profitPerStep as number)),
+    );
+    expect(Math.abs(binding.profitPerStep as number)).toBeCloseTo(maxSensitivity, 6);
+  });
+
+  it("ranking orders reachable levers by descending profit sensitivity", () => {
+    const ranked = analyzeLeverage(winning()).levers.filter(
+      (l) => l.reachable && l.profitPerStep !== undefined,
+    );
+    for (let i = 1; i < ranked.length; i++) {
+      expect(Math.abs(ranked[i - 1].profitPerStep as number)).toBeGreaterThanOrEqual(
+        Math.abs(ranked[i].profitPerStep as number),
+      );
+    }
+  });
 });
 
 describe("recommend — concrete budget/CPA advisor", () => {
@@ -204,7 +301,7 @@ describe("recommend — concrete budget/CPA advisor", () => {
   function deliverable(): Scenario {
     return {
       model: "cps", budget: 500, spend: 500,
-      targetCpa: 20, aov: 67.85, vatRate: 0.2, grossMargin: 0.65, ltvMultiplier: 1,
+      targetCpa: 20, aov: 67.85, vatRate: 0.2, contributionMargin: 0.65, ltvMultiplier: 1,
     };
   }
 
@@ -232,7 +329,7 @@ describe("recommend — concrete budget/CPA advisor", () => {
   });
 
   it("holds when there is no positive contribution per sale (break-even <= 0)", () => {
-    const s: Scenario = { ...deliverable(), grossMargin: 0 };
+    const s: Scenario = { ...deliverable(), contributionMargin: 0 };
     const r = recommend(s, 10);
     expect(r.action).toBe("hold");
     expect(r.targetCpa).toBeUndefined();

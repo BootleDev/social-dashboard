@@ -22,7 +22,7 @@ function cpc(overrides: Partial<Scenario> = {}): Scenario {
     spend: 500,
     cpc: 0.4,
     aov: 45,
-    grossMargin: 0.65,
+    contributionMargin: 0.65,
     ltvMultiplier: 1,
     clickCvr: 0.015,
     ...overrides,
@@ -37,7 +37,7 @@ function cpm(overrides: Partial<Scenario> = {}): Scenario {
     cpm: 12,
     ctr: 0.039,
     aov: 45,
-    grossMargin: 0.65,
+    contributionMargin: 0.65,
     ltvMultiplier: 1,
     clickCvr: 0.015,
     ...overrides,
@@ -187,22 +187,22 @@ describe("break-even helpers", () => {
     );
   });
 
-  it("breakEvenClickCvr = effectiveCpc / (aov * grossMargin) — Gemini's 3.42%", () => {
+  it("breakEvenClickCvr = effectiveCpc / (aov * contributionMargin) — Gemini's 3.42%", () => {
     // €1.00 CPC, €45 AOV, 65% GM → 1/(45*0.65) = 1/29.25 = 0.0342.
     expect(
-      breakEvenClickCvr(cpc({ cpc: 1.0, aov: 45, grossMargin: 0.65 })),
+      breakEvenClickCvr(cpc({ cpc: 1.0, aov: 45, contributionMargin: 0.65 })),
     ).toBeCloseTo(1 / 29.25, 6);
   });
 
   it("breakEvenClickCvr with LTV divides by the extra M (lower bar)", () => {
     // M = 1.3 → 1/(29.25*1.3) = 1/38.025 = 0.0263.
     expect(
-      breakEvenClickCvr(cpc({ cpc: 1.0, aov: 45, grossMargin: 0.65, ltvMultiplier: 1.3 }), true),
+      breakEvenClickCvr(cpc({ cpc: 1.0, aov: 45, contributionMargin: 0.65, ltvMultiplier: 1.3 }), true),
     ).toBeCloseTo(1 / 38.025, 6);
   });
 
   it("breakEvenCpa equals gross profit per unit (aov * gm)", () => {
-    expect(breakEvenCpa(cpc({ aov: 45, grossMargin: 0.65 }))).toBeCloseTo(29.25, 9);
+    expect(breakEvenCpa(cpc({ aov: 45, contributionMargin: 0.65 }))).toBeCloseTo(29.25, 9);
   });
 
   it("breakEvenClickCvr is undefined when gross profit is 0", () => {
@@ -279,24 +279,24 @@ describe("VAT handling — profit/break-even use net AOV, revenue/ROAS stay gros
 
   it("gross profit per unit uses NET aov * gm → totalProfit drops vs gross", () => {
     // NET €37.50 * 0.65 = €24.375/unit. 18.75 conv → grossProfit €457.03.
-    const p = runCpc(cpc({ vatRate: 0.2, grossMargin: 0.65 }));
+    const p = runCpc(cpc({ vatRate: 0.2, contributionMargin: 0.65 }));
     expect(p.grossProfit).toBeCloseTo(18.75 * NET_45_AT_20 * 0.65, 6);
     expect(p.totalProfit).toBeCloseTo(18.75 * NET_45_AT_20 * 0.65 - 500, 6);
     // Strictly less profit than the no-VAT run (the bug this fixes).
     expect(p.totalProfit as number).toBeLessThan(
-      runCpc(cpc({ grossMargin: 0.65 })).totalProfit as number,
+      runCpc(cpc({ contributionMargin: 0.65 })).totalProfit as number,
     );
   });
 
   it("profitPerSale = netAov*gm − cpa", () => {
-    const p = runCpc(cpc({ vatRate: 0.2, grossMargin: 0.65 }));
+    const p = runCpc(cpc({ vatRate: 0.2, contributionMargin: 0.65 }));
     const cpa = 500 / 18.75;
     expect(p.profitPerSale).toBeCloseTo(NET_45_AT_20 * 0.65 - cpa, 6);
   });
 
   it("breakEvenCpa = netAov * gm (lower than the gross figure)", () => {
     // NET €37.50 * 0.65 = €24.375 (vs €29.25 gross).
-    expect(breakEvenCpa(cpc({ aov: 45, grossMargin: 0.65, vatRate: 0.2 }))).toBeCloseTo(
+    expect(breakEvenCpa(cpc({ aov: 45, contributionMargin: 0.65, vatRate: 0.2 }))).toBeCloseTo(
       NET_45_AT_20 * 0.65,
       9,
     );
@@ -305,10 +305,10 @@ describe("VAT handling — profit/break-even use net AOV, revenue/ROAS stay gros
   it("breakEvenClickCvr uses net AOV → a HIGHER (harder) bar than gross", () => {
     // €1 CPC, net €37.50, 65% GM → 1/(37.5*0.65) = 1/24.375 = 0.04103.
     const withVat = breakEvenClickCvr(
-      cpc({ cpc: 1.0, aov: 45, grossMargin: 0.65, vatRate: 0.2 }),
+      cpc({ cpc: 1.0, aov: 45, contributionMargin: 0.65, vatRate: 0.2 }),
     ) as number;
     const gross = breakEvenClickCvr(
-      cpc({ cpc: 1.0, aov: 45, grossMargin: 0.65 }),
+      cpc({ cpc: 1.0, aov: 45, contributionMargin: 0.65 }),
     ) as number;
     expect(withVat).toBeCloseTo(1 / 24.375, 6);
     expect(withVat).toBeGreaterThan(gross); // VAT raises the break-even bar
@@ -343,7 +343,7 @@ function cps(overrides: Partial<Scenario> = {}): Scenario {
     spend: 500,
     targetCpa: 20,
     aov: 45,
-    grossMargin: 0.65,
+    contributionMargin: 0.65,
     ltvMultiplier: 1,
     ...overrides,
   };
@@ -437,11 +437,43 @@ describe("forecastTraffic — volume + time-to-learning", () => {
     expect(f.daysToReadableSample).toBeUndefined();
   });
 
-  it("cps mode: conversions forecast from budget/targetCpa, sessions undefined", () => {
-    // €40/day at €20 CPA → 2 conversions/day, no traffic stage.
+  it("cps mode WITHOUT cpc context: conversions only, no traffic (can't derive visitors)", () => {
+    // €40/day at €20 CPA → 2 conversions/day. cps carries no CPC, so without the
+    // opts.cpc hint there's no way to know how many visitors that spend buys.
     const f = forecastTraffic(cps({ targetCpa: 20 }), 40);
     expect(f.conversionsPerDay).toBeCloseTo(2, 6);
+    expect(f.visitorsPerDay).toBeUndefined();
     expect(f.sessionsPerDay).toBeUndefined();
     expect(f.daysToLearningPhase).toBeCloseTo(LEARNING_PHASE.conversions / 2, 6);
+  });
+
+  it("cps mode WITH cpc context: computes site visitors (spend ÷ CPC) the model otherwise hides", () => {
+    // €40/day at €0.40 CPC → 100 visitors/day, even though you bid on conversions.
+    // This is the figure the old model wrongly blanked: ad spend buys real traffic.
+    const f = forecastTraffic(cps({ targetCpa: 20 }), 40, { cpc: 0.4, cvr: 0.0019 });
+    expect(f.visitorsPerDay).toBeCloseTo(100, 6);
+    expect(f.visitorsPerWeek).toBeCloseTo(700, 6);
+    // No bounce modeled → sessions = visitors.
+    expect(f.sessionsPerDay).toBeCloseTo(100, 6);
+    // Conversions still come from the CPA bid, independent of the visitor derivation.
+    expect(f.conversionsPerDay).toBeCloseTo(2, 6);
+  });
+
+  it("A/B feasibility: a tiny purchase rate needs vastly more visitors than a CRO test", () => {
+    // At 100 visitors/day: a purchase-rate test (0.2%) needs far longer than a
+    // site/CRO test powered on a higher add-to-cart rate (2.3%).
+    const f = forecastTraffic(cps({ targetCpa: 20 }), 40, { cpc: 0.4, cvr: 0.002, atcRate: 0.023 });
+    expect(f.siteTestDays).toBeDefined();
+    expect(f.conversionTestDays).toBeDefined();
+    expect(f.conversionTestDays as number).toBeGreaterThan(f.siteTestDays as number);
+    // Sanity: site test on a 2.3% rate at 100 visitors/day is on the order of
+    // months, not days — confirm it's a meaningfully large number.
+    expect(f.siteTestDays as number).toBeGreaterThan(30);
+  });
+
+  it("A/B feasibility is undefined when no CVR / no visitors are known", () => {
+    const f = forecastTraffic(cps({ targetCpa: 20 }), 40); // no cpc/cvr
+    expect(f.siteTestDays).toBeUndefined();
+    expect(f.conversionTestDays).toBeUndefined();
   });
 })

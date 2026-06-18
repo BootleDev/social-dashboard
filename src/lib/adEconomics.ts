@@ -12,7 +12,7 @@
  *     - revenue + ROAS use the GROSS aov (ad-platform convention; ties to Meta /
  *       Google / Shopify so the tool reconciles against Ads Manager).
  *     - netRevenue, grossProfit, profit/sale, totalProfit, break-even CVR/CPA all
- *       use NET aov = aov / (1 + vatRate). grossMargin is a margin on NET revenue.
+ *       use NET aov = aov / (1 + vatRate). contributionMargin is a margin on NET revenue.
  *   vatRate defaults to 0 here (no split) so callers that omit it get the old
  *   gross behaviour unchanged; the app supplies the real rate (see DEFAULT_VAT_RATE).
  *
@@ -36,10 +36,12 @@
 
 import {
   LEARNING_PHASE,
+  AB_TEST_DEFAULTS,
   type Scenario,
   type Projection,
   type TrafficForecast,
 } from "./adScenario";
+import { abTestSampleSizePerVariant } from "./stats";
 
 /**
  * The one division primitive. Returns undefined unless both operands are finite
@@ -139,9 +141,9 @@ function runFromConversions(
   // Net revenue (ex-VAT) is the honest top-line you keep; basis for profit.
   const netRevenue = mul(conversions, netAov(scenario));
 
-  // Gross profit per conversion = NET aov * grossMargin (margin is on ex-VAT
+  // Gross profit per conversion = NET aov * contributionMargin (margin is on ex-VAT
   // revenue); total = conversions * that.
-  const grossProfitPerUnit = netAov(scenario) * scenario.grossMargin;
+  const grossProfitPerUnit = netAov(scenario) * scenario.contributionMargin;
   const grossProfit = mul(conversions, grossProfitPerUnit);
 
   // CPA = spend / conversions. Undefined (not Infinity) when conversions are 0.
@@ -254,36 +256,88 @@ export function runProjection(scenario: Scenario): Projection {
 export function forecastTraffic(
   scenario: Scenario,
   dailyBudget: number,
+  /**
+   * Real-world rates the conversion-bid model can't derive on its own. In cps
+   * the scenario carries no CPC/CVR (you buy results), but ad spend still buys
+   * real visitors at the market CPC, and those visitors convert at the funnel's
+   * CVR. Pass the baseline `cpc` and measured `cvr` so cps can forecast SITE
+   * traffic + A/B feasibility. For cpc/cpm these are derived from the scenario.
+   * `atcRate` (optional) is the add-to-cart rate used to power a SITE/CRO test;
+   * when omitted, the site test falls back to the purchase CVR (conservative).
+   */
+  opts: { cpc?: number; cvr?: number; atcRate?: number } = {},
 ): TrafficForecast {
-  // Run the funnel for exactly one day's spend.
+  // Run the funnel for exactly one day's spend (conversions, and sessions in
+  // traffic modes).
   const day: Scenario = { ...scenario, budget: dailyBudget, spend: dailyBudget };
   const p = runProjection(day);
-
-  const sessionsPerDay = p.sessions;
   const conversionsPerDay = p.conversions;
+
+  // SITE VISITORS — computed in every mode. cpc/cpm have it on the projection
+  // (p.clicks); cps doesn't model clicks, so derive visitors = budget ÷ CPC
+  // from the passed/effective CPC. Ad spend buys these visitors regardless of
+  // how you're billed, and they're the denominator for on-site A/B tests.
+  const cpc = opts.cpc ?? effectiveCpc(scenario);
+  const visitorsPerDay =
+    p.clicks !== undefined ? p.clicks : cpc !== undefined && cpc > 0 ? dailyBudget / cpc : undefined;
+
+  // Engaged sessions = visitors × (1 − bounce). Equals visitors when bounce is
+  // unmodeled. In traffic modes p.sessions already has this; in cps derive it.
+  const bounceSurvival = scenario.bounceRate === undefined ? 1 : 1 - scenario.bounceRate;
+  const sessionsPerDay =
+    p.sessions !== undefined
+      ? p.sessions
+      : visitorsPerDay !== undefined
+        ? visitorsPerDay * bounceSurvival
+        : undefined;
 
   const scale = (v: number | undefined, factor: number) =>
     v === undefined ? undefined : v * factor;
+  const daysToAccumulate = (rate: number | undefined, n: number): number | undefined =>
+    rate !== undefined && rate > 0 ? n / rate : undefined;
 
-  // Days to accumulate N conversions at this daily rate. Undefined when the rate
-  // is 0 (would be infinite) — the UI renders that as "—" / "not at this spend".
-  const daysToN = (n: number): number | undefined =>
-    conversionsPerDay !== undefined && conversionsPerDay > 0
-      ? n / conversionsPerDay
-      : undefined;
+  // A/B feasibility. BOTH tests accumulate VISITORS as the sample (visitors are
+  // the trials; the success event differs). The difference is the BASELINE RATE
+  // you power on, which sets how many visitors each needs:
+  //   - SITE / CRO test: powered on the add-to-cart rate (higher → fewer
+  //     visitors needed). e.g. testing a PDP change that moves ATC.
+  //   - CONVERSION / purchase test: powered on the purchase CVR (tiny → far more
+  //     visitors). e.g. testing whether a change moves actual purchases.
+  // days = (n_per_variant × 2 variants) ÷ visitors_per_day.
+  const cvr = opts.cvr ?? scenario.clickCvr ?? scenario.sessionCvr;
+  const sampleDays = (rate: number | undefined): number | undefined => {
+    if (rate === undefined) return undefined;
+    const perVariant = abTestSampleSizePerVariant(
+      rate,
+      AB_TEST_DEFAULTS.minDetectableEffect,
+      AB_TEST_DEFAULTS.zAlpha,
+      AB_TEST_DEFAULTS.zBeta,
+    );
+    return perVariant === undefined ? undefined : daysToAccumulate(visitorsPerDay, perVariant * 2);
+  };
+  // Site test rate = the add-to-cart proxy when supplied, else the purchase CVR
+  // (conservative). Conversion test rate = the purchase CVR.
+  const siteTestDays = sampleDays(opts.atcRate ?? cvr);
+  const conversionTestDays = sampleDays(cvr);
 
   return {
     dailyBudget,
+    visitorsPerDay,
+    visitorsPerWeek: scale(visitorsPerDay, 7),
+    visitorsPerMonth: scale(visitorsPerDay, 30),
     sessionsPerDay,
     sessionsPerWeek: scale(sessionsPerDay, 7),
     sessionsPerMonth: scale(sessionsPerDay, 30),
     conversionsPerDay,
     conversionsPerWeek: scale(conversionsPerDay, 7),
     conversionsPerMonth: scale(conversionsPerDay, 30),
-    daysToLearningPhase: daysToN(LEARNING_PHASE.conversions),
-    daysToReadableSample: daysToN(
+    daysToLearningPhase: daysToAccumulate(conversionsPerDay, LEARNING_PHASE.conversions),
+    daysToReadableSample: daysToAccumulate(
+      conversionsPerDay,
       LEARNING_PHASE.conversions * LEARNING_PHASE.readableSampleMultiple,
     ),
+    siteTestDays,
+    conversionTestDays,
   };
 }
 
@@ -309,8 +363,8 @@ export function effectiveCpc(scenario: Scenario): number | undefined {
 /**
  * Click-grain CVR at which front-end PROFIT = 0 (not ROAS = 1 — profit accounts
  * for gross margin). From spend/click = effectiveCpc and gross-profit/click =
- * clickCvr * netAov * grossMargin, profit = 0 ⇒
- *   clickCvr = effectiveCpc / (netAov * grossMargin).
+ * clickCvr * netAov * contributionMargin, profit = 0 ⇒
+ *   clickCvr = effectiveCpc / (netAov * contributionMargin).
  * Uses NET aov (profit is on ex-VAT revenue), so a non-zero vatRate RAISES the
  * break-even bar. With `includeLtv`, the denominator is also multiplied by the
  * LTV multiplier M (a repeat purchase lowers the bar). One formula for both
@@ -323,16 +377,16 @@ export function breakEvenClickCvr(
   const ecpc = effectiveCpc(scenario);
   if (ecpc === undefined) return undefined;
   const m = includeLtv ? scenario.ltvMultiplier : 1;
-  return ratio(ecpc, netAov(scenario) * scenario.grossMargin * m);
+  return ratio(ecpc, netAov(scenario) * scenario.contributionMargin * m);
 }
 
 /**
  * CPA at which front-end profit = 0 — equals gross profit per unit
- * (netAov * grossMargin). Above this CPA you lose money on the first sale.
+ * (netAov * contributionMargin). Above this CPA you lose money on the first sale.
  * Uses NET aov, so a non-zero vatRate LOWERS the allowable break-even CPA.
  */
 export function breakEvenCpa(scenario: Scenario): number | undefined {
-  const gp = netAov(scenario) * scenario.grossMargin;
+  const gp = netAov(scenario) * scenario.contributionMargin;
   return Number.isFinite(gp) && gp >= 0 ? gp : undefined;
 }
 

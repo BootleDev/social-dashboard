@@ -54,7 +54,7 @@ export interface ScenarioOverrides {
   /** VAT rate, decimal (0.20 = 20%). Defaults to DEFAULT_VAT_RATE if unset. */
   vatRate?: number;
   /** Gross margin, decimal (0.65 = 65%). Defaults to 1.0 if unset. */
-  grossMargin?: number;
+  contributionMargin?: number;
   /** Lifetime repeat multiplier M = 1 + repeat rate. Defaults to 1.0 if unset. */
   ltvMultiplier?: number;
   /** Click-grain CVR override. Mutually exclusive with the session group. */
@@ -115,7 +115,7 @@ export function resolveScenario(
     // Profit parameters have no baseline source (the ad/Shopify data carries no
     // margin or repeat rate); default to neutral so a caller that omits them
     // gets revenue-equivalent profit and front-end-only LTV.
-    grossMargin: overrides.grossMargin ?? 1,
+    contributionMargin: overrides.contributionMargin ?? 1,
     ltvMultiplier: overrides.ltvMultiplier ?? 1,
     // Conversion grain — exactly one group populated for traffic models; NONE
     // for cps (it has no funnel).

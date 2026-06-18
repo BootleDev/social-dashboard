@@ -5,6 +5,7 @@ import type { Post } from "../types";
 function basePost(overrides: Partial<Post> = {}): Post {
   return {
     id: "rec",
+    nativePostId: "instagram_123",
     platform: "instagram",
     postType: "reel",
     publishedAt: "",
