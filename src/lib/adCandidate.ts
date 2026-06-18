@@ -32,6 +32,17 @@
  *
  * Likes are a cheap signal, so View A uses them only via the existing
  * engagement rate, and View B treats /reach as primary with /likes secondary.
+ *
+ * CROSS-PLATFORM COMPARABILITY CAVEAT (View A intentScore):
+ *   intentScore renormalizes each platform's intent slice to 0–100 using only
+ *   the intent components that exist there (IG: comment+save; Pinterest: save+
+ *   outbound-click). So an intentScore of 80 means "strong intent FOR THAT
+ *   PLATFORM", not an absolute cross-platform magnitude — and the renorm erases
+ *   the relative weight Bootle assigned (e.g. comments carry 0.4 on IG). When a
+ *   mixed-platform list is sorted by intentScore, that is a per-platform-relative
+ *   ranking. View B (viralityIndex = (saves+shares)/reach) uses ONE honest
+ *   denominator across platforms, so it is the more defensible cross-platform
+ *   ranker — which is why the live Paid tab defaults to it.
  */
 
 import type { Post, AudienceDemographic } from "./types";
@@ -266,6 +277,13 @@ export interface CandidateScore {
     caption: string;
     /** Media URL — the post permalink for IG/FB, the link-out for Pinterest. */
     mediaUrl: string;
+    /**
+     * Platform-native post id (`pinterest_<numericId>` etc.) — what resolves a
+     * link to the actual post/pin. Distinct from `postId` (the Airtable record
+     * id). Pass THIS to resolveViewUrl, not `postId`, or Pinterest rows link to
+     * the product page instead of the pin.
+     */
+    nativePostId: string;
     /** ISO publish timestamp. */
     publishedAt: string;
   };
@@ -288,6 +306,8 @@ export interface CandidateScore {
     demoWeight: number;
     demoFlagged: boolean;
     retentionFactor: number;
+    /** Recency factor in [floor, 1]; 1.0 when recency is disabled (no nowMs). */
+    recencyFactor: number;
     saves: number;
     shares: number;
     likes: number;
@@ -392,6 +412,7 @@ export function scoreCandidate(
       postType: post.postType,
       caption: post.caption,
       mediaUrl: post.mediaUrl,
+      nativePostId: post.nativePostId,
       publishedAt: post.publishedAt,
     },
     intentScore,
@@ -403,6 +424,7 @@ export function scoreCandidate(
       demoWeight: demo.weight,
       demoFlagged: demo.flagged,
       retentionFactor: rf,
+      recencyFactor: recf,
       saves: post.saves,
       shares: post.shares,
       likes: post.likes,
@@ -437,7 +459,10 @@ export function rankCandidates(
     nowMs?: number;
   } = {},
 ): CandidateScore[] {
-  const sortBy = options.sortBy ?? "intentScore";
+  // Default to viralityIndex (/reach): one honest denominator across platforms,
+  // the more defensible cross-platform ranker (see the comparability caveat in
+  // the module header). Matches the live Paid tab's default sort.
+  const sortBy = options.sortBy ?? "viralityIndex";
   const demo = demoFitWeight(options.audience ?? [], options.target);
   const retention = options.retention ?? {};
 
@@ -462,6 +487,91 @@ export function rankCandidates(
     deduped.push(s);
   }
   return deduped;
+}
+
+// ===========================================================================
+// Plain-language rationale — "why is this a candidate?"
+// ===========================================================================
+
+/** Thresholds for the rationale's qualitative calls. Exported + test-pinned. */
+export const RATIONALE_THRESHOLDS = {
+  /** (saves+shares)/reach at/above which the active-intent signal is "strong". */
+  strongIntentRate: 0.02,
+  /** …and below which it's explicitly "weak" (a caveat, not a reason to promote). */
+  weakIntentRate: 0.005,
+  /** recencyFactor at/above which the post counts as "fresh creative". */
+  freshRecency: 0.7,
+  /** recencyFactor at/below which it's flagged as "older creative". */
+  staleRecency: 0.4,
+  /** retentionFactor above this (for video) counts as "holds attention". */
+  strongRetention: 0.75,
+  /**
+   * volumeFactor below this means the rate rests on thin reach — directional.
+   * The /reach ratio floor already guarantees reach ≥ minReachForRatio (100), so
+   * any scoreable candidate has volumeFactor ≥ ~0.72; this is set above that so
+   * the caveat actually fires for posts whose reach sits below the median anchor
+   * (~180), i.e. volumeFactor ≲ 0.83. Tuned to flag "barely cleared the floor".
+   */
+  thinVolume: 0.83,
+} as const;
+
+/**
+ * A short, plain-language explanation of why a scored post is (or isn't) a good
+ * paid-creative candidate, derived ENTIRELY from the breakdown the scorer
+ * already computed — no new math, no I/O. Returns an ordered list of reasons,
+ * strongest signal first, plus any caveats last. Pure and deterministic so the
+ * UI can render a recognizable "why" without re-deriving anything.
+ *
+ * The reasons cite the signals that actually moved the score: active-intent
+ * strength (saves+shares per reach, the cross-platform-honest rate), video
+ * hold (retention), and freshness (recency). Caveats name what should temper
+ * trust: thin reach (low volume confidence) and stale creative.
+ */
+export function candidateRationale(c: CandidateScore): string[] {
+  const t = RATIONALE_THRESHOLDS;
+  const { saves, shares, reach, volumeFactor: vf, retentionFactor: rf, recencyFactor: recf } = c.breakdown;
+  const reasons: string[] = [];
+
+  // Active-intent rate — the primary signal (saves + shares per reach).
+  const intentRate = reach > 0 ? (saves + shares) / reach : 0;
+  if (intentRate >= t.strongIntentRate) {
+    reasons.push(`strong saves + shares (${(intentRate * 100).toFixed(1)}% of reach)`);
+  }
+
+  // Video hold — retentionFactor only exceeds the neutral 1.0 ceiling never; it
+  // sits in [floor, 1], reaching 1.0 only when hook+hold clear their anchors (or
+  // when no retention data exists). So "holds attention" = a measured, near-full
+  // retention factor. A factor of exactly 1.0 is ambiguous (could be missing
+  // data), so require strictly above the strong threshold AND below 1.0, which
+  // only happens when real retention data is present and good-but-not-perfect,
+  // plus the explicit full-credit case gated on having any retention movement.
+  if (rf >= t.strongRetention && rf < 1) {
+    reasons.push("video holds attention");
+  }
+
+  // Freshness — recencyFactor lands in [freshRecency, 1) only with recency
+  // enabled on a recent post; exactly 1.0 is ambiguous (disabled or brand-new),
+  // so we don't claim "fresh" from it.
+  if (recf >= t.freshRecency && recf < 1) {
+    reasons.push("fresh creative");
+  }
+
+  // Caveats — temper, don't promote.
+  if (recf <= t.staleRecency) {
+    reasons.push("older creative — refresh before scaling");
+  }
+  if (vf < t.thinVolume) {
+    reasons.push("thin reach — treat as directional");
+  }
+  if (intentRate < t.weakIntentRate && intentRate > 0) {
+    reasons.push("weak saves + shares for the reach");
+  }
+
+  // Always say something: if no signal stood out, name the bare fact.
+  if (reasons.length === 0) {
+    reasons.push(`${saves + shares} saves + shares on ${Math.round(reach)} reach`);
+  }
+  return reasons;
 }
 
 /**

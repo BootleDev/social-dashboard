@@ -6,7 +6,9 @@ import {
   demoFitWeight,
   scoreCandidate,
   rankCandidates,
+  candidateRationale,
   CANDIDATE_WEIGHTS,
+  RATIONALE_THRESHOLDS,
   type TargetAudienceProfile,
 } from "../adCandidate";
 import type { Post, AudienceDemographic } from "../types";
@@ -14,6 +16,7 @@ import type { Post, AudienceDemographic } from "../types";
 function makePost(overrides: Partial<Post> = {}): Post {
   return {
     id: "rec_test",
+    nativePostId: "instagram_123",
     platform: "instagram",
     postType: "Reel",
     publishedAt: "2026-01-15T10:00:00.000Z",
@@ -299,10 +302,87 @@ describe("rankCandidates", () => {
     expect(ranked[0].post.postType).toBe("Reel");
   });
 
+  it("carries the platform-native post id so the link resolves to the post/pin", () => {
+    // Regression: the candidate row passed the Airtable record id (postId) to
+    // resolveViewUrl, so Pinterest links fell back to the product page. The
+    // native id (pinterest_<num>) must ride along on post.nativePostId.
+    const pin = makePost({
+      id: "rec_abc",
+      platform: "pinterest",
+      nativePostId: "pinterest_1097893215423369870",
+      mediaUrl: "https://bootle.io/products/the-bootle",
+      impressions: 500,
+      saves: 10,
+      shares: 3,
+    });
+    const ranked = rankCandidates([pin], { sortBy: "viralityIndex" });
+    expect(ranked[0].post.nativePostId).toBe("pinterest_1097893215423369870");
+    // postId is still the record id — passing IT would have broken the link.
+    expect(ranked[0].postId).toBe("rec_abc");
+  });
+
   it("does not mutate the input array", () => {
     const input = [...posts];
     rankCandidates(input);
     expect(input.map((p) => p.id)).toEqual(["hi", "lo", "fluke"]);
+  });
+});
+
+describe("candidateRationale — plain-language 'why'", () => {
+  const NOW = Date.parse("2026-06-17T00:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+
+  it("leads with strong saves+shares when the intent rate clears the threshold", () => {
+    // 30 s+s on 1000 reach = 3% > 2% strong threshold.
+    const post = makePost({ reach: 1000, saves: 20, shares: 10 });
+    const c = scoreCandidate(post, { weight: 1, flagged: false }, undefined, NOW);
+    const reasons = candidateRationale(c);
+    expect(reasons[0]).toMatch(/strong saves \+ shares/);
+    expect(reasons[0]).toMatch(/3\.0% of reach/);
+  });
+
+  it("flags older creative as a caveat", () => {
+    const post = makePost({ reach: 1000, saves: 20, shares: 10, publishedAt: daysAgo(300) });
+    const c = scoreCandidate(post, { weight: 1, flagged: false }, undefined, NOW);
+    expect(candidateRationale(c).some((r) => /older creative/.test(r))).toBe(true);
+  });
+
+  it("calls out fresh creative when recent (recency in [fresh, 1))", () => {
+    // ~30 days old → recencyFactor ≈ 0.76, within [0.7, 1).
+    const post = makePost({ reach: 1000, saves: 20, shares: 10, publishedAt: daysAgo(30) });
+    const c = scoreCandidate(post, { weight: 1, flagged: false }, undefined, NOW);
+    expect(candidateRationale(c).some((r) => /fresh creative/.test(r))).toBe(true);
+  });
+
+  it("adds a thin-reach caveat when volume confidence is low", () => {
+    // reach 120 → above the /reach floor (100) but volumeFactor well under 0.6.
+    const post = makePost({ reach: 120, saves: 10, shares: 5 });
+    const c = scoreCandidate(post, { weight: 1, flagged: false }, undefined, NOW);
+    expect(c.breakdown.volumeFactor).toBeLessThan(RATIONALE_THRESHOLDS.thinVolume);
+    expect(candidateRationale(c).some((r) => /thin reach/.test(r))).toBe(true);
+  });
+
+  it("notes video that holds attention when retention is strong but sub-perfect", () => {
+    const post = makePost({ postType: "Reel", reach: 1000, saves: 20, shares: 10 });
+    // hook+hold near (not at) the anchors → rf in [strong, 1).
+    const c = scoreCandidate(post, { weight: 1, flagged: false }, { hookRate: 0.27, holdRate: 0.27 }, NOW);
+    expect(c.breakdown.retentionFactor).toBeGreaterThanOrEqual(RATIONALE_THRESHOLDS.strongRetention);
+    expect(c.breakdown.retentionFactor).toBeLessThan(1);
+    expect(candidateRationale(c).some((r) => /holds attention/.test(r))).toBe(true);
+  });
+
+  it("always returns at least one reason (bare fact when nothing stands out)", () => {
+    // Middling rate (1% → between weak 0.5% and strong 2%), fresh enough, static.
+    const post = makePost({ postType: "Static", reach: 1000, saves: 7, shares: 3, publishedAt: daysAgo(30) });
+    const c = scoreCandidate(post, { weight: 1, flagged: false }, undefined, NOW);
+    const reasons = candidateRationale(c);
+    expect(reasons.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("is pure — same input, same output", () => {
+    const post = makePost({ reach: 1000, saves: 20, shares: 10 });
+    const c = scoreCandidate(post, { weight: 1, flagged: false }, undefined, NOW);
+    expect(candidateRationale(c)).toEqual(candidateRationale(c));
   });
 });
 

@@ -1,7 +1,14 @@
 import { num, str, count, type AirtableRecord } from "./utils";
 
 export interface Post {
+  /** Airtable record id (rec…). Stable row key; NOT the platform-native post id. */
   id: string;
+  /**
+   * Platform-native post id from the "Post ID" field, e.g. `pinterest_<numericId>`.
+   * This — not `id` — is what resolves a link to the actual post/pin (see
+   * resolveViewUrl). Empty string when the feed doesn't carry one.
+   */
+  nativePostId: string;
   platform: string;
   postType: string;
   publishedAt: string;
@@ -55,6 +62,7 @@ export interface Post {
 export function toPost(r: AirtableRecord): Post {
   return {
     id: r.id,
+    nativePostId: str(r.fields["Post ID"]),
     platform: str(r.fields["Platform"]).toLowerCase().trim(),
     postType: str(r.fields["Post Type"]),
     publishedAt: str(r.fields["Published At"]),
