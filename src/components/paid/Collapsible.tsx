@@ -25,18 +25,20 @@ export default function Collapsible({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="rounded-xl p-5" style={card}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="w-full flex items-center justify-between gap-3 cursor-pointer"
-      >
-        <span className="text-base font-medium inline-flex items-center gap-2" style={{ color: "var(--text-primary, var(--text-secondary))" }}>
+      {/* Header is a flex row, NOT a single wrapping button — the tooltip is its
+          own button and must not nest inside another (invalid HTML + the tooltip
+          tap would toggle the collapse). The collapse toggle is the title button;
+          the tooltip sits beside it. */}
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex items-center gap-2 cursor-pointer text-base font-medium"
+          style={{ color: "var(--text-primary, var(--text-secondary))" }}
+        >
           <span className="inline-block w-1 h-4 rounded-full" style={{ background: "var(--brand)" }} />
           {title}
-        </span>
-        <span className="inline-flex items-center gap-2">
-          {tip && <InfoTooltip text={tip} label={`About ${title}`} />}
           <span
             className="transition-transform text-xs"
             style={{ color: "var(--text-secondary)", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
@@ -44,8 +46,9 @@ export default function Collapsible({
           >
             ▶
           </span>
-        </span>
-      </button>
+        </button>
+        {tip && <InfoTooltip text={tip} label={`About ${title}`} />}
+      </div>
       {open && <div className="mt-4">{children}</div>}
     </div>
   );
