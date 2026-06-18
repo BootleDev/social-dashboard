@@ -514,20 +514,37 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
           </div>
         </div>
 
-        {/* Live cause→effect readout: the CVR → achievable CPA chain, visible. */}
+        {/* Live cause→effect readout. The TOP LINE flips direction by mode so
+            there's never two CVR figures competing: CVR-driven shows
+            CVR→achievable CPA; pinned shows target CPA→required CVR. */}
         {model === "cps" && (
           <div
             className="mt-4 rounded-lg p-3 text-xs flex flex-wrap items-center gap-x-2 gap-y-1"
             style={{ background: "var(--bg-primary)", color: "var(--text-secondary)" }}
           >
-            <span>
-              Conversion rate <strong>{pct(effectiveCvrDisplay)}</strong>
-            </span>
-            <span aria-hidden>→</span>
-            <span>
-              achievable CPA <strong>{eur(impliedBaselineCpa)}</strong>
-              <span className="opacity-70"> (CPC {eur(baseline?.cpc.value)} ÷ CVR)</span>
-            </span>
+            {pinnedTargetCpa === undefined ? (
+              <>
+                <span>
+                  Conversion rate <strong>{pct(effectiveCvrDisplay)}</strong>
+                </span>
+                <span aria-hidden>→</span>
+                <span>
+                  achievable CPA <strong>{eur(impliedBaselineCpa)}</strong>
+                  <span className="opacity-70"> (CPC {eur(baseline?.cpc.value)} ÷ CVR)</span>
+                </span>
+              </>
+            ) : (
+              <>
+                <span>
+                  Target CPA <strong>€{pinnedTargetCpa.toFixed(2)}</strong>
+                </span>
+                <span aria-hidden>→</span>
+                <span>
+                  needs conversion rate <strong>{pct(requiredCvrForTarget)}</strong>
+                  <span className="opacity-70"> (CPC {eur(baseline?.cpc.value)} ÷ target CPA)</span>
+                </span>
+              </>
+            )}
             <span aria-hidden>·</span>
             <span>
               break-even CPA <strong>{eur(breakEvenCpaDisplay)}</strong>
@@ -541,20 +558,21 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
               </span>
             ) : (
               <span>
-                Pinned to a Target CPA of <strong>€{pinnedTargetCpa.toFixed(2)}</strong> — to
-                actually hit it your funnel must convert at{" "}
-                <strong>{pct(requiredCvrForTarget)}</strong>{" "}
-                <span className="opacity-70">(CPC {eur(baseline?.cpc.value)} ÷ target CPA)</span>
+                To hit this CPA your funnel must convert at{" "}
+                <strong>{pct(requiredCvrForTarget)}</strong>
                 {requiredCvrMultiple !== undefined && (
                   <>
-                    , {requiredCvrMultiple > 1.05
+                    {" — "}
+                    {requiredCvrMultiple > 1.05
                       ? `~${requiredCvrMultiple.toFixed(1)}× your current ${pct(effectiveCvrDisplay)}`
                       : requiredCvrMultiple < 0.95
-                        ? `below your current ${pct(effectiveCvrDisplay)} — comfortably reachable`
+                        ? `below your current ${pct(effectiveCvrDisplay)}, comfortably reachable`
                         : `about your current ${pct(effectiveCvrDisplay)}`}
                   </>
                 )}
-                . Clear the field to go back to the live CVR-driven CPA.
+                . Your set conversion rate ({pct(effectiveCvrDisplay)}) is unchanged — it&apos;s
+                only used here to show the gap. Clear the field to go back to the live
+                CVR-driven CPA.
               </span>
             )}
           </div>
