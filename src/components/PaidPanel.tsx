@@ -870,18 +870,23 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
               days={forecast.conversionTestDays}
             />
           </div>
-          {/* Meta's learning phase is a separate question (the algorithm, not a test). */}
+          {/* Optimisation quality — a SEPARATE question from "can you afford to
+              run ads" (the verdict) and from "can you A/B test" (above). Phrased
+              so it doesn't read as "you need 50 sales before you can advertise". */}
           <div className="mt-3 text-[11px] flex items-center gap-1.5" style={{ color: "var(--text-secondary)" }}>
             <span>
-              Meta needs ~50 sales/ad set per 7 days to exit its learning phase —{" "}
+              You can run ads at any budget — but Meta&apos;s algorithm only optimises well once
+              an ad set gets <strong>~50 sales every 7 days</strong>. At this spend that&apos;s{" "}
               <strong>
                 {forecast.daysToLearningPhase === undefined
-                  ? "not reachable at this spend"
-                  : `at least ${humanDuration(forecast.daysToLearningPhase)} here`}
+                  ? "out of reach"
+                  : `at least ${humanDuration(forecast.daysToLearningPhase)} away`}
               </strong>
-              {forecast.daysToLearningPhase !== undefined && ", likely longer in practice"}.
+              {forecast.daysToLearningPhase !== undefined && " (likely longer in practice)"}, so
+              delivery stays under-optimised. Fix the funnel first — this only matters once a
+              sale makes money.
             </span>
-            <InfoTooltip text="Below ~50 conversions per ad set per rolling 7 days, Meta's delivery stays 'Learning Limited' and under-optimises (threshold unchanged in 2026, incl. Advantage+). The figure shown is a FLOOR — the minimum time to accumulate 50 sales at this rate. Real exit is typically slower: Meta's 2026 'Andromeda' update stretched typical stabilisation to ~7–14 days for many accounts. This is about the algorithm getting enough signal — separate from whether YOU can read an A/B result." label="What is the learning phase?" />
+            <InfoTooltip text="This is the threshold for Meta to OPTIMISE delivery well — NOT a requirement to advertise. Ads run at any budget; below ~50 conversions per ad set per rolling 7 days the ad set just stays 'Learning Limited' and under-delivers (threshold unchanged in 2026, incl. Advantage+). The days shown are a FLOOR — the minimum to accumulate 50 sales at this rate; Meta's 2026 'Andromeda' update stretched typical stabilisation to ~7–14 days for many accounts. Separate from whether the funnel is profitable (the verdict) or whether you can read an A/B test (above)." label="What is the learning phase?" />
           </div>
           <p className="mt-2 text-[11px]" style={{ color: "var(--text-secondary)" }}>
             A/B durations target a 20% relative lift at 95% confidence and scale linearly from
