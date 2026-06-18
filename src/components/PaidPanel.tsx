@@ -17,6 +17,7 @@ import { toPost } from "@/lib/types";
 import { resolveViewUrl } from "@/lib/viewUrl";
 import { getPlatformConfig } from "@/lib/platforms";
 import { usePersistedState } from "@/lib/usePersistedState";
+import { setPaidChatContext } from "@/lib/paidChatContext";
 import InfoTooltip from "./InfoTooltip";
 import Collapsible from "./paid/Collapsible";
 import LeveragePanel from "./paid/LeveragePanel";
@@ -226,6 +227,38 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
       ? Math.round((Date.now() - Date.parse(`${latestSpendDate}T00:00:00Z`)) / 86_400_000)
       : undefined;
   const spendIsStale = spendAgeDays !== undefined && spendAgeDays > 30;
+
+  // Publish the live decision context for the dashboard "Ask AI" chat so the user
+  // can ask "why HOLD?" / "what should I change?" and get THIS scenario's
+  // reasoning. Rebuilt on every recompute; cleared when the Paid tab unmounts.
+  // Placed before the loading/error early returns so the hook runs unconditionally.
+  useEffect(() => {
+    if (!leverage || !ranged || !baseline) {
+      setPaidChatContext(null);
+      return;
+    }
+    const v = leverage.verdict;
+    const rec = leverage.recommendation;
+    const e = ranged.expected;
+    setPaidChatContext(
+      [
+        "PAID AD SIMULATOR — current scenario the user is viewing:",
+        `- Mode: ${MODEL_LABEL[model]}, budget €${budget}.`,
+        `- Measured baseline (window ${api?.window.start}→${api?.window.end}, ad spend last seen ${baseline.flags.latestSpendDate}): CPC ${eur(baseline.cpc.value)}, CTR ${pct(baseline.ctr.value)}, ad CVR ${pct(baseline.clickCvr.value)}, ad-AOV ${eur(baseline.aov.value)}.`,
+        `- Inputs: conversion rate ${pct(effectiveCvrDisplay)} (${cvrOverride.trim() ? "user override" : "provisional Shopify, all-traffic"}), AOV ${eur(effectiveAovDisplay)} (fresh Shopify), gross margin ${grossMarginPct}% (on net), VAT ${vatRatePct}%.`,
+        `- Achievable CPA (CPC÷CVR) ${eur(impliedBaselineCpa)} vs break-even CPA ${eur(breakEvenCpaDisplay)}.`,
+        `- Projection (expected): ${e.conversions?.toFixed(1)} conversions, revenue ${eur(e.revenue)} (net ${eur(e.netRevenue)}), CPA ${eur(e.cpa)}, attributed ROAS ${ratio(e.roas)}, total profit ${eur(e.totalProfit)}.`,
+        `- VERDICT: ${v.status.toUpperCase()}. ${v.summary}`,
+        `- RECOMMENDATION: ${rec.action === "spend" ? "DO" : "DON'T"} — ${rec.summary}`,
+        "Note: ad pricing (CPC/CPM/CTR) may be stale; conversion rate is provisional (Shopify all-traffic) until live GA4 attribution lands. ROAS is attributed, not incremental. When asked about this scenario, use these figures and explain the reasoning.",
+      ].join("\n"),
+    );
+    return () => setPaidChatContext(null);
+  }, [
+    leverage, ranged, baseline, model, budget, api,
+    effectiveCvrDisplay, effectiveAovDisplay, grossMarginPct, vatRatePct,
+    cvrOverride, impliedBaselineCpa, breakEvenCpaDisplay,
+  ]);
 
   if (loading) return <div style={{ color: "var(--text-secondary)" }}>Loading paid data…</div>;
   if (error)

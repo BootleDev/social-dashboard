@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { getPaidChatContext } from "@/lib/paidChatContext";
 
 interface Message {
   role: "user" | "assistant";
@@ -41,6 +42,9 @@ export default function ChatBox() {
             role: m.role,
             content: m.content,
           })),
+          // When the Paid tab is active it publishes its live decision context so
+          // the assistant can answer "why HOLD?" about the actual scenario.
+          pageContext: getPaidChatContext(),
         }),
       });
 
