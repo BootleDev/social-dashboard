@@ -63,6 +63,14 @@ the traffic (cpc/cpm) diagnostic modes; in conversion-bid (cps) the target-CPA l
 the conversion economics, so a standalone CVR lever is omitted rather than shown as
 "not computable".
 
+**Recommendation (`recommend`).** The report also carries a concrete
+DO/DON'T recommendation synthesized from the model's own constraints: a target CPA a
+safety margin (20%) below break-even, and a starting daily budget = the learning-phase
+floor at that CPA (so Meta gets enough conversions to optimize). It is more conservative
+than the bare verdict — a scenario that's profitable right on the break-even knife-edge
+recommends HOLD (no safety buffer) and names the CVR lift needed. When the funnel can't
+deliver the recommended CPA, it says don't spend and quantifies the required CVR rise.
+
 ## 5. Data sources & provisional baseline
 
 Reads the Airtable **Marketing Intelligence** base (`appIyePhrYZBUxCP9`):

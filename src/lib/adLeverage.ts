@@ -25,8 +25,8 @@
  *   runProjection and asserting totalProfit ≈ 0.
  */
 
-import { runProjection, effectiveCpc } from "./adEconomics";
-import type { Projection, Scenario } from "./adScenario";
+import { runProjection, effectiveCpc, breakEvenCpa } from "./adEconomics";
+import { LEARNING_PHASE, type Projection, type Scenario } from "./adScenario";
 
 /** Display unit for a lever's real-world values. */
 export type LeverUnit = "pct" | "eur";
@@ -88,10 +88,34 @@ export interface Verdict {
   summary: string;
 }
 
+/**
+ * A concrete "what should I actually do" recommendation, synthesized from the
+ * constraints the model already computes (break-even CPA = ceiling, learning-
+ * phase floor). Turns the calculator into an advisor.
+ */
+export interface Recommendation {
+  /**
+   * "spend" — there's a profitable, learnable plan; "hold" — no profitable
+   * target exists at the current funnel, fix it first.
+   */
+  action: "spend" | "hold";
+  /** Recommended target CPA, EUR — a safety margin below break-even. undefined when holding. */
+  targetCpa: number | undefined;
+  /**
+   * Recommended starting daily budget, EUR — the learning-phase floor at the
+   * recommended CPA, so Meta gets enough conversions to optimize. undefined when holding.
+   */
+  dailyBudget: number | undefined;
+  /** Verbatim one/two-line recommendation for the UI. */
+  summary: string;
+}
+
 export interface LeverageReport {
   verdict: Verdict;
   /** Levers ranked best-leverage first (reachable, smallest change). */
   levers: Lever[];
+  /** Concrete budget/CPA recommendation (advisor layer). */
+  recommendation: Recommendation;
 }
 
 /** Tunables for reachability judgments. Exported + test-pinned. */
@@ -112,6 +136,12 @@ export const LEVERAGE_GUARDS = {
    * 50% of current). A required cost factor below (1 − maxCostCut) is unreachable.
    */
   maxCostCut: 0.5,
+  /**
+   * Safety margin for the recommended target CPA: bid this fraction of break-even
+   * CPA so a thin scenario isn't recommended right on the knife-edge. 0.8 = bid
+   * 20% below break-even, leaving a buffer for CPA drift / attribution loss.
+   */
+  recommendedCpaOfBreakeven: 0.8,
 } as const;
 
 /** The cost lever's current value for the scenario's model. */
@@ -388,6 +418,77 @@ export function analyzeLeverage(
       }),
     },
     levers: leversOut,
+    recommendation: recommend(scenario, achievableCpa),
+  };
+}
+
+/**
+ * Synthesize a concrete budget/CPA recommendation from the model's own
+ * constraints — break-even CPA (the ceiling) and the learning-phase floor.
+ *
+ * Logic:
+ *  - The most you can pay and not lose money is the break-even CPA. Recommend a
+ *    target a safety margin below it (recommendedCpaOfBreakeven) so you're not
+ *    bidding on the knife-edge.
+ *  - But a target is only real if the funnel can DELIVER it. If the achievable
+ *    CPA (CPC ÷ CVR) is above the recommended target, no profitable, deliverable
+ *    plan exists → action "hold": fix the funnel first, with the CVR needed to
+ *    make the recommended CPA achievable.
+ *  - When spendable, the starting daily budget is the learning-phase floor at the
+ *    recommended CPA: (LEARNING_PHASE.conversions / windowDays) × CPA — enough
+ *    daily conversions for Meta to exit "Learning Limited" and optimize.
+ *
+ * `achievableCpa` is the funnel's deliverable CPA (from context); when unknown
+ * (non-cps, or no baseline), the deliverability check is skipped and the
+ * recommendation rests on break-even alone.
+ */
+export function recommend(
+  scenario: Scenario,
+  achievableCpa: number | undefined,
+): Recommendation {
+  const be = breakEvenCpa(scenario);
+  if (be === undefined || be <= 0) {
+    return {
+      action: "hold",
+      targetCpa: undefined,
+      dailyBudget: undefined,
+      summary: "No positive contribution per sale at these inputs — fix margin / AOV before spending.",
+    };
+  }
+
+  const recCpa = be * LEVERAGE_GUARDS.recommendedCpaOfBreakeven;
+  const dailyFloor =
+    (LEARNING_PHASE.conversions / LEARNING_PHASE.windowDays) * recCpa;
+  const eur0 = (v: number) => `€${Math.round(v).toLocaleString("en-IE")}`;
+  const eur2 = (v: number) => `€${v.toFixed(2)}`;
+
+  // Deliverability: in cps mode the funnel must hit the recommended CPA.
+  const deliverable = achievableCpa === undefined || achievableCpa <= recCpa;
+  if (!deliverable) {
+    // CVR needed to make recCpa achievable: achievableCpa scales as CPC ÷ CVR,
+    // so requiredCvr = currentCvr × (achievableCpa / recCpa). Express as the
+    // multiple, since current CVR may be a provisional input.
+    const cvrMultiple = (achievableCpa as number) / recCpa;
+    return {
+      action: "hold",
+      targetCpa: recCpa,
+      dailyBudget: undefined,
+      summary:
+        `Don't spend yet. A viable target is ${eur2(recCpa)} CPA (20% under the ` +
+        `${eur2(be)} break-even), but your funnel can only deliver ${eur0(achievableCpa as number)} ` +
+        `per sale — conversion rate must rise ~${cvrMultiple.toFixed(1)}× first. Fix the funnel, then spend.`,
+    };
+  }
+
+  return {
+    action: "spend",
+    targetCpa: recCpa,
+    dailyBudget: dailyFloor,
+    summary:
+      `Start at ${eur0(dailyFloor)}/day targeting ${eur2(recCpa)} CPA ` +
+      `(20% under the ${eur2(be)} break-even). The daily figure is the learning-phase ` +
+      `floor (~${LEARNING_PHASE.conversions} conversions/${LEARNING_PHASE.windowDays}d) so Meta can optimize; ` +
+      `scale up only while CPA holds — watch the diminishing-returns caveat.`,
   };
 }
 

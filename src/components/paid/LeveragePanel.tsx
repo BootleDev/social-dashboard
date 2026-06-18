@@ -21,7 +21,7 @@ const VERDICT_STYLE: Record<
 };
 
 export default function LeveragePanel({ report }: { report: LeverageReport }) {
-  const { verdict, levers } = report;
+  const { verdict, levers, recommendation } = report;
   const style = VERDICT_STYLE[verdict.status];
   return (
     <div className="rounded-xl p-5" style={{ ...card, borderLeft: `4px solid ${style.bg}` }}>
@@ -40,7 +40,24 @@ export default function LeveragePanel({ report }: { report: LeverageReport }) {
           label="What is the verdict?"
         />
       </div>
-      <p className="text-sm mb-4">{verdict.summary}</p>
+      <p className="text-sm mb-3">{verdict.summary}</p>
+
+      {/* Concrete recommendation — the advisor line. */}
+      <div
+        className="rounded-lg px-3 py-2 mb-4 text-sm inline-flex items-start gap-2"
+        style={{ background: "var(--bg-primary)" }}
+      >
+        <span
+          className="text-[10px] font-bold px-1.5 py-0.5 rounded mt-0.5 shrink-0"
+          style={{
+            background: recommendation.action === "spend" ? "var(--success, #16a34a)" : "var(--danger, #dc2626)",
+            color: "#fff",
+          }}
+        >
+          {recommendation.action === "spend" ? "DO" : "DON'T"}
+        </span>
+        <span>{recommendation.summary}</span>
+      </div>
       <div className="text-xs font-medium mb-2" style={{ color: "var(--text-secondary)" }}>
         Levers — break-even threshold (real units) + profit sensitivity. The
         highlighted row is the binding constraint: thinnest margin, watch it first.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { analyzeLeverage, LEVERAGE_GUARDS } from "../adLeverage";
-import { runProjection, effectiveCpc } from "../adEconomics";
+import { analyzeLeverage, recommend, LEVERAGE_GUARDS } from "../adLeverage";
+import { runProjection, effectiveCpc, breakEvenCpa } from "../adEconomics";
 import type { Scenario } from "../adScenario";
 
 /** A clearly-below-break-even CPC scenario (Bootle's real shape: tiny CVR). */
@@ -196,5 +196,49 @@ describe("profitable run", () => {
     const report = analyzeLeverage(winning());
     const bound = report.levers.filter((l) => l.binding);
     expect(bound).toHaveLength(1);
+  });
+});
+
+describe("recommend — concrete budget/CPA advisor", () => {
+  // A cps scenario whose funnel CAN deliver a profitable CPA.
+  function deliverable(): Scenario {
+    return {
+      model: "cps", budget: 500, spend: 500,
+      targetCpa: 20, aov: 67.85, vatRate: 0.2, grossMargin: 0.65, ltvMultiplier: 1,
+    };
+  }
+
+  it("recommends a target 20% under break-even and the learning-phase daily floor", () => {
+    const s = deliverable();
+    const be = breakEvenCpa(s) as number; // ~36.75
+    const r = recommend(s, /* achievableCpa */ 20); // funnel delivers €20 ≤ rec
+    expect(r.action).toBe("spend");
+    expect(r.targetCpa).toBeCloseTo(be * LEVERAGE_GUARDS.recommendedCpaOfBreakeven, 6);
+    // daily = (50/7) × recCpa
+    expect(r.dailyBudget).toBeCloseTo((50 / 7) * (r.targetCpa as number), 4);
+    expect(r.summary).toMatch(/Start at .*day targeting/);
+  });
+
+  it("says HOLD when the funnel can't deliver the recommended CPA", () => {
+    const s = deliverable();
+    const be = breakEvenCpa(s) as number;
+    const recCpa = be * LEVERAGE_GUARDS.recommendedCpaOfBreakeven; // ~29.4
+    // Funnel only delivers €179 — way above the recommended target.
+    const r = recommend(s, 179);
+    expect(r.action).toBe("hold");
+    expect(r.dailyBudget).toBeUndefined();
+    expect(r.targetCpa).toBeCloseTo(recCpa, 6); // still names the viable target
+    expect(r.summary).toMatch(/Don't spend|conversion rate must rise/);
+  });
+
+  it("holds when there is no positive contribution per sale (break-even <= 0)", () => {
+    const s: Scenario = { ...deliverable(), grossMargin: 0 };
+    const r = recommend(s, 10);
+    expect(r.action).toBe("hold");
+    expect(r.targetCpa).toBeUndefined();
+  });
+
+  it("is attached to every analyzeLeverage report", () => {
+    expect(analyzeLeverage(deliverable(), { achievableCpa: 20 }).recommendation.action).toBe("spend");
   });
 });
