@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { LEARNING_PHASE } from "../adScenario";
 import {
+  forecastTraffic,
   ratio,
   runCpc,
   runCpm,
@@ -407,3 +409,39 @@ describe("impliedFromCps — back out the traffic prices a target CPA implies", 
     expect(r.impliedCpm).toBeUndefined();
   });
 });
+
+describe("forecastTraffic — volume + time-to-learning", () => {
+  it("scales sessions/conversions from a one-day run", () => {
+    // cpc fixture: cpc 0.4, clickCvr 0.015. At €40/day → 100 clicks/day,
+    // click grain so sessions=clicks=100, conversions=100×0.015=1.5/day.
+    const f = forecastTraffic(cpc(), 40);
+    expect(f.sessionsPerDay).toBeCloseTo(100, 6);
+    expect(f.conversionsPerDay).toBeCloseTo(1.5, 6);
+    expect(f.sessionsPerWeek).toBeCloseTo(700, 6);
+    expect(f.conversionsPerMonth).toBeCloseTo(45, 6);
+  });
+
+  it("days-to-learning = LEARNING_PHASE.conversions / conversions-per-day", () => {
+    const f = forecastTraffic(cpc(), 40); // 1.5 conv/day
+    expect(f.daysToLearningPhase).toBeCloseTo(LEARNING_PHASE.conversions / 1.5, 6);
+    expect(f.daysToReadableSample).toBeCloseTo(
+      (LEARNING_PHASE.conversions * LEARNING_PHASE.readableSampleMultiple) / 1.5,
+      6,
+    );
+  });
+
+  it("days-to-N is undefined when conversions/day is 0 (not Infinity)", () => {
+    const f = forecastTraffic(cpc({ clickCvr: 0 }), 40);
+    expect(f.conversionsPerDay).toBe(0);
+    expect(f.daysToLearningPhase).toBeUndefined();
+    expect(f.daysToReadableSample).toBeUndefined();
+  });
+
+  it("cps mode: conversions forecast from budget/targetCpa, sessions undefined", () => {
+    // €40/day at €20 CPA → 2 conversions/day, no traffic stage.
+    const f = forecastTraffic(cps({ targetCpa: 20 }), 40);
+    expect(f.conversionsPerDay).toBeCloseTo(2, 6);
+    expect(f.sessionsPerDay).toBeUndefined();
+    expect(f.daysToLearningPhase).toBeCloseTo(LEARNING_PHASE.conversions / 2, 6);
+  });
+})

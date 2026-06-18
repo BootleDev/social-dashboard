@@ -298,6 +298,36 @@ export interface RangedProjection {
   flags: SimulationFlags;
 }
 
+/**
+ * Traffic + time forecast at a chosen DAILY budget — "what volume does this buy,
+ * and how long until I can learn from it?". Derived from a single projection
+ * scaled to the daily spend. All fields undefined when not computable.
+ */
+export interface TrafficForecast {
+  /** The daily budget the forecast is built on, EUR. */
+  dailyBudget: number;
+  /** Sessions/clicks per day, week, month (30d). undefined for cps (no traffic stage). */
+  sessionsPerDay: number | undefined;
+  sessionsPerWeek: number | undefined;
+  sessionsPerMonth: number | undefined;
+  /** Conversions per day / week / month. */
+  conversionsPerDay: number | undefined;
+  conversionsPerWeek: number | undefined;
+  conversionsPerMonth: number | undefined;
+  /**
+   * Days to accumulate Meta's learning-phase threshold of conversions
+   * (LEARNING_PHASE.conversions) at this daily spend — when the algorithm has
+   * enough signal to optimise. undefined when conversions/day is 0.
+   */
+  daysToLearningPhase: number | undefined;
+  /**
+   * Days to accumulate a readable sample (LEARNING_PHASE.conversions × a
+   * legibility factor) — a looser "enough to trust the rate" bar than the
+   * learning phase. undefined when conversions/day is 0.
+   */
+  daysToReadableSample: number | undefined;
+}
+
 // ===========================================================================
 // Tunable constants (pattern: scoreConfig.ts — exported, test-pinned)
 // ===========================================================================
@@ -366,6 +396,13 @@ export const DEFAULT_BANDS: SensitivityBands = {
 export const LEARNING_PHASE = {
   conversions: 50,
   windowDays: 7,
+  /**
+   * Multiple of the learning-phase conversion count for a "readable sample" —
+   * enough conversions that the measured rate is worth trusting, a looser bar
+   * than just exiting Learning Limited. 3× ≈ 150 conversions, a common rule of
+   * thumb for a stable directional read on a single metric.
+   */
+  readableSampleMultiple: 3,
 } as const;
 
 /**

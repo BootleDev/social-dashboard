@@ -34,7 +34,12 @@
  * display concern handled by the UI layer.
  */
 
-import { LEARNING_PHASE, type Scenario, type Projection } from "./adScenario";
+import {
+  LEARNING_PHASE,
+  type Scenario,
+  type Projection,
+  type TrafficForecast,
+} from "./adScenario";
 
 /**
  * The one division primitive. Returns undefined unless both operands are finite
@@ -231,6 +236,55 @@ export function runCps(scenario: Scenario): Projection {
 export function runProjection(scenario: Scenario): Projection {
   if (scenario.model === "cps") return runCps(scenario);
   return scenario.model === "cpm" ? runCpm(scenario) : runCpc(scenario);
+}
+
+// ===========================================================================
+// Traffic + time forecast
+// ===========================================================================
+
+/**
+ * Forecast the volume a DAILY budget buys and how long until it's learnable.
+ * Runs the scenario at `dailyBudget` (a one-day spend), reads sessions and
+ * conversions off the projection, and scales to week / month plus days-to-N.
+ *
+ * "How long to learn?" is the answer to the operator's A/B / data question: at
+ * a small daily spend on a ~0.2% funnel, conversions trickle in, so reaching a
+ * readable sample can take weeks — better to know before committing budget. Pure.
+ */
+export function forecastTraffic(
+  scenario: Scenario,
+  dailyBudget: number,
+): TrafficForecast {
+  // Run the funnel for exactly one day's spend.
+  const day: Scenario = { ...scenario, budget: dailyBudget, spend: dailyBudget };
+  const p = runProjection(day);
+
+  const sessionsPerDay = p.sessions;
+  const conversionsPerDay = p.conversions;
+
+  const scale = (v: number | undefined, factor: number) =>
+    v === undefined ? undefined : v * factor;
+
+  // Days to accumulate N conversions at this daily rate. Undefined when the rate
+  // is 0 (would be infinite) — the UI renders that as "—" / "not at this spend".
+  const daysToN = (n: number): number | undefined =>
+    conversionsPerDay !== undefined && conversionsPerDay > 0
+      ? n / conversionsPerDay
+      : undefined;
+
+  return {
+    dailyBudget,
+    sessionsPerDay,
+    sessionsPerWeek: scale(sessionsPerDay, 7),
+    sessionsPerMonth: scale(sessionsPerDay, 30),
+    conversionsPerDay,
+    conversionsPerWeek: scale(conversionsPerDay, 7),
+    conversionsPerMonth: scale(conversionsPerDay, 30),
+    daysToLearningPhase: daysToN(LEARNING_PHASE.conversions),
+    daysToReadableSample: daysToN(
+      LEARNING_PHASE.conversions * LEARNING_PHASE.readableSampleMultiple,
+    ),
+  };
 }
 
 // ===========================================================================

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { DailyAdRow, ShopifySalesRow } from "@/lib/adBaseline";
 import { resolveScenario, simulate, type ScenarioOverrides } from "@/lib/adSimulate";
+import { forecastTraffic } from "@/lib/adEconomics";
 import { analyzeLeverage } from "@/lib/adLeverage";
 import {
   DEFAULT_VAT_RATE,
@@ -110,7 +111,7 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
 
   // Run the simulation whenever inputs change. Errors (e.g. missing baseline
   // input with no override) are surfaced, not thrown into render.
-  const { ranged, leverage, simError } = useMemo(() => {
+  const { ranged, leverage, forecast, simError } = useMemo(() => {
     if (!baseline) return { ranged: null, simError: null };
     // Parse a euro/number field: "" → undefined (use baseline), else the number.
     const num = (s: string): number | undefined => {
@@ -168,15 +169,27 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
     const achievableCpa = achievableCpaSeed;
     try {
       const scenario = resolveScenario(baseline, overrides);
+      const lev = analyzeLeverage(scenario, { achievableCpa });
+      const expected = simulate(scenario, { baseline });
+      // Forecast traffic + time-to-learning at a sensible DAILY budget: the
+      // recommended daily spend if there is one, else the learning-phase floor,
+      // else budget/30. Tells the operator whether they'll get enough volume to
+      // learn (their A/B / data question) before committing.
+      const dailyBudget =
+        lev.recommendation.dailyBudget ??
+        expected.expected.minDailyBudget ??
+        budget / 30;
       return {
-        ranged: simulate(scenario, { baseline }),
-        leverage: analyzeLeverage(scenario, { achievableCpa }),
+        ranged: expected,
+        leverage: lev,
+        forecast: forecastTraffic(scenario, dailyBudget),
         simError: null,
       };
     } catch (e) {
       return {
         ranged: null,
         leverage: null,
+        forecast: null,
         simError: e instanceof Error ? e.message : "Simulation failed",
       };
     }
@@ -692,6 +705,52 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
             attribution loss (platform-reported, not incremental).
           </p>
         </div>
+      )}
+
+      {/* Traffic + time-to-learning forecast — "will I get enough data?" */}
+      {forecast && (
+        <Collapsible
+          title="Traffic & time to learn"
+          tip="Volume the recommended daily budget buys, and how long until you have enough conversions to optimise / trust a result. At a low conversion rate, conversions trickle in — so reaching a learnable sample can take weeks. Use these counts to judge whether a test or a real read is feasible before committing spend."
+        >
+          <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+            At <strong>{eur(forecast.dailyBudget)}/day</strong> (the recommended daily spend).
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+            <Metric
+              label="Sessions / day"
+              value={int(forecast.sessionsPerDay)}
+              conf="ok"
+              sub={`${int(forecast.sessionsPerWeek)}/wk · ${int(forecast.sessionsPerMonth)}/mo`}
+              tip="Engaged sessions the daily budget buys (clicks that don't bounce). Conversion-bid mode has no traffic stage, so this is blank there — use a diagnostic CPC/CPM mode to forecast clicks."
+            />
+            <Metric
+              label="Conversions / day"
+              value={forecast.conversionsPerDay === undefined ? "—" : forecast.conversionsPerDay.toFixed(1)}
+              conf="ok"
+              sub={`${forecast.conversionsPerWeek?.toFixed(1) ?? "—"}/wk · ${forecast.conversionsPerMonth?.toFixed(0) ?? "—"}/mo`}
+              tip="Projected purchases per day at this spend. This is the signal that drives both Meta's optimisation and your ability to read a result."
+            />
+            <Metric
+              label="Days to exit learning"
+              value={forecast.daysToLearningPhase === undefined ? "— (too few)" : `~${Math.ceil(forecast.daysToLearningPhase)}d`}
+              conf="ok"
+              tip="Days to accumulate ~50 conversions per ad set — Meta's learning-phase threshold, where the algorithm has enough signal to optimise. Far out (or '—') means this daily budget is too thin to ever stabilise."
+            />
+            <Metric
+              label="Days to readable sample"
+              value={forecast.daysToReadableSample === undefined ? "— (too few)" : `~${Math.ceil(forecast.daysToReadableSample)}d`}
+              conf="ok"
+              tip="Days to ~150 conversions — a looser bar for trusting the measured rate (e.g. before judging a change). At a ~0.2% funnel on a small budget this is often many weeks; that's your answer on whether testing is practical yet."
+            />
+          </div>
+          <p className="mt-3 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            Counts scale linearly from a one-day run, so weekly/monthly figures don&apos;t
+            account for saturation or fatigue at higher spend. If &ldquo;days to readable
+            sample&rdquo; is many weeks, you likely won&apos;t have the data to test
+            variations meaningfully until conversion rate rises.
+          </p>
+        </Collapsible>
       )}
 
       {/* Candidate content */}

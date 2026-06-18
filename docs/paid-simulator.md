@@ -63,6 +63,15 @@ the traffic (cpc/cpm) diagnostic modes; in conversion-bid (cps) the target-CPA l
 the conversion economics, so a standalone CVR lever is omitted rather than shown as
 "not computable".
 
+**Traffic & time-to-learn (`forecastTraffic`).** Given the recommended daily budget, the
+tool forecasts the volume it buys (sessions/conversions per day/week/month) and how many
+days until you accumulate enough conversions to (a) exit Meta's learning phase (~50/ad
+set) and (b) reach a readable sample (~150). This answers the operator's "will I have
+enough data to test?" question before spending: at a ~0.2% funnel on a small budget,
+conversions trickle in so a readable sample can be hundreds of days out — a decisive
+signal that the funnel must be fixed before paid is even learnable. Counts scale linearly
+from a one-day run (no saturation modelling), so large-budget figures are optimistic.
+
 **Recommendation (`recommend`).** The report also carries a concrete
 DO/DON'T recommendation synthesized from the model's own constraints: a target CPA a
 safety margin (20%) below break-even, and a starting daily budget = the learning-phase
