@@ -286,7 +286,9 @@ export default function PlatformCompare({
         const metrics = metricsMap.get(key) ?? [];
         return {
           label: `${config.label} Reach`,
-          // Nullable: FB has no account Reach (empty every day) — gap, not 0 fill.
+          // Nullable: a day with no reach value is a gap, not a 0 fill. FB reach
+          // is a page_total_media_view_unique proxy from 2026-06-20 (daily_proxy);
+          // before that FB account reach was empty.
           data: alignToDateArrayNullable(
             metrics,
             allDates,

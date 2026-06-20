@@ -114,11 +114,24 @@ const DERIVED_ACCOUNT_METRIC_ER_TYPES = new Set([
  *                    distribution figure; it is tagged distinctly so it is never
  *                    confused with a Meta-style measurement, but it is real and
  *                    summable per day.
+ *  - `daily_proxy` — Facebook account REACH only, from 2026-06-20: the Graph API
+ *                    publishes no deduplicated FB account reach, so we proxy it
+ *                    with `page_total_media_view_unique` (unique users who viewed
+ *                    page content — the same metric backing FB account
+ *                    impressions). Tagged distinctly so it is never mistaken for
+ *                    a directly-measured dedup reach, but it is a real per-day
+ *                    distribution figure and IS summed (and disclosed as a proxy
+ *                    in the Methodology page). NB: FB reach therefore ≈ FB
+ *                    impressions, by construction.
  * Other Source values are NOT real per-day volume: `null` (honestly absent, e.g.
  * IG has no per-day Impressions), `period_aggregate` (a labelled window total,
  * never per-day), `pending`/`settled` (late-settling lifecycle markers).
  */
-const REAL_PER_DAY_VOLUME_SOURCES = new Set(["daily_real", "pin_sum"]);
+const REAL_PER_DAY_VOLUME_SOURCES = new Set([
+  "daily_real",
+  "pin_sum",
+  "daily_proxy",
+]);
 
 /**
  * True when a SPECIFIC metric's per-day value on an account row is a real,

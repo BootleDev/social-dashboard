@@ -70,6 +70,11 @@ const SOURCE_VOCAB: { tag: string; meaning: string }[] = [
       "Pinterest only: the account figure is defined as the sum of that day's per-pin impressions, because Pinterest exposes no deduplicated account reach. A real distribution figure, tagged distinctly so it is never mistaken for a directly-measured account number.",
   },
   {
+    tag: "daily_proxy",
+    meaning:
+      "Facebook account reach only, from 2026-06-20: the Graph API publishes no deduplicated FB account reach, so reach is proxied by page_total_media_view_unique (unique users who viewed page content — the same metric behind FB impressions). Counted in window sums and tagged distinctly so it is never mistaken for a directly-measured dedup reach. FB reach therefore tracks FB impressions by construction.",
+  },
+  {
     tag: "null",
     meaning:
       "No honest value exists for that metric on that day. The dashboard shows an em-dash, never a zero or a stand-in.",
@@ -102,9 +107,9 @@ const METRIC_LINEAGE: MetricLineage[] = [
       },
       {
         platform: "facebook",
-        apiField: null,
-        source: "null",
-        note: "Facebook's Graph API v22.0 reports no account-level reach. No value exists to show — an honest absence, not a tracking gap.",
+        apiField: "page_total_media_view_unique (v22.0, page token) — proxy",
+        source: "daily_proxy",
+        note: "Facebook's Graph API v22.0 reports no deduplicated account reach. Since 2026-06-20 we proxy it with page_total_media_view_unique (unique users who viewed page content — the same metric behind FB impressions), disclosed as a proxy and counted in sums. FB reach therefore tracks FB impressions; it is not a directly-measured dedup reach.",
       },
       {
         platform: "pinterest",
