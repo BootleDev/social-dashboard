@@ -44,9 +44,11 @@ const tableCache = createTtlCache({ ttlMs: TABLE_CACHE_TTL_MS });
  *    write is MARKETING-35; until it lands, `Account Daily Facts` has no
  *    Pinterest rows, so Pinterest account reach/impressions are simply absent
  *    on the dashboard (intentional single-source behaviour, not a bug).
- *  - Structurally-absent cells (FB account Reach, IG account Impressions) are
- *    omitted, never shown as 0 or a synthetic substitute — the platform APIs
- *    don't report them.
+ *  - IG account Impressions is structurally absent (Meta retired it) — omitted,
+ *    never shown as 0 or a synthetic substitute, because the API doesn't report
+ *    it. FB has no deduplicated account Reach either, so from 2026-06-20 FB Reach
+ *    is a `page_total_media_view_unique` proxy (Source `daily_proxy`) — counted,
+ *    but disclosed as a proxy on the Methodology page.
  *
  * The in-app Methodology page explains this for dashboard readers; this comment
  * is the dev-facing copy of the same model.

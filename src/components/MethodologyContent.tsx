@@ -573,11 +573,14 @@ export default function MethodologyContent() {
           false when the platform simply does not publish that metric. We never
           sum per-post numbers into an account total to fill a gap, because
           adding up posts counts the same person once per post they saw and
-          overstates true reach. The one deliberate exception is Pinterest, which
-          publishes no dedup&apos;d account reach: there, account reach and
-          impressions are explicitly defined as the pin-impression sum and tagged{" "}
-          <SourceTag tag="pin_sum" /> so the definition is never confused with a
-          directly-measured figure.
+          overstates true reach. There are two deliberate, clearly-tagged
+          exceptions where a platform publishes no dedup&apos;d account reach.
+          Pinterest: account reach and impressions are defined as the
+          pin-impression sum, tagged <SourceTag tag="pin_sum" />. Facebook (from
+          2026-06-20): account reach is proxied by page_total_media_view_unique
+          (the same metric behind FB impressions), tagged{" "}
+          <SourceTag tag="daily_proxy" />. Both are tagged distinctly so the
+          definition is never confused with a directly-measured figure.
         </p>
       </Section>
     </div>

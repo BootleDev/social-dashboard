@@ -233,6 +233,18 @@ describe("hasRealReach / hasRealImpressions", () => {
     expect(hasRealReach(fb)).toBe(true);
     expect(hasRealImpressions(fb)).toBe(true);
   });
+  it("daily_proxy is REACH-only: it is NOT counted as real impressions (guards double-count)", () => {
+    // daily_proxy proxies FB reach with page_total_media_view_unique, the same
+    // metric behind FB impressions. If the writer ever tagged impressions
+    // daily_proxy, counting it would double-count — so daily_proxy is real for
+    // the reach channel only.
+    const row = makeRecord({
+      "Reach Source": "daily_proxy",
+      "Impressions Source": "daily_proxy",
+    });
+    expect(hasRealReach(row)).toBe(true);
+    expect(hasRealImpressions(row)).toBe(false);
+  });
   it("treats Pinterest pin_sum as real, summable per-day volume", () => {
     // Pinterest account reach/impressions is a deliberate pin-impression sum
     // (MARKETING-35), tagged pin_sum — distinct from a Meta measurement, but

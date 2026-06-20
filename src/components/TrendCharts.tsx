@@ -137,7 +137,7 @@ export default function TrendCharts({ posts, dailyMetrics }: TrendChartsProps) {
           <ChartCard
             title="Account reach over time"
             height="220px"
-            tooltip="Account-level reach per platform over the measured days. Account reach is what each platform reports for the whole account — distinct from the post-level Total Reach above. A gap is an unreported day, not a zero."
+            tooltip="Account-level reach per platform over the measured days. Account reach is what each platform reports for the whole account — distinct from the post-level Total Reach above. A gap is an unreported day, not a zero. Facebook reach is a page_total_media_view_unique proxy (from 2026-06-20); Pinterest is a pin-impression sum. See the Methodology page."
           >
             <Line data={reachData} options={lineChartOptions} />
           </ChartCard>
