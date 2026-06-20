@@ -3,11 +3,20 @@
  *
  * For each of daily_account_metrics / weekly_summaries / social_alerts /
  * account_daily_facts this asserts, against the FULL table on both sides:
- *   - row count equality
- *   - sort-order equality on the load-bearing sort key (date / week_start /
- *     alert_date desc)
+ *   - row count parity (1:1 for the verbatim dual-writes; DIRECTIONAL for
+ *     social_alerts — see below)
+ *   - sort-order: each side desc on the load-bearing key (date / week_start /
+ *     alert_date), and positionally equal for the 1:1 tables
  *   - per-column value equality on matching natural keys (see table-specific
  *     notes on key selection and intentional divergences below)
+ *
+ * PARITY INVARIANT: the migration target is Supabase ⊇ Airtable — Supabase, the
+ * canonical store, must hold everything Airtable has (a missing Airtable row =
+ * data loss = fail), while extra Supabase-only rows are acceptable (it is the
+ * more-complete store). Three append-only/verbatim tables are tested as strict
+ * 1:1 (direction "exact"); social_alerts is tested DIRECTIONALLY (direction
+ * "supabaseSuperset") because n8n legitimately writes alert types to Supabase
+ * that it no longer dual-writes to Airtable.
  *
  * DOCUMENTED INTENTIONAL DIVERGENCES (per table):
  *
@@ -29,24 +38,31 @@
  *   None expected. Append-only; dual-write copies every column verbatim.
  *
  * ── social_alerts ────────────────────────────────────────────────────────────
- *   NATURAL KEY NOTE: social_alerts has no stable cross-store id. The Supabase
- *   table has a bigint `id` (the envelope id); Airtable has its own opaque
- *   record id. Multiple alerts share the same platform|date (e.g. two HEARTBEAT
- *   rows for pinterest on a single day from different n8n writers), and
- *   platform|date|type also collides. We use platform|alert_date|type|message
- *   as the natural key — the most discriminating combination available without
- *   a shared surrogate.
+ *   DIRECTIONAL — Supabase ⊇ Airtable (direction: "supabaseSuperset").
+ *   social_alerts has no stable cross-store id. The Supabase table has a bigint
+ *   `id` (the envelope id); Airtable has its own opaque record id. Multiple
+ *   alerts share the same platform|date (e.g. two HEARTBEAT rows for pinterest
+ *   on a single day from different n8n writers), and platform|date|type also
+ *   collides. We use platform|alert_date|type|message as the natural key — the
+ *   most discriminating combination available without a shared surrogate.
  *
- *   1. Content divergences in social_alerts are EXPECTED. The n8n writers
- *      UPSERT into Supabase (so later runs overwrite earlier rows), but INSERT
- *      into Airtable (historical rows are never touched). A row that was
- *      rewritten in Supabase will differ from the original Airtable snapshot.
- *      These show up as key-not-found (the rewritten message/type/severity
- *      produces a different natural key) and are marked allowedDivergence for
- *      the fields that change on rewrite: "Message", "Type", "Severity",
- *      "Post ID". The count-equality check and sort-order check still fire for
- *      structural divergences (extra/missing rows). Any key-set mismatch
- *      (unexpected new fields appearing on one side) is still a real bug.
+ *   1. Supabase legitimately holds MORE rows than Airtable, and that is the SAFE
+ *      direction (not data loss). n8n UPSERTs alerts into Supabase but INSERTs
+ *      into Airtable, AND has stopped dual-writing some alert types (notably
+ *      Pinterest/system HEARTBEAT) to Airtable entirely — so Supabase carries
+ *      rows Airtable never received (24 extra Supabase-only rows observed
+ *      2026-06-20: Pinterest/system HEARTBEAT plus a few rewritten alerts). The
+ *      check therefore asserts the migration invariant DIRECTIONALLY: every
+ *      AIRTABLE row must exist in Supabase (an Airtable row missing from
+ *      Supabase IS real data loss and fails loudly), while extra Supabase-only
+ *      rows are tolerated. Count check fails only if Supabase has FEWER rows
+ *      than Airtable. Live state: 0 Airtable rows missing from Supabase.
+ *   2. Content divergences on rows that DO match by natural key are EXPECTED and
+ *      reported (not failed) via allowedDivergence on the fields that change on
+ *      an UPSERT rewrite: "Message", "Type", "Severity", "Post ID". A rewrite
+ *      that also changed the natural key would orphan the original Airtable row
+ *      — that surfaces as a key-miss (data-loss fail), so it is NOT hidden. Any
+ *      key-set mismatch (unexpected new fields on one side) is still a real bug.
  *
  * ── account_daily_facts ──────────────────────────────────────────────────────
  *   1. "Engagement Rate" — PRECISION ONLY (same as daily_account_metrics above).
@@ -236,62 +252,111 @@ function valuesEqual(a, b, dp) {
  * differences are intentional (reported, not failed). roundedColumns = display
  * names that use dp-bounded comparison instead of exact equality.
  *
- * The atByKey Map uses the LAST record for a given key when duplicates exist
- * (Map.set overwrites). For tables with unique natural keys this is
- * irrelevant. For social_alerts (where the natural key incorporates message)
- * duplicates should not occur; if they do the comparison is still correct for
- * the matched record and any unmatched Supabase records fail individually.
+ * PARITY INVARIANT — the migration target is Supabase ⊇ Airtable: Supabase, the
+ * canonical store, must contain EVERYTHING Airtable has (a missing Airtable row
+ * = real data loss = hard fail), but Supabase holding EXTRA rows is acceptable
+ * (it is the more-complete store). `direction` selects how strictly row-count
+ * and natural-key matching enforce that:
+ *
+ *   - "exact" (default): 1:1 parity. Counts must be equal, the desc date
+ *     sequences must match positionally, and every Supabase row must have an
+ *     Airtable twin. Use for append-only/verbatim dual-writes where no
+ *     legitimate one-sided rows exist (daily_account_metrics, weekly_summaries,
+ *     account_daily_facts).
+ *
+ *   - "supabaseSuperset": directional. Asserts every AIRTABLE row exists in
+ *     Supabase (the unsafe direction — Airtable rows missing from Supabase fail
+ *     loudly), and EXPLICITLY TOLERATES extra Supabase-only rows (the safe
+ *     direction). Used for social_alerts, where n8n UPSERTs into Supabase but
+ *     INSERTs into Airtable, and has stopped dual-writing some alert types
+ *     (e.g. Pinterest/system HEARTBEAT) to Airtable entirely — so Supabase
+ *     legitimately carries rows Airtable never received. Those extras are not
+ *     data loss; failing on them would be a false negative for the migration.
+ *
+ * The matchByKey Map uses the LAST record for a given key when duplicates exist
+ * (Map.set overwrites). For tables with unique natural keys this is irrelevant.
+ * For social_alerts (whose natural key incorporates message) duplicates should
+ * not occur; if they do the comparison is still correct for the matched record.
  */
 function compareTable(
   section,
   sb,
   at,
-  { keyOf, sortKey, allowedDivergence = [], roundedColumns = {} },
+  { keyOf, sortKey, allowedDivergence = [], roundedColumns = {}, direction = "exact" },
 ) {
+  const superset = direction === "supabaseSuperset";
   console.log(`\n=== ${section} ===`);
-  console.log(`  rows: supabase=${sb.length} airtable=${at.length}`);
+  console.log(
+    `  rows: supabase=${sb.length} airtable=${at.length}${superset ? " (Supabase⊇Airtable)" : ""}`,
+  );
 
-  // (1) Row count — structural divergence
-  if (sb.length !== at.length)
+  // (1) Row count — structural divergence.
+  //   exact:    counts must be equal.
+  //   superset: Supabase may have MORE (extra Supabase-only rows are safe);
+  //             only Supabase having FEWER than Airtable is a data-loss fail
+  //             (the per-Airtable-row match below pinpoints which rows).
+  if (superset) {
+    if (sb.length < at.length)
+      fail(section, `Supabase has FEWER rows than Airtable (${sb.length} < ${at.length}) — possible data loss`);
+  } else if (sb.length !== at.length) {
     fail(section, `row count mismatch ${sb.length} vs ${at.length}`);
+  }
 
   if (sb.length === 0 && at.length === 0) {
     console.log("  both sides empty — count parity holds (0 = 0)");
     return;
   }
 
-  // (2) Sort order: the load-bearing date sequence must be non-increasing and
-  // match positionally on both sides. Within-key ties: Airtable uses record-
-  // creation order, which nothing downstream relies on.
+  // (2) Sort order: each side's load-bearing date sequence must be
+  // non-increasing (a broken desc sort is still a real bug on either store).
+  // In "exact" mode the two sequences must ALSO match positionally (1:1 rows).
+  // In "superset" mode positional equality is structurally impossible — extra
+  // Supabase-only rows shift the sequence — so we only assert per-side ordering.
   const sbSeq = sb.map((r) => String(r.fields[sortKey] ?? "").split("T")[0]);
   const atSeq = at.map((r) => String(r.fields[sortKey] ?? "").split("T")[0]);
   const nonIncreasing = (seq) =>
     seq.every((v, i) => i === 0 || seq[i - 1] >= v);
   if (!nonIncreasing(sbSeq)) fail(section, `Supabase ${sortKey} not desc-sorted`);
   if (!nonIncreasing(atSeq)) fail(section, `Airtable ${sortKey} not desc-sorted`);
-  if (JSON.stringify(sbSeq) !== JSON.stringify(atSeq))
+  if (!superset && JSON.stringify(sbSeq) !== JSON.stringify(atSeq))
     fail(section, `${sortKey} desc sequence differs between sources`);
 
-  // (3) Per-record key-set + per-column values, matched by natural key
-  const atByKey = new Map(at.map((r) => [keyOf(r.fields), r]));
+  // (3) Per-record key-set + per-column values, matched by natural key.
+  //   exact:    drive over Supabase rows; a Supabase row with no Airtable twin
+  //             is a fail (both stores should be 1:1).
+  //   superset: drive over AIRTABLE rows; an Airtable row with no Supabase twin
+  //             is a data-loss fail. Extra Supabase-only rows are simply not
+  //             visited — they are the tolerated safe direction.
   const divergenceReport = new Map(); // display-name -> count of differing rows
   let matched = 0;
   let keyMisses = 0;
-  for (const rec of sb) {
-    const k = keyOf(rec.fields);
-    const atRec = atByKey.get(k);
-    if (!atRec) {
+
+  const driving = superset ? at : sb;
+  const lookup = superset
+    ? new Map(sb.map((r) => [keyOf(r.fields), r])) // key -> Supabase rec
+    : new Map(at.map((r) => [keyOf(r.fields), r])); // key -> Airtable rec
+  const missLabel = superset
+    ? "no Supabase record for Airtable natural key"
+    : "no Airtable record for natural key";
+
+  for (const drivingRec of driving) {
+    const k = keyOf(drivingRec.fields);
+    const otherRec = lookup.get(k);
+    if (!otherRec) {
       keyMisses++;
-      // Only report the first 5 key misses to avoid a wall of output on
-      // social_alerts where many rewrites produce unmatched keys.
+      // Only report the first 5 key misses to avoid a wall of output.
       if (keyMisses <= 5)
-        fail(section, `no Airtable record for natural key "${k}"`);
+        fail(section, `${missLabel} "${k}"`);
       else if (keyMisses === 6)
         fail(section, `... (further key misses suppressed; ${keyMisses} total so far)`);
       continue;
     }
     matched++;
-    const sbKeys = Object.keys(rec.fields);
+    // Resolve which record is Supabase vs Airtable regardless of drive direction
+    // so the field-comparison logic and divergence-direction labels stay correct.
+    const sbRec = superset ? otherRec : drivingRec;
+    const atRec = superset ? drivingRec : otherRec;
+    const sbKeys = Object.keys(sbRec.fields);
     const atKeys = Object.keys(atRec.fields);
     const sbSet = new Set(sbKeys);
     const atSet = new Set(atKeys);
@@ -310,25 +375,27 @@ function compareTable(
         }
         continue;
       }
-      if (!valuesEqual(rec.fields[key], atRec.fields[key], roundedColumns[key])) {
+      if (!valuesEqual(sbRec.fields[key], atRec.fields[key], roundedColumns[key])) {
         if (allowed) {
           divergenceReport.set(key, (divergenceReport.get(key) ?? 0) + 1);
         } else {
           fail(
             section,
-            `value mismatch at "${k}" field "${key}": supabase=${JSON.stringify(rec.fields[key])} airtable=${JSON.stringify(atRec.fields[key])}`,
+            `value mismatch at "${k}" field "${key}": supabase=${JSON.stringify(sbRec.fields[key])} airtable=${JSON.stringify(atRec.fields[key])}`,
           );
         }
       }
     }
   }
   if (keyMisses > 5) {
-    // Update the suppressed-count message to the final count
     console.error(
-      `[parity:${section}] NOTE — ${keyMisses} total Supabase rows had no matching Airtable record`,
+      `[parity:${section}] NOTE — ${keyMisses} total ${superset ? "Airtable rows had no matching Supabase record" : "Supabase rows had no matching Airtable record"}`,
     );
   }
-  console.log(`  matched by natural key: ${matched}/${sb.length}`);
+  const denom = superset ? at.length : sb.length;
+  console.log(
+    `  matched by natural key: ${matched}/${denom}${superset ? ` (of Airtable rows; ${sb.length - at.length >= 0 ? sb.length - at.length : 0}+ extra Supabase-only rows tolerated)` : ""}`,
+  );
   for (const [key, n] of divergenceReport) {
     console.log(
       `  documented divergence "${key}": ${n} row(s) differ (intentional — see script header)`,
@@ -407,19 +474,28 @@ function compareTable(
   const sb = rows.map(mapAlertRow);
   const at = await fetchAllAirtable(AT_SOCIAL_ALERTS, "Alert Date");
   compareTable("social_alerts", sb, at, {
+    // DIRECTIONAL: Supabase ⊇ Airtable. n8n UPSERTs alerts into Supabase but
+    // INSERTs into Airtable, and has STOPPED dual-writing some alert types
+    // (e.g. Pinterest/system HEARTBEAT) to Airtable — so Supabase legitimately
+    // holds rows Airtable never received (24 extra Supabase-only rows observed
+    // 2026-06-20; 0 Airtable rows missing from Supabase). Those extras are the
+    // SAFE direction and must NOT fail the check. The directional mode asserts
+    // every Airtable row still exists in Supabase (an Airtable row missing from
+    // Supabase WOULD be real data loss and fails loudly) and tolerates the
+    // Supabase-only extras. See header §social_alerts.
+    direction: "supabaseSuperset",
     // Natural key: platform|date|type|message. Message is truncated to 60
     // chars for the key to stay readable in error output while still being
     // discriminating enough. Full message is in the value comparison.
     keyOf: (f) =>
       `${f["Platform"]}|${f["Alert Date"]}|${f["Type"]}|${String(f["Message"] ?? "").slice(0, 60)}`,
     sortKey: "Alert Date",
-    // "Message", "Type", "Severity", "Post ID" — UPSERT vs INSERT divergence.
-    // n8n UPSERTs into Supabase (rewrites change type/severity/message on
-    // later runs); n8n INSERTs into Airtable (old rows never updated). A
-    // rewritten row produces a different natural key, causing a key-miss on
-    // the Supabase side. The key-miss failures above capture the structural
-    // count; these field divergences are reported on any rows that DO match
-    // but with updated content. See header §social_alerts.
+    // "Message", "Type", "Severity", "Post ID" — UPSERT-rewrite content drift
+    // on rows that DO match by natural key. n8n UPSERTs into Supabase (later
+    // runs may rewrite severity/message); n8n INSERTs into Airtable (old rows
+    // never updated). Reported, not failed. (A rewrite that also changed the
+    // key would orphan the Airtable row — that surfaces as a key-miss above,
+    // i.e. it is NOT silently allowed.)
     allowedDivergence: ["Message", "Type", "Severity", "Post ID"],
   });
 }
