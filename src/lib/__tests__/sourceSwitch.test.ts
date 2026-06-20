@@ -8,7 +8,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { forcedToAirtable } from "../sourceSwitch";
+import {
+  forcedToAirtable,
+  hasAllExpectedPlatforms,
+  EXPECTED_ACCOUNT_PLATFORMS,
+} from "../sourceSwitch";
+
+/** Minimal mapped-envelope row carrying just the Platform field the guard reads. */
+function platformRow(platform: string) {
+  return { fields: { Platform: platform } };
+}
 
 let warnSpy: ReturnType<typeof vi.spyOn>;
 
@@ -61,5 +70,42 @@ describe("forcedToAirtable — per-table kill switch", () => {
     forcedToAirtable("supabase", "SOCIAL_ALERTS_SOURCE");
     forcedToAirtable("supabase", "SOCIAL_ALERTS_SOURCE");
     expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard", () => {
+  it("EXPECTED_ACCOUNT_PLATFORMS is exactly the three account writers' platforms", () => {
+    expect([...EXPECTED_ACCOUNT_PLATFORMS].sort()).toEqual([
+      "facebook",
+      "instagram",
+      "pinterest",
+    ]);
+  });
+
+  it("true when every expected platform is present (extra rows per platform are fine)", () => {
+    const rows = [
+      platformRow("instagram"),
+      platformRow("instagram"),
+      platformRow("facebook"),
+      platformRow("pinterest"),
+    ];
+    expect(hasAllExpectedPlatforms(rows)).toBe(true);
+  });
+
+  it("FALSE when a writer's platform is missing (Pinterest gap) — forces Airtable fallback", () => {
+    // Simulates the Pinterest Data Refresher failing to write while the Social
+    // refresher (IG/FB) succeeded: rows.length > 0 but Pinterest absent.
+    const rows = [platformRow("instagram"), platformRow("facebook")];
+    expect(hasAllExpectedPlatforms(rows)).toBe(false);
+  });
+
+  it("FALSE on an empty result (so an empty Supabase read falls back to Airtable)", () => {
+    expect(hasAllExpectedPlatforms([])).toBe(false);
+  });
+
+  it("respects a custom expected list", () => {
+    const rows = [platformRow("instagram"), platformRow("facebook")];
+    expect(hasAllExpectedPlatforms(rows, ["instagram", "facebook"])).toBe(true);
+    expect(hasAllExpectedPlatforms(rows, ["instagram", "tiktok"])).toBe(false);
   });
 });

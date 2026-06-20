@@ -3,8 +3,13 @@ import {
   getDailyAccountMetricsFromSupabase,
   getWeeklySummariesFromSupabase,
   getSocialAlertsFromSupabase,
+  getAccountDailyFactsFromSupabase,
 } from "./supabase";
-import { forcedToAirtable } from "./sourceSwitch";
+import {
+  forcedToAirtable,
+  hasAllExpectedPlatforms,
+  EXPECTED_ACCOUNT_PLATFORMS,
+} from "./sourceSwitch";
 import { createTtlCache } from "./ttlCache";
 
 const BASE_URL = "https://api.airtable.com/v0";
@@ -195,6 +200,8 @@ export async function getPosts(opts: { noCache?: boolean } = {}) {
 //   DAILY_METRICS_SOURCE=airtable
 //   WEEKLY_SUMMARIES_SOURCE=airtable
 //   SOCIAL_ALERTS_SOURCE=airtable
+//   ACCOUNT_DAILY_FACTS_SOURCE=airtable   (WEBDEV-228; expires when WEBDEV-216
+//                                          retires the Airtable dual-write)
 // ---------------------------------------------------------------------------
 
 // forcedToAirtable lives in ./sourceSwitch (pure, unit-tested): whitespace-
@@ -296,11 +303,43 @@ export async function getSocialAlerts(opts: { noCache?: boolean } = {}) {
  * per-grain source model comment at the top of this file). Populated for IG/FB
  * by the Meta Social Data Refresher; Pinterest rows arrive with MARKETING-35.
  */
-export async function getAccountDailyFacts(opts: { noCache?: boolean } = {}) {
+async function getAccountDailyFactsFromAirtable(opts: { noCache?: boolean }) {
   return fetchAllRecords(TABLES.ACCOUNT_DAILY_FACTS, {
     sort: [{ field: "Date", direction: "desc" }],
     noCache: opts.noCache,
   });
+}
+
+export async function getAccountDailyFacts(opts: { noCache?: boolean } = {}) {
+  // NOTE: this kill switch expires when WEBDEV-216 removes the Airtable
+  // dual-write — after that the Airtable fallback below serves nothing.
+  if (
+    !forcedToAirtable(
+      process.env.ACCOUNT_DAILY_FACTS_SOURCE,
+      "ACCOUNT_DAILY_FACTS_SOURCE",
+    ) &&
+    hasSupabaseDbUrl()
+  ) {
+    try {
+      const rows = await getAccountDailyFactsFromSupabase();
+      // Two independent writers (Social + Pinterest refreshers) populate this
+      // table, so `rows.length > 0` alone would accept a Supabase-side write gap
+      // for one platform and silently drop its KPIs. Require EVERY expected
+      // platform present; otherwise fall back to Airtable. (When BOTH stores are
+      // stale the reconciler + OpsPanel freshness own it — fallback can't help.)
+      if (hasAllExpectedPlatforms(rows)) return rows;
+      console.warn(
+        "[account-daily-facts] Supabase empty or missing platform(s); " +
+          `falling back to Airtable (expected ${EXPECTED_ACCOUNT_PLATFORMS.join(", ")})`,
+      );
+    } catch (err) {
+      console.error(
+        "[account-daily-facts] Supabase read failed; falling back to Airtable:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return getAccountDailyFactsFromAirtable(opts);
 }
 
 export async function getContentLibrary(opts: { noCache?: boolean } = {}) {
