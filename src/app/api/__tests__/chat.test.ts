@@ -42,6 +42,22 @@ const mockDashboardData = {
       },
       createdTime: "2026-03-10",
     },
+    // OPERATIONS-90: a canonical IG row that carries real (daily_real) reach but
+    // NO Engagement Rate key (the platform reported no engagement signal, so the
+    // mapper drops the null per Airtable sparse-record shape). The legacy table
+    // has a row for the SAME date with a DERIVED er_type ER. We ship canonical
+    // AS-IS: that legacy approximation must NOT be merged into this row.
+    {
+      id: "instagram|2026-03-09",
+      fields: {
+        Platform: "Instagram",
+        Followers: 681,
+        Date: "2026-03-09",
+        Reach: 213,
+        // no "Engagement Rate" key on purpose (canonical = honest absence)
+      },
+      createdTime: "2026-03-09",
+    },
     {
       id: "facebook|2026-03-10",
       fields: {
@@ -59,6 +75,22 @@ const mockDashboardData = {
       id: "rec2",
       fields: { Platform: "Instagram", Followers: 682, Date: "2026-03-10" },
       createdTime: "2026-03-10",
+    },
+    // Legacy row for the 2026-03-09 IG date: a derived period-average ER over an
+    // inferior reach base (42 vs canonical's real 213). If a field-level merge
+    // existed, 0.0871 would leak into the prompt; the ship-canonical-as-is
+    // decision means it must not.
+    {
+      id: "rec2b",
+      fields: {
+        Platform: "Instagram",
+        Followers: 681,
+        Date: "2026-03-09",
+        Reach: 42,
+        "Engagement Rate": 0.0871,
+        "ER Type": "period_average",
+      },
+      createdTime: "2026-03-09",
     },
     {
       id: "rec3",
@@ -191,6 +223,28 @@ describe("POST /api/chat", () => {
     expect(captured.system).toContain('"Reach": 1200');
     expect(captured.system).toContain('"Reach": 340');
     expect(captured.system).toContain('"Engagement Rate": 0.086');
+
+    globalThis.fetch = originalFetch;
+  });
+
+  // OPERATIONS-90 decision lock: ship canonical AS-IS, no field-level merge from
+  // legacy. A canonical IG row with real reach but ABSENT ER must stay absent in
+  // the prompt — the legacy derived (period_average) ER for that same date, on an
+  // inferior reach base, must NOT leak in. The investigation (2026-06-20) proved
+  // legacy IG ER is always a derived approximation, so importing it would be less
+  // correct than canonical's honest null.
+  it("ships canonical as-is: does not merge legacy derived ER into a canonical row", async () => {
+    const captured = captureAnthropicSystemPrompt();
+
+    const res = await POST(makeRequest({ message: "ig engagement?" }));
+    expect(res.status).toBe(200);
+
+    // Canonical's real reach for the ER-absent date is present...
+    expect(captured.system).toContain('"Reach": 213');
+    // ...and the legacy derived ER (0.0871) for that date is NOT merged in.
+    expect(captured.system).not.toContain("0.0871");
+    // The legacy inferior reach base (42) for that date is not pulled in either.
+    expect(captured.system).not.toContain('"Reach": 42');
 
     globalThis.fetch = originalFetch;
   });
