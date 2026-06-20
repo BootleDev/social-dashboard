@@ -15,8 +15,10 @@ import {
   mapDailyRow,
   mapWeeklyRow,
   mapAlertRow,
+  mapAccountDailyFactsRow,
 } from "../supabaseMappers";
-import { num } from "../utils";
+import { num, hasRealReach, hasRealImpressions } from "../utils";
+import { assertFractionScale } from "../rateSentinel";
 
 // A full daily row as it arrives from pg AFTER the type parsers in supabase.ts
 // (date stays a "YYYY-MM-DD" string; numerics may be strings, but we feed
@@ -198,4 +200,391 @@ describe("mapAlertRow", () => {
     const rec = mapAlertRow(alertRow({ post_id: null }));
     expect("Post ID" in rec.fields).toBe(false);
   });
+});
+
+// ===========================================================================
+// mapAccountDailyFactsRow (WEBDEV-228) — the SOLE source for account KPIs.
+// ===========================================================================
+//
+// Fixtures are REAL rows captured live 2026-06-20 from social.account_daily_facts
+// and the matching Airtable "Account Daily Facts" records (same platform|date),
+// so the offline-parity test below is ground truth, not a re-statement of the
+// map. Numeric columns come back from pg as JS numbers; the `numeric`
+// engagement_rate comes back as a STRING (no OID-1700 typeparser), so the
+// fixtures model it as a string ("0.0860") exactly as the driver delivers it.
+
+// A synthetic FULL row (every column non-null) to lock the exact emitted key set.
+function fullAccountRow(overrides: Record<string, unknown> = {}) {
+  return {
+    snapshot_key: "instagram|2026-06-08",
+    platform: "instagram",
+    date: "2026-06-08",
+    reach: 4000,
+    reach_source: "daily_real",
+    impressions: 5000,
+    impressions_source: "daily_real",
+    views: 10,
+    views_source: "daily_real",
+    profile_views: 300,
+    followers: 1000,
+    follower_delta: 12,
+    engagement: 250,
+    engagement_rate: "0.0860", // pg numeric -> string
+    data_status: "settled",
+    restatement_log: "restated 2026-06-08",
+    profile_views_30d: 913,
+    accounts_engaged_30d: 150,
+    interactions_30d: 480,
+    profile_links_taps_30d: 7,
+    period_source: "period_aggregate",
+    updated_at: "2026-06-08T03:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("mapAccountDailyFactsRow — envelope shape", () => {
+  it("emits the EXACT 1:1 Airtable display-name key set for a full row", () => {
+    const rec = mapAccountDailyFactsRow(fullAccountRow());
+    expect(Object.keys(rec.fields).sort()).toEqual(
+      [
+        "Snapshot Key",
+        "Platform",
+        "Date",
+        "Reach",
+        "Reach Source",
+        "Impressions",
+        "Impressions Source",
+        "Views",
+        "Views Source",
+        "Profile Views",
+        "Followers",
+        "Follower Delta", // NOT "Followers Gained" (that is the legacy table)
+        "Engagement",
+        "Engagement Rate",
+        "data_status", // snake_case literal — NOT title-case
+        "Restatement Log",
+        "Profile Views (30d)",
+        "Accounts Engaged (30d)",
+        "Interactions (30d)",
+        "Profile Links Taps (30d)",
+        "Period Source",
+      ].sort(),
+    );
+  });
+
+  it("synthesizes id as `platform|date` and createdTime from updated_at", () => {
+    const rec = mapAccountDailyFactsRow(fullAccountRow());
+    expect(rec.id).toBe("instagram|2026-06-08");
+    expect(rec.createdTime).toBe("2026-06-08T03:00:00.000Z");
+  });
+
+  it("ENGAGEMENT RATE: passes the pg numeric STRING through verbatim (fraction, num(x)*100 = percent)", () => {
+    const rec = mapAccountDailyFactsRow(fullAccountRow());
+    const er = rec.fields["Engagement Rate"];
+    expect(er).toBe("0.0860"); // unchanged string — no *100, no Number() coercion
+    expect(num(er)).toBeCloseTo(0.086, 10);
+    expect(num(er) * 100).toBeCloseTo(8.6, 10);
+  });
+
+  it("SPARSE SHAPE: null columns are OMITTED, a real 0 is KEPT", () => {
+    const rec = mapAccountDailyFactsRow(
+      fullAccountRow({
+        impressions: null,
+        restatement_log: null,
+        profile_links_taps_30d: null,
+        engagement: 0,
+      }),
+    );
+    expect("Impressions" in rec.fields).toBe(false);
+    expect("Restatement Log" in rec.fields).toBe(false);
+    expect("Profile Links Taps (30d)" in rec.fields).toBe(false);
+    expect(rec.fields["Engagement"]).toBe(0); // 0 is a real value, emitted
+  });
+});
+
+describe("mapAccountDailyFactsRow — provenance / honesty model (hasRealReach/hasRealImpressions)", () => {
+  // IG: account impressions retired by Meta -> impressions_source is the literal
+  // STRING "null"; reach is a real same-day measurement (daily_real).
+  const igRow = {
+    snapshot_key: "instagram|2026-06-17",
+    platform: "instagram",
+    date: "2026-06-17",
+    reach: 46,
+    reach_source: "daily_real",
+    impressions: null,
+    impressions_source: "null",
+    views_source: "null",
+    followers: 732,
+    follower_delta: 0,
+    data_status: "settled",
+    updated_at: "2026-06-20T00:19:33.990538+00:00",
+  };
+  // FB: reach became a page_total_media_view_unique PROXY on 2026-06-20, tagged
+  // `daily_proxy` — which is NOT in REAL_PER_DAY_VOLUME_SOURCES, so FB reach is
+  // (still) NOT summed into the account headline. Impressions are real.
+  const fbRow = {
+    snapshot_key: "facebook|2026-06-17",
+    platform: "facebook",
+    date: "2026-06-17",
+    reach: 32,
+    reach_source: "daily_proxy",
+    impressions: 32,
+    impressions_source: "daily_real",
+    views_source: "null",
+    profile_views: 1,
+    followers: 83,
+    follower_delta: 0,
+    engagement: 0,
+    data_status: "settled",
+    updated_at: "2026-06-20T00:19:33.990538+00:00",
+  };
+  // Pinterest: account reach/impressions = the day's pin-impression SUM
+  // (MARKETING-35), tagged `pin_sum` — real and summable.
+  const pinRow = {
+    snapshot_key: "pinterest|2026-06-16",
+    platform: "pinterest",
+    date: "2026-06-16",
+    reach: 79,
+    reach_source: "pin_sum",
+    impressions: 79,
+    impressions_source: "pin_sum",
+    views_source: null, // SQL NULL on Pinterest (asymmetry vs FB/IG "null" string)
+    followers: 5,
+    follower_delta: null,
+    engagement_rate: "0.0860",
+    data_status: "settled",
+    updated_at: "2026-06-19T05:40:28.710302+00:00",
+  };
+
+  it("IG: impressions_source literal string 'null' -> hasRealImpressions FALSE; daily_real reach -> hasRealReach TRUE", () => {
+    const rec = mapAccountDailyFactsRow(igRow);
+    expect(rec.fields["Impressions Source"]).toBe("null"); // string emitted, not dropped
+    expect(hasRealImpressions(rec)).toBe(false);
+    expect(hasRealReach(rec)).toBe(true);
+  });
+
+  it("FB: daily_proxy reach -> hasRealReach TRUE (page_total_media_view_unique proxy, counted); daily_real impressions -> hasRealImpressions TRUE", () => {
+    // The mapper passes reach_source through verbatim; hasRealReach treats the FB
+    // page_total_media_view_unique proxy (daily_proxy) as real-and-summable from
+    // 2026-06-20 (see utils REAL_PER_DAY_VOLUME_SOURCES / hasRealMetricSource).
+    const rec = mapAccountDailyFactsRow(fbRow);
+    expect(rec.fields["Reach Source"]).toBe("daily_proxy");
+    expect(hasRealReach(rec)).toBe(true);
+    expect(hasRealImpressions(rec)).toBe(true);
+  });
+
+  it("Pinterest: pin_sum -> both real; SQL-NULL views_source OMITS the Views Source key (asymmetry vs FB/IG string 'null')", () => {
+    const rec = mapAccountDailyFactsRow(pinRow);
+    expect(hasRealReach(rec)).toBe(true);
+    expect(hasRealImpressions(rec)).toBe(true);
+    expect("Views Source" in rec.fields).toBe(false); // Pinterest: SQL NULL -> omitted
+    expect("Follower Delta" in rec.fields).toBe(false); // null -> num(undefined)=0 downstream is intentional
+  });
+
+  it("NULL-SOURCE EDGE: reach_source=null -> NO 'Reach Source' key (sparse) AND hasRealReach TRUE (ER-Type fallback is intentionally dead for ADF)", () => {
+    // Documents that the legacy ER-Type fallback in hasRealMetricSource never
+    // fires for ADF rows: with no Source key and no ER Type, it defaults to real.
+    // (No live ADF row has a null reach_source today — this is a defensive guard.)
+    const rec = mapAccountDailyFactsRow({ ...igRow, reach_source: null });
+    expect("Reach Source" in rec.fields).toBe(false);
+    expect(hasRealReach(rec)).toBe(true);
+  });
+
+  it("PERIOD_AGGREGATE: the IG rolling-30d row carries reach_source='daily_real' so it IS summed (matches Airtable) — Period Source only routes the 30d tiles", () => {
+    const rec = mapAccountDailyFactsRow({
+      ...igRow,
+      reach_source: "daily_real",
+      period_source: "period_aggregate",
+      profile_views_30d: 927,
+    });
+    // A future reviewer must NOT "fix" this to exclude it: parity requires it.
+    expect(rec.fields["Reach Source"]).toBe("daily_real");
+    expect(hasRealReach(rec)).toBe(true);
+    expect(rec.fields["Period Source"]).toBe("period_aggregate");
+    expect(rec.fields["Profile Views (30d)"]).toBe(927);
+  });
+});
+
+describe("mapAccountDailyFactsRow — unit sentinel (#1 risk) on raw rows", () => {
+  it("a fraction-scale engagement_rate passes the sentinel", () => {
+    expect(() =>
+      assertFractionScale("social.account_daily_facts", [fullAccountRow()], {
+        throwOn: ["engagement_rate"],
+        idCols: ["platform", "date"],
+      }),
+    ).not.toThrow();
+  });
+
+  it("REGRESSION GUARD: a percent-scale engagement_rate (8.6) THROWS, failing the read over to Airtable", () => {
+    expect(() =>
+      assertFractionScale(
+        "social.account_daily_facts",
+        [fullAccountRow({ engagement_rate: "8.6" })],
+        { throwOn: ["engagement_rate"], idCols: ["platform", "date"] },
+      ),
+    ).toThrow(/engagement_rate/);
+  });
+});
+
+describe("mapAccountDailyFactsRow — OFFLINE PARITY vs live Airtable (the silent-key-mismatch backstop)", () => {
+  // Each pair was captured at the same instant (2026-06-20) for the same
+  // platform|date. A silent display-name typo in the map returns wrong-key rows
+  // that fail-closed CANNOT catch (not empty, no throw) -> every KPI blanks.
+  // This asserts byte-for-byte field parity against ground truth.
+  type Pair = {
+    label: string;
+    supabaseRow: Record<string, unknown>;
+    airtableFields: Record<string, unknown>;
+  };
+
+  const pairs: Pair[] = [
+    {
+      label: "facebook|2026-06-17 (settled, daily_proxy reach)",
+      supabaseRow: {
+        snapshot_key: "facebook|2026-06-17",
+        platform: "facebook",
+        date: "2026-06-17",
+        reach: 32,
+        reach_source: "daily_proxy",
+        impressions: 32,
+        impressions_source: "daily_real",
+        views: null,
+        views_source: "null",
+        profile_views: 1,
+        followers: 83,
+        follower_delta: 0,
+        engagement: 0,
+        engagement_rate: null,
+        data_status: "settled",
+        restatement_log: null,
+        period_source: null,
+        profile_views_30d: null,
+        accounts_engaged_30d: null,
+        interactions_30d: null,
+        profile_links_taps_30d: null,
+        updated_at: "2026-06-20T00:19:33.990538+00:00",
+      },
+      airtableFields: {
+        "Views Source": "null",
+        Platform: "facebook",
+        Reach: 32,
+        "Reach Source": "daily_proxy",
+        "Profile Views": 1,
+        "Impressions Source": "daily_real",
+        data_status: "settled",
+        Date: "2026-06-17",
+        Engagement: 0,
+        "Snapshot Key": "facebook|2026-06-17",
+        Followers: 83,
+        "Follower Delta": 0,
+        Impressions: 32,
+      },
+    },
+    {
+      label: "pinterest|2026-06-16 (settled, pin_sum, SQL-NULL views_source)",
+      supabaseRow: {
+        snapshot_key: "pinterest|2026-06-16",
+        platform: "pinterest",
+        date: "2026-06-16",
+        reach: 79,
+        reach_source: "pin_sum",
+        impressions: 79,
+        impressions_source: "pin_sum",
+        views: null,
+        views_source: null,
+        profile_views: null,
+        followers: 5,
+        follower_delta: null,
+        engagement: null,
+        engagement_rate: "0.0860", // Airtable keeps full float; pg rounds to scale
+        data_status: "settled",
+        restatement_log: null,
+        period_source: null,
+        profile_views_30d: null,
+        accounts_engaged_30d: null,
+        interactions_30d: null,
+        profile_links_taps_30d: null,
+        updated_at: "2026-06-19T05:40:28.710302+00:00",
+      },
+      airtableFields: {
+        Platform: "pinterest",
+        Reach: 79,
+        "Reach Source": "pin_sum",
+        "Impressions Source": "pin_sum",
+        data_status: "settled",
+        Date: "2026-06-16",
+        "Engagement Rate": 0.08602150537634409,
+        "Snapshot Key": "pinterest|2026-06-16",
+        Followers: 5,
+        Impressions: 79,
+      },
+    },
+    {
+      label: "instagram|2026-06-19 (period_aggregate, 30d tiles)",
+      supabaseRow: {
+        snapshot_key: "instagram|2026-06-19",
+        platform: "instagram",
+        date: "2026-06-19",
+        reach: 116,
+        reach_source: "daily_real",
+        impressions: null,
+        impressions_source: "null",
+        views: null,
+        views_source: "null",
+        profile_views: null,
+        followers: 732,
+        follower_delta: 0,
+        engagement: 0,
+        engagement_rate: "0", // pg numeric 0
+        data_status: "pending",
+        restatement_log: null,
+        period_source: "period_aggregate",
+        profile_views_30d: 927,
+        accounts_engaged_30d: 148,
+        interactions_30d: 488,
+        profile_links_taps_30d: null,
+        updated_at: "2026-06-20T00:19:33.990538+00:00",
+      },
+      airtableFields: {
+        "Views Source": "null",
+        Platform: "instagram",
+        Reach: 116,
+        "Reach Source": "daily_real",
+        "Impressions Source": "null",
+        data_status: "pending",
+        Date: "2026-06-19",
+        "Profile Views (30d)": 927,
+        "Engagement Rate": 0,
+        Engagement: 0,
+        "Snapshot Key": "instagram|2026-06-19",
+        "Interactions (30d)": 488,
+        "Period Source": "period_aggregate",
+        Followers: 732,
+        "Accounts Engaged (30d)": 148,
+        "Follower Delta": 0,
+      },
+    },
+  ];
+
+  for (const { label, supabaseRow, airtableFields } of pairs) {
+    it(`emits a byte-for-byte identical field envelope for ${label}`, () => {
+      const mapped = mapAccountDailyFactsRow(supabaseRow).fields;
+
+      // 1. Same key SET (the silent-mismatch killer). Snapshot Key included.
+      expect(Object.keys(mapped).sort()).toEqual(
+        Object.keys(airtableFields).sort(),
+      );
+
+      // 2. Same VALUE per key. Engagement Rate diverges only by pg's numeric
+      //    rounding (Airtable keeps the full float) — identical when rendered,
+      //    so compare it numerically; everything else must be strictly equal.
+      for (const key of Object.keys(airtableFields)) {
+        if (key === "Engagement Rate") {
+          expect(num(mapped[key])).toBeCloseTo(num(airtableFields[key]), 3);
+        } else {
+          expect(mapped[key]).toEqual(airtableFields[key]);
+        }
+      }
+    });
+  }
 });

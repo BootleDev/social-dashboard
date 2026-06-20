@@ -1,5 +1,5 @@
 /**
- * Pure row -> envelope mappers for the three Supabase-migrated tables.
+ * Pure row -> envelope mappers for the four Supabase-migrated tables.
  *
  * Extracted from supabase.ts (WEBDEV-207) so the shape-critical mapping logic is
  * unit-testable WITHOUT a live DB and without importing the `server-only` /
@@ -136,6 +136,91 @@ export function mapAlertRow(row: Record<string, unknown>): AirtableRecord {
   return {
     id: String(row.id),
     fields: buildFields(row, ALERTS_MAP),
+    createdTime: toCreatedTime(row.updated_at),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// social.account_daily_facts -> getAccountDailyFacts (WEBDEV-228)
+// ---------------------------------------------------------------------------
+//
+// The SOLE source for account-grain KPIs (WEBDEV-146): one row per platform|date
+// with per-metric Source provenance. This map is the EXACT 1:1 of the Airtable
+// "Account Daily Facts" table's 21 fields (verified live 2026-06-20 against
+// tblgKAMI1pF3FjQGo) so the Supabase envelope is byte-for-byte identical to the
+// Airtable getter's. Consumers read these display-name keys directly:
+//   - hasRealReach / hasRealImpressions (utils.ts) — "Reach Source" /
+//     "Impressions Source" gate whether a row's volume is summed into the
+//     account headline. Values: daily_real / pin_sum are real-and-summable;
+//     daily_proxy / the literal STRING "null" / period_aggregate are not.
+//   - OverviewDeepDive — "Period Source" === "period_aggregate" routes the IG
+//     rolling-30d tiles (NOT the reach sums); the *_30d display keys feed them.
+//   - MethodologyContent — "data_status" (snake_case, NOT title-case), plus the
+//     distinct "Reach Source" / "Impressions Source" value sets.
+//   - PlatformCompare / Overview — Followers, Reach, Impressions, Profile Views,
+//     Engagement Rate.
+//
+// KEYS THAT DIFFER FROM THE PLAN'S DRAFT FIELD MAP (corrected against live data):
+//   * follower_delta -> "Follower Delta" (NOT "Followers Gained"). The plan
+//     conflated this with the LEGACY Daily Account Metrics table, whose field IS
+//     "Followers Gained" (DAILY_MAP above). The ADF table's field is literally
+//     "Follower Delta"; mapping to the wrong name would break envelope parity.
+//   * snapshot_key -> "Snapshot Key" and restatement_log -> "Restatement Log"
+//     are INCLUDED (the plan listed them as omit). Airtable emits "Snapshot Key"
+//     on EVERY row (= platform|date), so omitting it would create a guaranteed
+//     per-row key-set divergence from the Airtable getter; including it keeps the
+//     envelope identical. No consumer reads either (both are harmless
+//     passthroughs); "Restatement Log" is sparse today (all rows null -> omitted
+//     by buildFields, matching Airtable's empty-cell omission) but stays in parity
+//     if a restatement is ever logged.
+//
+// ENGAGEMENT-RATE UNIT (the #1 review risk, same as DAILY_MAP): engagement_rate
+// is a FRACTION (live range 0.00–0.25); the dashboard does num(x) * 100 on the
+// same axis as the Airtable posts-derived ER line, so it MUST stay a fraction.
+// pg returns numeric as a STRING (no OID-1700 typeparser in supabase.ts), so the
+// value arrives like "0.0860"; buildFields passes it through verbatim and num()
+// in the components parses it. Note Airtable stores the full-precision float
+// (0.08602150537634409) while Postgres rounds to the numeric column's scale
+// (0.0860) — the rendered ER (~8.6%) is identical, so the offline parity test
+// compares Engagement Rate with toBeCloseTo, not strict equality.
+export const ACCOUNT_DAILY_FACTS_MAP: Array<[string, string]> = [
+  ["snapshot_key", "Snapshot Key"],
+  ["platform", "Platform"],
+  ["date", "Date"],
+  ["reach", "Reach"],
+  ["reach_source", "Reach Source"],
+  ["impressions", "Impressions"],
+  ["impressions_source", "Impressions Source"],
+  ["views", "Views"],
+  ["views_source", "Views Source"],
+  ["profile_views", "Profile Views"],
+  ["followers", "Followers"],
+  ["follower_delta", "Follower Delta"],
+  ["engagement", "Engagement"],
+  ["engagement_rate", "Engagement Rate"],
+  ["data_status", "data_status"],
+  ["restatement_log", "Restatement Log"],
+  ["profile_views_30d", "Profile Views (30d)"],
+  ["accounts_engaged_30d", "Accounts Engaged (30d)"],
+  ["interactions_30d", "Interactions (30d)"],
+  ["profile_links_taps_30d", "Profile Links Taps (30d)"],
+  ["period_source", "Period Source"],
+];
+
+/**
+ * Map an account_daily_facts row to the Airtable envelope.
+ * id = `${platform}|${date}` (one row per platform per day, matching the
+ * snapshot_key upsert key). The Airtable getter returns the Airtable record id
+ * here instead, but no consumer of account facts relies on the id being an
+ * Airtable rec id (only the Posts inline-tag editor uses rec ids), so the
+ * synthetic composite id is the same intentional substitution mapDailyRow makes.
+ */
+export function mapAccountDailyFactsRow(
+  row: Record<string, unknown>,
+): AirtableRecord {
+  return {
+    id: `${row.platform}|${row.date}`,
+    fields: buildFields(row, ACCOUNT_DAILY_FACTS_MAP),
     createdTime: toCreatedTime(row.updated_at),
   };
 }

@@ -36,9 +36,10 @@ interface PlatformCompareProps {
 interface PlatformKPIs {
   followers: number;
   avgER: number;
-  // null = the platform does not report this account metric (e.g. Facebook has
-  // no account reach; Instagram retired account impressions). Rendered as an
-  // em-dash, never as a real 0 — a structural blank is not a measured zero.
+  // null = the platform does not report this account metric (e.g. Instagram
+  // retired account impressions). Rendered as an em-dash, never as a real 0 — a
+  // structural blank is not a measured zero. (FB account reach is no longer a
+  // structural blank: from 2026-06-20 it is a daily_proxy value.)
   totalReach: number | null;
   totalImpressions: number | null;
   posts: number;
@@ -93,8 +94,8 @@ function PlatformCard({
 }) {
   const config = getPlatformConfig(platformKey);
 
-  // A null structural metric (e.g. FB account reach, IG account impressions)
-  // renders as an em-dash — the platform doesn't report it, which is not a 0.
+  // A null structural metric (e.g. IG account impressions) renders as an
+  // em-dash — the platform doesn't report it, which is not a 0.
   const fmtOrDash = (v: number | null) => (v === null ? "—" : formatNumber(v));
 
   const rows = [
@@ -201,8 +202,9 @@ export default function PlatformCompare({
       // Account-grain volume is summed PER METRIC only from rows that carry a
       // real measurement for that metric (WEBDEV-146), matching Overview — so
       // one metric's absence renders as an em-dash, never a false 0. A platform
-      // with zero real-reach rows (e.g. Facebook) gets null, not 0. Source:
-      // Account Daily Facts.
+      // with zero real rows for a metric gets null, not 0 (e.g. IG impressions;
+      // FB reach is a daily_proxy value from 2026-06-20, so it is summed).
+      // Source: Account Daily Facts.
       const realReachRows = metrics.filter(hasRealReach);
       const realImprRows = metrics.filter(hasRealImpressions);
       const profileViewRows = metrics.filter(
@@ -286,7 +288,9 @@ export default function PlatformCompare({
         const metrics = metricsMap.get(key) ?? [];
         return {
           label: `${config.label} Reach`,
-          // Nullable: FB has no account Reach (empty every day) — gap, not 0 fill.
+          // Nullable: a day with no reach value is a gap, not a 0 fill. FB reach
+          // is a page_total_media_view_unique proxy from 2026-06-20 (daily_proxy);
+          // before that FB account reach was empty.
           data: alignToDateArrayNullable(
             metrics,
             allDates,
@@ -535,7 +539,10 @@ export default function PlatformCompare({
         <ChartCard title="Engagement Rate Comparison">
           <Line data={erTrendData} options={lineChartOptions} />
         </ChartCard>
-        <ChartCard title="Reach Comparison">
+        <ChartCard
+          title="Reach Comparison"
+          tooltip="Account reach per platform. Facebook reach is a page_total_media_view_unique proxy (from 2026-06-20); Pinterest is a pin-impression sum; Instagram is directly measured. See the Methodology page."
+        >
           <Line data={reachTrendData} options={lineChartOptions} />
         </ChartCard>
       </div>

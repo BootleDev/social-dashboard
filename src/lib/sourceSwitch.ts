@@ -31,3 +31,49 @@ export function forcedToAirtable(
   }
   return false;
 }
+
+/**
+ * Platforms that MUST be present in a healthy account_daily_facts read
+ * (WEBDEV-228). account_daily_facts is written by TWO independent n8n writers —
+ * the Social Data Refresher (instagram + facebook) and the Pinterest Data
+ * Refresher (pinterest) — so a Supabase-side write gap on ONE writer would leave
+ * the table partially populated. A bare `rows.length > 0` would happily serve
+ * that partial set and silently drop a platform's KPIs.
+ *
+ * MAINTENANCE: keep this in sync with the platforms the ADF refreshers write.
+ * If a new platform is added to the Social/Pinterest Data Refresher write path,
+ * add it here — otherwise its absence would never trigger the Airtable fallback.
+ * Values are lowercase to match the n8n writers (and hasAllExpectedPlatforms
+ * case-folds the read side defensively).
+ */
+export const EXPECTED_ACCOUNT_PLATFORMS = [
+  "instagram",
+  "facebook",
+  "pinterest",
+] as const;
+
+/**
+ * True when the mapped account-facts rows carry EVERY expected platform, i.e.
+ * the Supabase read is complete enough to trust over Airtable. Empty in -> false
+ * (fall back). Pure (operates on the mapped envelope's `fields['Platform']`), so
+ * it is unit-testable without the server-only / pg layer that airtable.ts pulls
+ * in (same rationale as forcedToAirtable / buildFields / assertFractionScale).
+ *
+ * NOTE: this guard recovers a SUPABASE-SPECIFIC platform drop only. When BOTH
+ * stores are stale/partial the WEBDEV-202 reconciler and the OpsPanel freshness
+ * panel own it — the Airtable fallback cannot help there.
+ */
+export function hasAllExpectedPlatforms(
+  rows: Array<{ fields: Record<string, unknown> }>,
+  expected: readonly string[] = EXPECTED_ACCOUNT_PLATFORMS,
+): boolean {
+  if (rows.length === 0) return false;
+  // Case-fold + trim defensively: EXPECTED is lowercase, and a writer that ever
+  // emitted "Instagram"/" pinterest " would otherwise pin the dashboard to
+  // Airtable forever despite Supabase having all platforms. Guards source
+  // selection only — the emitted "Platform" field value is untouched (parity).
+  const present = new Set(
+    rows.map((r) => String(r.fields["Platform"]).trim().toLowerCase()),
+  );
+  return expected.every((p) => present.has(p));
+}

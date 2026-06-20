@@ -1,12 +1,13 @@
 /**
  * Supabase (Postgres) read layer for the social dashboard's migrated tables.
  *
- * WEBDEV-207 (dashboard, second cutover): the lowest-risk slice of the Airtable
- * -> Supabase machine-data migration. ONLY the three fully-migrated, machine-
- * written tables are repointed here:
- *   - social.daily_account_metrics   (-> getDailyAccountMetrics)
- *   - social.weekly_summaries        (-> getWeeklySummaries)
- *   - social.social_alerts           (-> getSocialAlerts)
+ * WEBDEV-207 (dashboard, second cutover) + WEBDEV-228: the machine-written,
+ * fully-migrated tables are repointed here, each behind a per-table kill switch
+ * with fail-closed Airtable fallback:
+ *   - social.daily_account_metrics   (-> getDailyAccountMetrics)   WEBDEV-207
+ *   - social.weekly_summaries        (-> getWeeklySummaries)       WEBDEV-207
+ *   - social.social_alerts           (-> getSocialAlerts)          WEBDEV-207
+ *   - social.account_daily_facts     (-> getAccountDailyFacts)     WEBDEV-228
  * Every other getter (getPosts, getContentLibrary) stays on Airtable: POSTS and
  * CONTENT_LIBRARY are human-edited and are NOT migrated. See ./airtable.ts.
  *
@@ -48,7 +49,12 @@ import "server-only";
 import pg from "pg";
 import type { AirtableRecord } from "./utils";
 import { SUPABASE_ROOT_CA_2021 } from "./supabase-ca";
-import { mapDailyRow, mapWeeklyRow, mapAlertRow } from "./supabaseMappers";
+import {
+  mapDailyRow,
+  mapWeeklyRow,
+  mapAlertRow,
+  mapAccountDailyFactsRow,
+} from "./supabaseMappers";
 import { assertFractionScale } from "./rateSentinel";
 
 // int8 (OID 20): return as a JS number, not a string. social.social_alerts.id
@@ -116,7 +122,20 @@ function getPool(): pg.Pool {
       // Full TLS verification against the pinned Supabase root (the pooler's
       // self-signed root is not in the system trust store). See ./supabase-ca.
       ssl: { ca: SUPABASE_ROOT_CA_2021, rejectUnauthorized: true },
-      max: 2,
+      // WEBDEV-228: after the account_daily_facts repoint, getAllDashboardData
+      // fires FOUR concurrent Supabase reads (daily_account_metrics,
+      // weekly_summaries, social_alerts, account_daily_facts) on one
+      // serverless invocation. With max:2 the two queued readers could hit
+      // connectionTimeoutMillis (2500ms) and throw -> a FALSE Airtable fallback
+      // while Supabase is healthy. max:4 sizes the pool to a SINGLE
+      // getAllDashboardData call so it does not self-starve. The pool is a
+      // module-level singleton shared across whatever the warm lambda serves;
+      // allowExitOnIdle lets the process exit when idle (no cross-invocation
+      // leak), but two overlapping requests on one warm instance (e.g. /api/chat
+      // firing alongside /api/airtable) can still contend — a queued caller then
+      // times out at connectionTimeoutMillis and the withTimeout(4000ms) wrapper
+      // guarantees a fail-closed Airtable fallback rather than a hang.
+      max: 4,
       // Time-bound a slow/hung pooler so a stall fails over to Airtable fast.
       // NOTE: the connect (2500) and query (3500) budgets are SEQUENTIAL, so
       // they do NOT individually sit under the 4000ms ceiling. The actual
@@ -252,6 +271,47 @@ export async function getSocialAlertsFromSupabase(): Promise<AirtableRecord[]> {
           order by alert_date desc, id desc`,
       );
       return rows.map(mapAlertRow);
+    })(),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// social.account_daily_facts -> getAccountDailyFacts (WEBDEV-228)
+// ---------------------------------------------------------------------------
+//
+// The SOLE source for account-grain KPIs (WEBDEV-146). Same fail-over contract
+// as the three getters above: a timeout / error / sentinel-throw rejects so the
+// caller (airtable.ts) falls back to the Airtable read. EXPLICIT column list
+// (NOT select *): it matches the three getters above and stops a future schema
+// column from silently slipping past the unit sentinel below. The mapped
+// envelope is byte-for-byte the Airtable getter's (see ACCOUNT_DAILY_FACTS_MAP).
+//
+// engagement_rate is the throwOn sentinel column — it must stay a FRACTION
+// (live range 0.00–0.25); percent-scale writer drift (>1) or a negative value
+// throws here and fails the read over to Airtable, the same #1-risk guard the
+// daily_account_metrics getter carries. The sentinel scans the RAW pg rows
+// (which have platform/date columns for idCols) BEFORE mapping.
+export async function getAccountDailyFactsFromSupabase(): Promise<
+  AirtableRecord[]
+> {
+  return withTimeout(
+    "account_daily_facts",
+    (async () => {
+      const { rows } = await getPool().query(
+        `select snapshot_key, platform, date, reach, reach_source,
+                impressions, impressions_source, views, views_source,
+                profile_views, followers, follower_delta, engagement,
+                engagement_rate, data_status, restatement_log, period_source,
+                profile_views_30d, accounts_engaged_30d, interactions_30d,
+                profile_links_taps_30d, updated_at
+           from social.account_daily_facts
+          order by date desc`,
+      );
+      assertFractionScale("social.account_daily_facts", rows, {
+        throwOn: ["engagement_rate"],
+        idCols: ["platform", "date"],
+      });
+      return rows.map(mapAccountDailyFactsRow);
     })(),
   );
 }

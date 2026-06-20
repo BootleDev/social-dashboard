@@ -320,7 +320,7 @@ export default function Overview({
               Account metrics by platform
             </span>
             <InfoTooltip
-              text="Account-level reach, impressions and followers as each platform reports them. This is ACCOUNT-level data and intentionally differs from the post-level Total Reach above — that one sums every post; this one is what the platform reports for the account. A blank (—) means the platform does not publish that metric at the account level (e.g. Facebook has no account reach; Instagram retired account impressions) — not a tracking gap. Pinterest reach/impressions are a pin-sum. See the Methodology page."
+              text="Account-level reach, impressions and followers as each platform reports them. This is ACCOUNT-level data and intentionally differs from the post-level Total Reach above — that one sums every post; this one is what the platform reports for the account. A blank (—) means the platform does not publish that metric at the account level (e.g. Instagram retired account impressions) — not a tracking gap. Facebook publishes no deduplicated account reach, so its reach is a page_total_media_view_unique proxy (since 2026-06-20), disclosed as a proxy and summed; Pinterest reach/impressions are a pin-sum. See the Methodology page."
               label="Why do platforms show different account metrics?"
             />
           </div>

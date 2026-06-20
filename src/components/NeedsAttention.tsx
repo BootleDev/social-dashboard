@@ -76,11 +76,13 @@ function alertSeverity(raw: string): Severity {
 
 /**
  * Largest account-reach swing across platforms vs the prior period. Only
- * platforms that report real account reach are eligible (FB has none; Pinterest
- * is a pin-sum, IG is real) — so this never invents a mover from a structural
- * blank. Returns the single biggest absolute %-move, up or down. Moves off a
- * near-zero prior base (small-denominator artifacts) are excluded via
- * significantPctChange, so a tiny prior window can't surface as a huge percent.
+ * platforms that report real account reach are eligible (IG is real; Pinterest
+ * is a pin-sum; FB is a page_total_media_view_unique proxy from 2026-06-20,
+ * Source daily_proxy — eligible from then on) — so this never invents a mover
+ * from a structural blank. Returns the single biggest absolute %-move, up or
+ * down. Moves off a near-zero prior base (small-denominator artifacts) are
+ * excluded via significantPctChange, so a tiny prior window can't surface as a
+ * huge percent.
  */
 function biggestMover(
   dailyMetrics: AirtableRecord[],

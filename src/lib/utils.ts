@@ -114,6 +114,15 @@ const DERIVED_ACCOUNT_METRIC_ER_TYPES = new Set([
  *                    distribution figure; it is tagged distinctly so it is never
  *                    confused with a Meta-style measurement, but it is real and
  *                    summable per day.
+ * `daily_proxy` is a Facebook account-REACH-only proxy and is handled
+ * SEPARATELY in hasRealMetricSource (deliberately NOT in this set): from
+ * 2026-06-20 the Graph API publishes no deduplicated FB account reach, so reach
+ * is proxied by `page_total_media_view_unique` (unique users who viewed page
+ * content — the same metric backing FB account impressions). It is summable for
+ * REACH only; counting it as impressions would double-count, since FB
+ * impressions are already `daily_real` with the same underlying value. Disclosed
+ * as a proxy on the Methodology page.
+ *
  * Other Source values are NOT real per-day volume: `null` (honestly absent, e.g.
  * IG has no per-day Impressions), `period_aggregate` (a labelled window total,
  * never per-day), `pending`/`settled` (late-settling lifecycle markers).
@@ -140,6 +149,11 @@ function hasRealMetricSource(
 ): boolean {
   const source = str(record.fields[sourceField]).trim();
   if (source.length > 0) {
+    // daily_proxy is a Facebook REACH-only proxy (page_total_media_view_unique,
+    // from 2026-06-20): summable for reach, but NEVER counted as impressions —
+    // FB impressions are already daily_real with the same underlying value, so
+    // treating daily_proxy as impressions would double-count.
+    if (source === "daily_proxy") return sourceField === "Reach Source";
     return REAL_PER_DAY_VOLUME_SOURCES.has(source);
   }
 

@@ -214,13 +214,36 @@ describe("hasRealReach / hasRealImpressions", () => {
     expect(hasRealReach(ig)).toBe(true);
     expect(hasRealImpressions(ig)).toBe(false);
   });
-  it("a Facebook-shaped row is absent for reach, real for impressions", () => {
-    const fb = makeRecord({
+  it("a null reach Source is absent for reach, real for daily_real impressions", () => {
+    const row = makeRecord({
       "Reach Source": "null",
       "Impressions Source": "daily_real",
     });
-    expect(hasRealReach(fb)).toBe(false);
+    expect(hasRealReach(row)).toBe(false);
+    expect(hasRealImpressions(row)).toBe(true);
+  });
+  it("treats Facebook daily_proxy reach as real, summable (page_total_media_view_unique proxy, 2026-06-20)", () => {
+    // FB has no deduplicated account reach; from 2026-06-20 reach is proxied by
+    // page_total_media_view_unique (tagged daily_proxy) and IS summed, disclosed
+    // as a proxy. So FB reach is now real-for-reach (was absent before).
+    const fb = makeRecord({
+      "Reach Source": "daily_proxy",
+      "Impressions Source": "daily_real",
+    });
+    expect(hasRealReach(fb)).toBe(true);
     expect(hasRealImpressions(fb)).toBe(true);
+  });
+  it("daily_proxy is REACH-only: it is NOT counted as real impressions (guards double-count)", () => {
+    // daily_proxy proxies FB reach with page_total_media_view_unique, the same
+    // metric behind FB impressions. If the writer ever tagged impressions
+    // daily_proxy, counting it would double-count — so daily_proxy is real for
+    // the reach channel only.
+    const row = makeRecord({
+      "Reach Source": "daily_proxy",
+      "Impressions Source": "daily_proxy",
+    });
+    expect(hasRealReach(row)).toBe(true);
+    expect(hasRealImpressions(row)).toBe(false);
   });
   it("treats Pinterest pin_sum as real, summable per-day volume", () => {
     // Pinterest account reach/impressions is a deliberate pin-impression sum

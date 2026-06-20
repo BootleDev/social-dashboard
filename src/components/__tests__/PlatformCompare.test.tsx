@@ -19,8 +19,10 @@ function makeRecord(fields: Record<string, unknown>): AirtableRecord {
 }
 
 // Account Daily Facts shapes (WEBDEV-146): per-metric Source columns are
-// authoritative. IG reports per-day Reach but no per-day Impressions;
-// FB/Pinterest report Impressions but no deduplicated account Reach.
+// authoritative. IG reports per-day Reach but no per-day Impressions
+// (structural null); FB reach is a page_total_media_view_unique proxy from
+// 2026-06-20 (daily_proxy → a real summable value, not a blank); Pinterest
+// reports Impressions but its Reach column is a structural null here.
 const fixtures = [
   makeRecord({
     Platform: "Instagram",
@@ -33,8 +35,9 @@ const fixtures = [
   makeRecord({
     Platform: "Facebook",
     Date: "2026-06-01",
+    Reach: 454,
     Impressions: 454,
-    "Reach Source": "null",
+    "Reach Source": "daily_proxy",
     "Impressions Source": "daily_real",
     Followers: 100,
   }),
@@ -64,8 +67,9 @@ describe("PlatformCard metric rows (structural nulls, WEBDEV-182/189)", () => {
   it("shows — instead of silent zeros for non-reported account metrics", () => {
     render(<PlatformCompare posts={[]} dailyMetrics={fixtures} />);
 
+    // FB reach is a daily_proxy value (page_total_media_view_unique), shown, not blank.
     const fb = platformCard("Facebook");
-    expect(rowValue(fb, "Total Reach")).toBe("—");
+    expect(rowValue(fb, "Total Reach")).toBe("454");
     expect(rowValue(fb, "Impressions")).toBe("454");
 
     const ig = platformCard("Instagram");
@@ -79,8 +83,11 @@ describe("PlatformCard metric rows (structural nulls, WEBDEV-182/189)", () => {
 
   it("never renders a structural blank as a real 0", () => {
     render(<PlatformCompare posts={[]} dailyMetrics={fixtures} />);
-    const fb = platformCard("Facebook");
-    expect(rowValue(fb, "Total Reach")).not.toBe("0");
+    // IG impressions and Pinterest reach are the structural blanks now (FB reach
+    // is a real proxy value).
+    const pin = platformCard("Pinterest");
+    expect(rowValue(pin, "Total Reach")).toBe("—");
+    expect(rowValue(pin, "Total Reach")).not.toBe("0");
     const ig = platformCard("Instagram");
     expect(rowValue(ig, "Impressions")).not.toBe("0");
   });
