@@ -363,10 +363,13 @@ describe("mapAccountDailyFactsRow — provenance / honesty model (hasRealReach/h
     expect(hasRealReach(rec)).toBe(true);
   });
 
-  it("FB: daily_proxy reach -> hasRealReach FALSE (proxy not summed); daily_real impressions -> hasRealImpressions TRUE", () => {
+  it("FB: daily_proxy reach -> hasRealReach TRUE (page_total_media_view_unique proxy, counted); daily_real impressions -> hasRealImpressions TRUE", () => {
+    // The mapper passes reach_source through verbatim; hasRealReach treats the FB
+    // page_total_media_view_unique proxy (daily_proxy) as real-and-summable from
+    // 2026-06-20 (see utils REAL_PER_DAY_VOLUME_SOURCES / hasRealMetricSource).
     const rec = mapAccountDailyFactsRow(fbRow);
     expect(rec.fields["Reach Source"]).toBe("daily_proxy");
-    expect(hasRealReach(rec)).toBe(false);
+    expect(hasRealReach(rec)).toBe(true);
     expect(hasRealImpressions(rec)).toBe(true);
   });
 
