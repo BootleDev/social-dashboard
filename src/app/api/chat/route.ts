@@ -64,16 +64,31 @@ export async function POST(request: Request) {
   try {
     const data = await getAllDashboardData();
 
+    // OPERATIONS-90: source account-grain daily metrics from Account Daily Facts
+    // (the canonical table, WEBDEV-146/228), not the legacy Daily Account Metrics
+    // table. The legacy table's Reach / Engagement Rate are a DERIVED rollup that
+    // is NULL-by-design when there is no derivation basis, so feeding it to the
+    // analyst LLM leaked intermittent "n/a" reach/ER into the prompt. Account
+    // Daily Facts carries complete daily reach/ER. Both getters return the SAME
+    // Airtable envelope and share the keys this route reads (Platform, Followers,
+    // Reach, Engagement Rate, Date), so the reads below are unchanged. Fall back
+    // to the legacy table only if Account Daily Facts is absent/empty (e.g. a
+    // mid-deploy cached payload without the key), preserving prior behaviour.
+    const accountFacts =
+      data.accountDailyFacts && data.accountDailyFacts.length > 0
+        ? data.accountDailyFacts
+        : data.dailyMetrics;
+
     // Detect active platforms
     const platformSet = new Set<string>();
-    for (const r of data.dailyMetrics) {
+    for (const r of accountFacts) {
       const p = str(r.fields["Platform"]).toLowerCase().trim();
       if (p) platformSet.add(p);
     }
     const platformCount = Math.max(platformSet.size, 1);
 
     // Last 14 days of daily metrics (14 days x N platforms)
-    const recentDaily = data.dailyMetrics
+    const recentDaily = accountFacts
       .map((r) => r.fields)
       .slice(0, 14 * platformCount);
 
@@ -86,7 +101,7 @@ export async function POST(request: Request) {
     // Platform follower counts (latest per platform)
     const platformLines: string[] = [];
     const seen = new Set<string>();
-    for (const r of data.dailyMetrics) {
+    for (const r of accountFacts) {
       const p = str(r.fields["Platform"]).toLowerCase().trim();
       if (!p || seen.has(p)) continue;
       seen.add(p);

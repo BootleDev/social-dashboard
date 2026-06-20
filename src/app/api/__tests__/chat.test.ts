@@ -27,6 +27,33 @@ const mockDashboardData = {
       createdTime: "2026-01-01",
     },
   ],
+  // OPERATIONS-90: the chat route now sources account-grain daily metrics from
+  // accountDailyFacts (canonical, complete Reach/ER). dailyMetrics (legacy) is
+  // only the fallback when accountDailyFacts is empty/absent.
+  accountDailyFacts: [
+    {
+      id: "instagram|2026-03-10",
+      fields: {
+        Platform: "Instagram",
+        Followers: 682,
+        Date: "2026-03-10",
+        Reach: 1200,
+        "Engagement Rate": 0.086,
+      },
+      createdTime: "2026-03-10",
+    },
+    {
+      id: "facebook|2026-03-10",
+      fields: {
+        Platform: "Facebook",
+        Followers: 78,
+        Date: "2026-03-10",
+        Reach: 340,
+        "Engagement Rate": 0.012,
+      },
+      createdTime: "2026-03-10",
+    },
+  ],
   dailyMetrics: [
     {
       id: "rec2",
@@ -128,6 +155,61 @@ describe("POST /api/chat", () => {
 
     const res = await POST(makeRequest({ message: "hello" }));
     expect(res.status).toBe(500);
+
+    globalThis.fetch = originalFetch;
+  });
+
+  // OPERATIONS-90: the chat route must source account-grain daily metrics from
+  // accountDailyFacts (canonical, complete Reach/ER), not the legacy NULL-prone
+  // Daily Account Metrics. These tests capture the prompt sent to Anthropic and
+  // assert the canonical values reach it, with legacy as fallback only.
+  function captureAnthropicSystemPrompt() {
+    const captured = { system: "" };
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation((url: string, init?: RequestInit) => {
+        if (typeof url === "string" && url.includes("anthropic")) {
+          captured.system = JSON.parse(String(init?.body)).system as string;
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ content: [{ text: "ok" }] }),
+          });
+        }
+        return originalFetch(url);
+      });
+    return captured;
+  }
+
+  it("sources daily metrics from accountDailyFacts (canonical Reach/ER)", async () => {
+    const captured = captureAnthropicSystemPrompt();
+
+    const res = await POST(makeRequest({ message: "how's reach?" }));
+    expect(res.status).toBe(200);
+
+    // The canonical Account Daily Facts reach values reach the prompt; the legacy
+    // dailyMetrics rows (which carry no Reach key) do not source this section.
+    expect(captured.system).toContain('"Reach": 1200');
+    expect(captured.system).toContain('"Reach": 340');
+    expect(captured.system).toContain('"Engagement Rate": 0.086');
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it("falls back to legacy dailyMetrics when accountDailyFacts is empty", async () => {
+    mockGetAllDashboardData.mockResolvedValue({
+      ...mockDashboardData,
+      accountDailyFacts: [],
+    });
+    const captured = captureAnthropicSystemPrompt();
+
+    const res = await POST(makeRequest({ message: "platforms?" }));
+    expect(res.status).toBe(200);
+
+    // Fallback path: legacy rows (no Reach key) feed the prompt, and the platform
+    // overview still resolves Instagram + Facebook from the legacy followers.
+    expect(captured.system).toContain("Instagram: 682 followers");
+    expect(captured.system).toContain("Facebook: 78 followers");
+    expect(captured.system).not.toContain('"Reach": 1200');
 
     globalThis.fetch = originalFetch;
   });
