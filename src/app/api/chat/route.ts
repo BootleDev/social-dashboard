@@ -64,16 +64,59 @@ export async function POST(request: Request) {
   try {
     const data = await getAllDashboardData();
 
+    // OPERATIONS-90: source account-grain daily metrics from Account Daily Facts
+    // (the canonical table, WEBDEV-146/228), not the legacy Daily Account Metrics
+    // table. Account Daily Facts is the single source of truth for account KPIs:
+    // its Reach is real/measured (daily_real for IG, daily_proxy for FB post
+    // OPS-89, pin_sum for Pinterest) and its Engagement Rate is the real
+    // account-grain figure, left NULL when the platform reported no engagement
+    // signal rather than fabricated.
+    //
+    // We ship canonical AS-IS (array-level fallback only), NOT a field-level
+    // merge from legacy. An adversarial diff vs legacy was investigated against
+    // live data (2026-06-20) and the apparent "losses" are not real-data losses
+    // the analyst should keep:
+    //   - LEGACY IG ER is ALWAYS a derived approximation (er_type =
+    //     period_average / posts_derived_daily; legacy has NO native daily IG
+    //     ER). On the dates canonical leaves ER null, legacy spreads a period
+    //     average across days with no real daily engagement signal — and against
+    //     an inferior reach base (e.g. 2026-06-07: legacy ER 0.087 over reach 42
+    //     vs canonical real reach 213). Importing it would feed the LLM a smoothed
+    //     approximation dressed as a daily number, which is LESS correct than an
+    //     honest null. The FB "daily" ER gaps are zeros (engagement = 0), not
+    //     signal. Within the 14-day window read below there is NO real-reach,
+    //     follower, or real-daily-ER value in legacy that canonical lacks.
+    //   - PINTEREST canonical trails by ~3 days. This is the pin_sum writer's
+    //     settling cutoff (T-3), not a stall: the writer runs daily and backfills
+    //     a trailing window, so 06-18/19/20 materialise as they settle. Legacy's
+    //     only edge on those few days is a follower count plus reach=null /
+    //     impressions=0 / ER=0 (no real reach content). Inside the window canonical
+    //     Pinterest ER equals legacy exactly.
+    // So canonical (real-or-absent) is strictly MORE correct than legacy (real
+    // reach mixed with derived/zero ER) for this analyst feed; a merge would
+    // re-introduce the approximations OPERATIONS-90 set out to remove.
+    //
+    // Both getters return the SAME Airtable envelope and share the keys this
+    // route reads (Platform, Followers, Reach, Engagement Rate, Date), so the
+    // reads below are unchanged. Fall back to the legacy table only if Account
+    // Daily Facts is absent/empty (e.g. a mid-deploy cached payload without the
+    // key, or the getter's own platform-completeness fallback firing),
+    // preserving prior behaviour.
+    const accountFacts =
+      data.accountDailyFacts && data.accountDailyFacts.length > 0
+        ? data.accountDailyFacts
+        : data.dailyMetrics;
+
     // Detect active platforms
     const platformSet = new Set<string>();
-    for (const r of data.dailyMetrics) {
+    for (const r of accountFacts) {
       const p = str(r.fields["Platform"]).toLowerCase().trim();
       if (p) platformSet.add(p);
     }
     const platformCount = Math.max(platformSet.size, 1);
 
     // Last 14 days of daily metrics (14 days x N platforms)
-    const recentDaily = data.dailyMetrics
+    const recentDaily = accountFacts
       .map((r) => r.fields)
       .slice(0, 14 * platformCount);
 
@@ -86,7 +129,7 @@ export async function POST(request: Request) {
     // Platform follower counts (latest per platform)
     const platformLines: string[] = [];
     const seen = new Set<string>();
-    for (const r of data.dailyMetrics) {
+    for (const r of accountFacts) {
       const p = str(r.fields["Platform"]).toLowerCase().trim();
       if (!p || seen.has(p)) continue;
       seen.add(p);
