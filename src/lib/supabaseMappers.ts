@@ -1,5 +1,5 @@
 /**
- * Pure row -> envelope mappers for the three Supabase-migrated tables.
+ * Pure row -> envelope mappers for the four Supabase-migrated tables.
  *
  * Extracted from supabase.ts (WEBDEV-207) so the shape-critical mapping logic is
  * unit-testable WITHOUT a live DB and without importing the `server-only` /

@@ -103,6 +103,15 @@ describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard
     expect(hasAllExpectedPlatforms([])).toBe(false);
   });
 
+  it("case-folds + trims the Platform value so a writer emitting 'Instagram'/' Pinterest ' does NOT pin to Airtable forever", () => {
+    const rows = [
+      platformRow("Instagram"),
+      platformRow("FACEBOOK"),
+      platformRow("  pinterest  "),
+    ];
+    expect(hasAllExpectedPlatforms(rows)).toBe(true);
+  });
+
   it("respects a custom expected list", () => {
     const rows = [platformRow("instagram"), platformRow("facebook")];
     expect(hasAllExpectedPlatforms(rows, ["instagram", "facebook"])).toBe(true);

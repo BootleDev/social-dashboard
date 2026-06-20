@@ -1,12 +1,13 @@
 /**
  * Supabase (Postgres) read layer for the social dashboard's migrated tables.
  *
- * WEBDEV-207 (dashboard, second cutover): the lowest-risk slice of the Airtable
- * -> Supabase machine-data migration. ONLY the three fully-migrated, machine-
- * written tables are repointed here:
- *   - social.daily_account_metrics   (-> getDailyAccountMetrics)
- *   - social.weekly_summaries        (-> getWeeklySummaries)
- *   - social.social_alerts           (-> getSocialAlerts)
+ * WEBDEV-207 (dashboard, second cutover) + WEBDEV-228: the machine-written,
+ * fully-migrated tables are repointed here, each behind a per-table kill switch
+ * with fail-closed Airtable fallback:
+ *   - social.daily_account_metrics   (-> getDailyAccountMetrics)   WEBDEV-207
+ *   - social.weekly_summaries        (-> getWeeklySummaries)       WEBDEV-207
+ *   - social.social_alerts           (-> getSocialAlerts)          WEBDEV-207
+ *   - social.account_daily_facts     (-> getAccountDailyFacts)     WEBDEV-228
  * Every other getter (getPosts, getContentLibrary) stays on Airtable: POSTS and
  * CONTENT_LIBRARY are human-edited and are NOT migrated. See ./airtable.ts.
  *
@@ -126,9 +127,14 @@ function getPool(): pg.Pool {
       // weekly_summaries, social_alerts, account_daily_facts) on one
       // serverless invocation. With max:2 the two queued readers could hit
       // connectionTimeoutMillis (2500ms) and throw -> a FALSE Airtable fallback
-      // while Supabase is healthy. max:4 gives each concurrent read its own
-      // connection. The pool is per-serverless-invocation (allowExitOnIdle), so
-      // this does not leak connections across requests.
+      // while Supabase is healthy. max:4 sizes the pool to a SINGLE
+      // getAllDashboardData call so it does not self-starve. The pool is a
+      // module-level singleton shared across whatever the warm lambda serves;
+      // allowExitOnIdle lets the process exit when idle (no cross-invocation
+      // leak), but two overlapping requests on one warm instance (e.g. /api/chat
+      // firing alongside /api/airtable) can still contend — a queued caller then
+      // times out at connectionTimeoutMillis and the withTimeout(4000ms) wrapper
+      // guarantees a fail-closed Airtable fallback rather than a hang.
       max: 4,
       // Time-bound a slow/hung pooler so a stall fails over to Airtable fast.
       // NOTE: the connect (2500) and query (3500) budgets are SEQUENTIAL, so

@@ -39,6 +39,12 @@ export function forcedToAirtable(
  * Refresher (pinterest) — so a Supabase-side write gap on ONE writer would leave
  * the table partially populated. A bare `rows.length > 0` would happily serve
  * that partial set and silently drop a platform's KPIs.
+ *
+ * MAINTENANCE: keep this in sync with the platforms the ADF refreshers write.
+ * If a new platform is added to the Social/Pinterest Data Refresher write path,
+ * add it here — otherwise its absence would never trigger the Airtable fallback.
+ * Values are lowercase to match the n8n writers (and hasAllExpectedPlatforms
+ * case-folds the read side defensively).
  */
 export const EXPECTED_ACCOUNT_PLATFORMS = [
   "instagram",
@@ -62,6 +68,12 @@ export function hasAllExpectedPlatforms(
   expected: readonly string[] = EXPECTED_ACCOUNT_PLATFORMS,
 ): boolean {
   if (rows.length === 0) return false;
-  const present = new Set(rows.map((r) => String(r.fields["Platform"])));
+  // Case-fold + trim defensively: EXPECTED is lowercase, and a writer that ever
+  // emitted "Instagram"/" pinterest " would otherwise pin the dashboard to
+  // Airtable forever despite Supabase having all platforms. Guards source
+  // selection only — the emitted "Platform" field value is untouched (parity).
+  const present = new Set(
+    rows.map((r) => String(r.fields["Platform"]).trim().toLowerCase()),
+  );
   return expected.every((p) => present.has(p));
 }
