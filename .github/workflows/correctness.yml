@@ -1,0 +1,33 @@
+name: Supabase correctness monitor
+
+# Validates the canonical Supabase social.* store against HARD INVARIANTS (WEBDEV-288).
+# Unlike the parity cron (Supabase vs Airtable), this survives retiring the dual-write
+# (WEBDEV-216): it checks Supabase against itself, not another store. Known/filed gaps
+# (WEBDEV-295/296/297) are not failed here — see ALLOWLIST in src/lib/correctnessChecks.ts.
+#
+# scripts/correctness-monitor.mjs self-skips (exit 0) when SUPABASE_DB_URL is absent, so a
+# fork/secretless run never flakes. On failure: red check (GitHub emails the author) AND a
+# POST to N8N_ALERT_WEBHOOK (if set) for the team email alert via n8n. 05:05 UTC sits just
+# after the 04:35 parity slot.
+
+on:
+  schedule:
+    - cron: "5 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  correctness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Native TS type-stripping for the imported src/lib/correctnessChecks.ts
+          # needs Node >= 22.18; 24 matches Vercel + the .nvmrc / engines field.
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: node scripts/correctness-monitor.mjs
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          N8N_ALERT_WEBHOOK: ${{ secrets.N8N_ALERT_WEBHOOK }}
