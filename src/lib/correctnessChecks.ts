@@ -60,6 +60,22 @@ export interface FactRow {
   is_post_day: boolean;
 }
 
+// WEBDEV-288 Part B — one raw per-day reach value pulled straight from the platform API
+// (Meta Graph: IG insights `reach`; FB `page_total_media_view_unique` proxy). The monitor
+// script fetches these; the pure check below compares them to the stored canonical reach.
+export interface ApiReachRow {
+  platform: string;
+  date: string; // YYYY-MM-DD
+  reach: number | null;
+}
+
+// Reconciliation materiality thresholds. Tuned to catch WRITER-class bugs (wrong metric,
+// bad transform, a zeroed/clobbered column) — which produce large divergence — while
+// tolerating small platform restatements (typically <5%), so the check doesn't fire on
+// benign late-settling. A violation requires BOTH thresholds crossed.
+export const RECON_REL_TOL = 0.25; // >25% relative divergence
+export const RECON_ABS_FLOOR = 5; // ...AND >5 absolute (avoid tiny-number noise)
+
 // 1) Freshness / dead-writer: each live table updated within its window. The single
 //    highest-value sweep — a stalled writer is an invisible data gap.
 export function checkFreshness(
@@ -225,12 +241,50 @@ export function enumerateDates(start: string, end: string): string[] {
   return out;
 }
 
-// Aggregate runner used by the monitor.
+// 10) Platform-API reconciliation (WEBDEV-288 Part B): the only check that pulls the
+//     SOURCE of truth (the platform API), catching "both stores wrong the same way" —
+//     a writer that stored a wrong/transformed reach is parity-blind and invariant-blind
+//     (the row can be internally consistent yet wrong vs the platform). FB+IG only;
+//     materiality-gated; compares only (platform,date) pairs present in BOTH sides.
+export function checkPlatformApiReconciliation(
+  facts: FactRow[],
+  apiReach: ApiReachRow[],
+  relTol = RECON_REL_TOL,
+  absFloor = RECON_ABS_FLOOR,
+): Violation[] {
+  const out: Violation[] = [];
+  const api = new Map<string, number>();
+  for (const r of apiReach) {
+    if (r.reach != null) api.set(`${r.platform}|${r.date}`, r.reach);
+  }
+  for (const f of facts) {
+    if (f.platform !== "facebook" && f.platform !== "instagram") continue;
+    if (f.reach == null) continue; // genuine/allowlisted null — not this check's call
+    const a = api.get(`${f.platform}|${f.date}`);
+    if (a == null) continue; // API has no value for that day (availability) — skip
+    const diff = Math.abs(f.reach - a);
+    const rel = a > 0 ? diff / a : diff > 0 ? 1 : 0;
+    if (diff > absFloor && rel > relTol) {
+      const src = f.platform === "facebook" ? "FB page_total_media_view_unique" : "IG insights reach";
+      out.push({
+        check: "platform-reconciliation",
+        severity: "fail",
+        detail: `${f.platform} ${f.date}: stored reach ${f.reach} vs ${src} API ${a} (${(rel * 100).toFixed(0)}% divergence > ${(relTol * 100).toFixed(0)}%) — canonical store disagrees with the platform (parity- & invariant-blind).`,
+      });
+    }
+  }
+  return out;
+}
+
+// Aggregate runner used by the monitor. apiReach is optional: when the monitor has no
+// platform token (or the fetch was skipped) it passes [] and reconciliation is a no-op,
+// so the rest of the monitor still runs.
 export function runAllChecks(input: {
   freshness: FreshnessRow[];
   facts: FactRow[];
   freshnessMaxAgeHours: Record<string, number>;
   platforms: string[];
+  apiReach?: ApiReachRow[];
 }): Violation[] {
   return [
     ...checkFreshness(input.freshness, input.freshnessMaxAgeHours),
@@ -242,5 +296,6 @@ export function runAllChecks(input: {
     ...checkErfReproducible(input.facts),
     ...checkNullSymmetry(input.facts),
     ...checkIsPostDayConsistency(input.facts),
+    ...checkPlatformApiReconciliation(input.facts, input.apiReach ?? []),
   ];
 }

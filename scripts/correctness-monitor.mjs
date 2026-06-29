@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { runAllChecks } from "../src/lib/correctnessChecks.ts";
+import { fetchMetaReachWindow } from "./lib/metaReach.mjs";
 
 const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL;
 if (!SUPABASE_DB_URL) {
@@ -77,11 +78,48 @@ try {
 
   const platforms = [...new Set(factsRows.map((r) => r.platform))];
 
-  const violations = runAllChecks({
-    freshness: fresh, facts: factsRows, freshnessMaxAgeHours: FRESHNESS, platforms,
-  });
+  // 3) Platform-API reconciliation (WEBDEV-288 Part B): independently re-pull raw per-day
+  // reach from Meta Graph (FB+IG) for the same window and compare to the stored canonical
+  // reach. Catches "both stores wrong the same way" (a writer transform bug is parity- AND
+  // invariant-blind). Meta-only for now (long-lived system-user token; Pinterest token
+  // expiry makes CI brittle — deferred). Skips cleanly without META_ACCESS_TOKEN.
+  let apiReach = [];
+  let reconError = null;
+  const META_TOKEN = process.env.META_ACCESS_TOKEN;
+  if (META_TOKEN) {
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      // Pad the settled window (today-16..today-3) by a day each side; the pure check only
+      // compares (platform,date) pairs present in BOTH sides, so extra API days are harmless.
+      apiReach = await fetchMetaReachWindow({
+        token: META_TOKEN,
+        sinceTs: nowSec - 17 * 86400,
+        untilTs: nowSec - 2 * 86400,
+      });
+      console.log(`[correctness] reconciliation: pulled ${apiReach.length} Meta reach point(s)`);
+    } catch (e) {
+      reconError = e.message;
+      console.error("[correctness] reconciliation fetch FAILED:", e.message);
+    }
+  } else {
+    console.log("[correctness] reconciliation: SKIP — no META_ACCESS_TOKEN");
+  }
 
-  console.log(`[correctness] checked ${fresh.length} tables for freshness + ${factsRows.length} settled rows across ${platforms.join(", ")}`);
+  const violations = runAllChecks({
+    freshness: fresh, facts: factsRows, freshnessMaxAgeHours: FRESHNESS, platforms, apiReach,
+  });
+  // A failed reconciliation fetch is itself a LOUD failure — a long-lived system-user token
+  // should not fail; if it does, the source-truth check is silently dark (the very class
+  // WEBDEV-290 fought), so surface it as a violation rather than swallowing it.
+  if (reconError) {
+    violations.push({
+      check: "platform-reconciliation",
+      severity: "fail",
+      detail: `Meta reach fetch failed — reconciliation could not run (token revoked / API change?): ${reconError}`,
+    });
+  }
+
+  console.log(`[correctness] checked ${fresh.length} tables for freshness + ${factsRows.length} settled rows across ${platforms.join(", ")}; reconciled ${apiReach.length} Meta reach point(s)`);
 
   const fails = violations.filter((v) => v.severity === "fail");
   if (fails.length === 0) {
