@@ -301,7 +301,8 @@ export async function getAccountDailyFactsFromSupabase(): Promise<
         `select snapshot_key, platform, date, reach, reach_source,
                 impressions, impressions_source, views, views_source,
                 profile_views, followers, follower_delta, engagement,
-                engagement_rate, data_status, restatement_log, period_source,
+                engagement_rate, engagement_rate_followers, content_reach,
+                is_post_day, data_status, restatement_log, period_source,
                 profile_views_30d, accounts_engaged_30d, interactions_30d,
                 profile_links_taps_30d, updated_at
            from social.account_daily_facts
@@ -309,6 +310,9 @@ export async function getAccountDailyFactsFromSupabase(): Promise<
       );
       assertFractionScale("social.account_daily_facts", rows, {
         throwOn: ["engagement_rate"],
+        // ERF can legitimately exceed 1 (a viral day where engagement > followers),
+        // so it can't throw; warn-only catches a percent-scale writer drift (WEBDEV-295/296).
+        warnOn: ["engagement_rate_followers"],
         idCols: ["platform", "date"],
       });
       return rows.map(mapAccountDailyFactsRow);

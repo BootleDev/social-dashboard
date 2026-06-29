@@ -198,6 +198,12 @@ export const ACCOUNT_DAILY_FACTS_MAP: Array<[string, string]> = [
   ["follower_delta", "Follower Delta"],
   ["engagement", "Engagement"],
   ["engagement_rate", "Engagement Rate"],
+  // WEBDEV-295/296: co-primary per-follower ER + content-grain reach + post-day flag.
+  // engagement_rate_followers is a FRACTION like engagement_rate (the ER-unit invariant
+  // above applies — passed through verbatim, ×100 happens in the chart).
+  ["engagement_rate_followers", "Engagement Rate Followers"],
+  ["content_reach", "Content Reach"],
+  ["is_post_day", "Is Post Day"],
   ["data_status", "data_status"],
   ["restatement_log", "Restatement Log"],
   ["profile_views_30d", "Profile Views (30d)"],

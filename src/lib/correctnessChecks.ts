@@ -28,9 +28,9 @@ export interface AllowEntry {
   reason: string;
 }
 export const ALLOWLIST: AllowEntry[] = [
-  { table: "account_daily_facts", platform: "instagram", metric: "engagement", reason: "WEBDEV-296 IG account engagement ~73% null" },
-  { table: "account_daily_facts", platform: "instagram", metric: "engagement_rate", reason: "WEBDEV-296 (derives from engagement)" },
-  { table: "account_daily_facts", platform: "facebook", metric: "engagement_rate", reason: "WEBDEV-295 FB ER not row-reproducible; null on zero-engagement days" },
+  // WEBDEV-295/296 FIXED (2026-06-29): content-grain ER writer deployed; the three
+  // former entries (IG engagement, IG engagement_rate, FB engagement_rate) are now
+  // ENFORCED by checkEngagementRateReproducible / checkNullSymmetry / checkIsPostDayConsistency.
   { table: "account_daily_facts", platform: "pinterest", metric: "engagement_rate<2026-05-04", reason: "unrecoverable aged tail (WEBDEV-297 cancelled)" },
   { table: "account_daily_facts", platform: "instagram", metric: "impressions", reason: "Meta deprecated IG account impressions (reach-only)" },
   { table: "account_daily_facts", platform: "instagram", metric: "views", reason: "not collected for IG account" },
@@ -52,6 +52,12 @@ export interface FactRow {
   followers: number | null;
   engagement: number | null;
   engagement_rate: number | null;
+  // WEBDEV-295/296 content-grain columns (FB+IG). content_reach is the ER denominator
+  // (per-post reach sum); engagement_rate_followers is the co-primary ERF; is_post_day
+  // flags whether a post was published that day. NULL on no-post days (never 0).
+  content_reach: number | null;
+  engagement_rate_followers: number | null;
+  is_post_day: boolean;
 }
 
 // 1) Freshness / dead-writer: each live table updated within its window. The single
@@ -87,7 +93,7 @@ export function checkEngagementRateRange(rows: FactRow[]): Violation[] {
 // 3) Counts are never negative.
 export function checkNonNegative(rows: FactRow[]): Violation[] {
   const out: Violation[] = [];
-  const cols: (keyof FactRow)[] = ["reach", "impressions", "followers", "engagement"];
+  const cols: (keyof FactRow)[] = ["reach", "impressions", "followers", "engagement", "content_reach"];
   for (const r of rows) {
     for (const k of cols) {
       const v = r[k];
@@ -129,6 +135,85 @@ export function checkCoreNonNull(rows: FactRow[]): Violation[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// WEBDEV-295/296 content-grain engagement invariants (scope: facebook + instagram).
+// Pinterest is excluded — it has its own native ER and no content_reach. These ENFORCE
+// what the new Social Data Refresher writer guarantees; they REPLACE the former
+// allowlist entries for IG engagement / IG ER / FB ER.
+// ---------------------------------------------------------------------------
+const FBIG = new Set(["facebook", "instagram"]);
+// Match the writer + history repair: ER columns are numeric(_,4), values rounded to 4dp.
+const round4 = (v: number): number => Math.round(v * 1e4) / 1e4;
+const REPRO_EPS = 1e-9; // both sides are 4dp; epsilon only absorbs float representation.
+
+// 6) Content-grain ER reproducible at 4dp: engagement_rate == round(engagement/content_reach, 4)
+//    when content_reach>0 and both engagement & ER are present.
+export function checkEngagementRateReproducible(rows: FactRow[]): Violation[] {
+  const out: Violation[] = [];
+  for (const r of rows) {
+    if (!FBIG.has(r.platform)) continue;
+    if (r.engagement == null || r.engagement_rate == null || r.content_reach == null || r.content_reach <= 0) continue;
+    const expected = round4(r.engagement / r.content_reach);
+    if (Math.abs(r.engagement_rate - expected) > REPRO_EPS) {
+      out.push({ check: "er-reproducible", severity: "fail", detail: `account_daily_facts ${r.platform}|${r.date}: engagement_rate=${r.engagement_rate} != round(engagement/content_reach,4)=${expected}` });
+    }
+  }
+  return out;
+}
+
+// 7) Co-primary ERF reproducible at 4dp: engagement_rate_followers == round(engagement/followers, 4)
+//    when followers>0 and both engagement & ERF are present. ERF being NULL is allowed
+//    (an independent denominator — a follower-fetch gap legitimately nulls it), so this
+//    check only fires on a PRESENT-but-WRONG ERF, never on a missing one.
+export function checkErfReproducible(rows: FactRow[]): Violation[] {
+  const out: Violation[] = [];
+  for (const r of rows) {
+    if (!FBIG.has(r.platform)) continue;
+    if (r.engagement == null || r.engagement_rate_followers == null || r.followers == null || r.followers <= 0) continue;
+    const expected = round4(r.engagement / r.followers);
+    if (Math.abs(r.engagement_rate_followers - expected) > REPRO_EPS) {
+      out.push({ check: "erf-reproducible", severity: "fail", detail: `account_daily_facts ${r.platform}|${r.date}: engagement_rate_followers=${r.engagement_rate_followers} != round(engagement/followers,4)=${expected}` });
+    }
+  }
+  return out;
+}
+
+// 8) Null-symmetry: engagement / content_reach / engagement_rate go NULL or non-NULL
+//    together (zero-vs-missing honesty). engagement & content_reach are computed from the
+//    same per-post source so they are always paired. engagement_rate pairs with them too,
+//    EXCEPT the degenerate content_reach=0 (ER is undefined → legitimately NULL).
+//    engagement_rate_followers is deliberately NOT in this group (independent denominator).
+export function checkNullSymmetry(rows: FactRow[]): Violation[] {
+  const out: Violation[] = [];
+  for (const r of rows) {
+    if (!FBIG.has(r.platform)) continue;
+    const eNull = r.engagement == null;
+    const crNull = r.content_reach == null;
+    const erNull = r.engagement_rate == null;
+    if (eNull !== crNull) {
+      out.push({ check: "null-symmetry", severity: "fail", detail: `account_daily_facts ${r.platform}|${r.date}: engagement ${eNull ? "NULL" : "set"} but content_reach ${crNull ? "NULL" : "set"}` });
+      continue;
+    }
+    if (erNull !== eNull && r.content_reach !== 0) {
+      out.push({ check: "null-symmetry", severity: "fail", detail: `account_daily_facts ${r.platform}|${r.date}: engagement_rate ${erNull ? "NULL" : "set"} disagrees with engagement ${eNull ? "NULL" : "set"}` });
+    }
+  }
+  return out;
+}
+
+// 9) is_post_day consistency: is_post_day === (engagement IS NOT NULL).
+export function checkIsPostDayConsistency(rows: FactRow[]): Violation[] {
+  const out: Violation[] = [];
+  for (const r of rows) {
+    if (!FBIG.has(r.platform)) continue;
+    const expected = r.engagement != null;
+    if (r.is_post_day !== expected) {
+      out.push({ check: "is-post-day", severity: "fail", detail: `account_daily_facts ${r.platform}|${r.date}: is_post_day=${r.is_post_day} but engagement ${expected ? "set" : "NULL"}` });
+    }
+  }
+  return out;
+}
+
 export function enumerateDates(start: string, end: string): string[] {
   const out: string[] = [];
   let d = Date.parse(start + "T00:00:00Z");
@@ -153,5 +238,9 @@ export function runAllChecks(input: {
     ...checkNonNegative(input.facts),
     ...checkNoInteriorGaps(input.facts, input.platforms),
     ...checkCoreNonNull(input.facts),
+    ...checkEngagementRateReproducible(input.facts),
+    ...checkErfReproducible(input.facts),
+    ...checkNullSymmetry(input.facts),
+    ...checkIsPostDayConsistency(input.facts),
   ];
 }

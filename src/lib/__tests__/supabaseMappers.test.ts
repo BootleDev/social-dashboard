@@ -230,6 +230,9 @@ function fullAccountRow(overrides: Record<string, unknown> = {}) {
     follower_delta: 12,
     engagement: 250,
     engagement_rate: "0.0860", // pg numeric -> string
+    engagement_rate_followers: "0.2500", // pg numeric -> string (WEBDEV-295/296)
+    content_reach: 2900,
+    is_post_day: true,
     data_status: "settled",
     restatement_log: "restated 2026-06-08",
     profile_views_30d: 913,
@@ -261,6 +264,9 @@ describe("mapAccountDailyFactsRow — envelope shape", () => {
         "Follower Delta", // NOT "Followers Gained" (that is the legacy table)
         "Engagement",
         "Engagement Rate",
+        "Engagement Rate Followers", // WEBDEV-295/296 co-primary ERF
+        "Content Reach",
+        "Is Post Day",
         "data_status", // snake_case literal — NOT title-case
         "Restatement Log",
         "Profile Views (30d)",
