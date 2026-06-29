@@ -2,8 +2,10 @@
 // (WEBDEV-288 Part 2). Unlike the parity cron (Supabase vs Airtable), this validates
 // Supabase against HARD INVARIANTS, so it survives retiring the dual-write (WEBDEV-216):
 // freshness/dead-writer, engagement_rate in [0,1], non-negative counts, no interior date
-// gaps, and core (reach/followers) non-null on recent settled rows. Known/filed gaps
-// (WEBDEV-295/296/297) are owned by those tickets and not failed here (see ALLOWLIST).
+// gaps, and core (reach/followers) non-null on recent settled rows. WEBDEV-295/296 are now
+// ENFORCED (content-grain ER reproducible @4dp, ERF reproducible, null-symmetry, is_post_day
+// consistency — FB+IG). Only the unrecoverable Pinterest aged tail (WEBDEV-297 cancelled)
+// stays allowlisted (see ALLOWLIST).
 //
 // Exit 1 on any violation (red CI check + GitHub emails the author). On failure it also
 // POSTs N8N_ALERT_WEBHOOK (if set) so the team gets the existing n8n email alert.
@@ -62,7 +64,10 @@ try {
   const factsRows = (await pool.query(
     `select platform, to_char(date,'YYYY-MM-DD') as date,
             reach::int as reach, impressions::int as impressions, followers::int as followers,
-            engagement::int as engagement, engagement_rate::float8 as engagement_rate
+            engagement::int as engagement, engagement_rate::float8 as engagement_rate,
+            content_reach::int as content_reach,
+            engagement_rate_followers::float8 as engagement_rate_followers,
+            coalesce(is_post_day, false) as is_post_day
        from social.account_daily_facts
       where data_status='settled'
         and date >= (current_date - interval '16 days')

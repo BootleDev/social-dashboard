@@ -260,19 +260,32 @@ export default function PlatformCompare({
 
     return {
       labels,
-      datasets: platformKeys.map((key) => {
+      // Two lines per platform: ER (by content reach, solid) and the co-primary
+      // ERF (by followers, dashed). Both are fractions → ×100; no-post days stay
+      // null (gaps, not zeros — spanGaps:false). WEBDEV-295/296.
+      datasets: platformKeys.flatMap((key) => {
         const config = getPlatformConfig(key);
         const metrics = metricsMap.get(key) ?? [];
-        return {
-          label: `${config.label} ER`,
-          data: alignToDateArrayNullable(metrics, allDates, "Engagement Rate").map(
-            (v) => (v === null ? null : v * 100),
-          ),
-          borderColor: config.color,
-          tension: 0.3,
-          pointRadius: 0,
-          spanGaps: false,
-        };
+        const toPct = (v: number | null) => (v === null ? null : v * 100);
+        return [
+          {
+            label: `${config.label} ER`,
+            data: alignToDateArrayNullable(metrics, allDates, "Engagement Rate").map(toPct),
+            borderColor: config.color,
+            tension: 0.3,
+            pointRadius: 0,
+            spanGaps: false,
+          },
+          {
+            label: `${config.label} ER/follower`,
+            data: alignToDateArrayNullable(metrics, allDates, "Engagement Rate Followers").map(toPct),
+            borderColor: config.color,
+            borderDash: [5, 4],
+            tension: 0.3,
+            pointRadius: 0,
+            spanGaps: false,
+          },
+        ];
       }),
     };
   }, [platformKeys, metricsMap, allDates]);
