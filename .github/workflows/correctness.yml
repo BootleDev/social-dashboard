@@ -31,3 +31,6 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           N8N_ALERT_WEBHOOK: ${{ secrets.N8N_ALERT_WEBHOOK }}
+          # WEBDEV-288 Part B: long-lived Meta system-user token for platform-API
+          # reconciliation (FB+IG reach). Absent → reconciliation self-skips.
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
