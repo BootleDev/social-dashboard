@@ -3,6 +3,9 @@ import {
   getWeeklySummariesFromSupabase,
   getSocialAlertsFromSupabase,
   getAccountDailyFactsFromSupabase,
+  getInstagramAudienceFromSupabase,
+  getPinterestTopPinsFromSupabase,
+  getPinterestTrendsKeywordsFromSupabase,
 } from "./supabase";
 import {
   hasAllExpectedPlatforms,
@@ -57,9 +60,9 @@ export const TABLES = {
   CONTENT_LIBRARY: "tbl5IMvmWyqGfuwSv",
   // Per-channel data feeds. One table per (channel, data-type) pair.
   // Naming convention: {CHANNEL}_{DATA_TYPE}. Add new feeds here as we wire them.
-  INSTAGRAM_AUDIENCE: "tblB8T1Cy0H8OzVXG",
-  PINTEREST_TRENDS_KEYWORDS: "tblZ4f4TXc92jakq8",
-  PINTEREST_TOP_PINS: "tblEuz0kmposwh81J",
+  // WEBDEV-216 Phase 3: INSTAGRAM_AUDIENCE / PINTEREST_TRENDS_KEYWORDS /
+  // PINTEREST_TOP_PINS were retired here — those feeds now read from Supabase
+  // (see the getters below and ./supabase.ts).
   SEASONAL_OPPORTUNITIES: "tbl5z2eAZakyz3ZZh",
   POST_DAILY_FACTS: "tblz1pSPb5ByXZMHe",
 } as const;
@@ -182,14 +185,16 @@ export async function getPosts(opts: { noCache?: boolean } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// WEBDEV-216 (dashboard, Supabase-only): the four machine-written tables below
-// are served straight from Supabase — the Airtable dual-write and the fail-
-// closed Airtable fallback (WEBDEV-207/228) are retired. The Supabase reads
-// return the SAME { id, fields:{<Airtable display names>}, createdTime }
-// envelope, so the /api routes and components are untouched. A Supabase read
-// error now propagates to the caller (route 500 / error state) instead of
-// falling back. POSTS and CONTENT_LIBRARY are NOT migrated (human-edited) and
-// stay on Airtable below.
+// WEBDEV-216 (dashboard, Supabase-only): the machine-written tables below are
+// served straight from Supabase — the Airtable dual-write and the fail-closed
+// Airtable fallback (WEBDEV-207/228) are retired. Phase 1/2 migrated
+// daily_account_metrics, weekly_summaries, social_alerts, account_daily_facts;
+// Phase 3 added instagram_audience, pinterest_top_pins, pinterest_trends_keywords
+// (the getters lower down). The Supabase reads return the SAME
+// { id, fields:{<Airtable display names>}, createdTime } envelope, so the /api
+// routes and components are untouched. A Supabase read error now propagates to
+// the caller (route 500 / error state) instead of falling back. POSTS and
+// CONTENT_LIBRARY are NOT migrated (human-edited) and stay on Airtable below.
 // ---------------------------------------------------------------------------
 
 // WEBDEV-216: served from Supabase (social.daily_account_metrics). `opts` is
@@ -239,36 +244,42 @@ export async function getContentLibrary(opts: { noCache?: boolean } = {}) {
   });
 }
 
+// WEBDEV-216 Phase 3: served from Supabase (social.instagram_audience /
+// pinterest_trends_keywords / pinterest_top_pins). Unlike the four small Phase
+// 1/2 tables (read per-request-fresh), these three are the LARGE feeds the
+// tableCache comment above calls out (multi-MB; pinterest_trends is ~11k rows
+// whose read costs ~1s server-side), so they keep the SAME 30-min in-process
+// TTL cache they had on the Airtable path — daily-snapshot data where minutes of
+// staleness are irrelevant. Caching them also keeps every warm dashboard/chat
+// load off the pg pool (the expensive reads run once per 30 min, not per
+// request) and the cache's in-flight dedup collapses concurrent cold loads to a
+// single query. `opts.noCache` (the Refresh button) forces a fresh read, exactly
+// as before. The `supabase:` key prefix cannot collide with the JSON cache keys
+// used for the Airtable reads.
 export async function getInstagramAudience(opts: { noCache?: boolean } = {}) {
-  return fetchAllRecords(TABLES.INSTAGRAM_AUDIENCE, {
-    sort: [
-      { field: "Snapshot Date", direction: "desc" },
-      { field: "Value", direction: "desc" },
-    ],
-    noCache: opts.noCache,
-  });
+  return tableCache.get(
+    "supabase:social.instagram_audience",
+    getInstagramAudienceFromSupabase,
+    { forceRefresh: opts.noCache },
+  );
 }
 
 export async function getPinterestTrendsKeywords(
   opts: { noCache?: boolean } = {},
 ) {
-  return fetchAllRecords(TABLES.PINTEREST_TRENDS_KEYWORDS, {
-    sort: [
-      { field: "Snapshot Date", direction: "desc" },
-      { field: "Rank", direction: "asc" },
-    ],
-    noCache: opts.noCache,
-  });
+  return tableCache.get(
+    "supabase:social.pinterest_trends_keywords",
+    getPinterestTrendsKeywordsFromSupabase,
+    { forceRefresh: opts.noCache },
+  );
 }
 
 export async function getPinterestTopPins(opts: { noCache?: boolean } = {}) {
-  return fetchAllRecords(TABLES.PINTEREST_TOP_PINS, {
-    sort: [
-      { field: "Snapshot Date", direction: "desc" },
-      { field: "Rank", direction: "asc" },
-    ],
-    noCache: opts.noCache,
-  });
+  return tableCache.get(
+    "supabase:social.pinterest_top_pins",
+    getPinterestTopPinsFromSupabase,
+    { forceRefresh: opts.noCache },
+  );
 }
 
 /**

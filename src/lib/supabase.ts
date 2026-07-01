@@ -8,6 +8,14 @@
  *   - social.weekly_summaries        (-> getWeeklySummaries)
  *   - social.social_alerts           (-> getSocialAlerts)
  *   - social.account_daily_facts     (-> getAccountDailyFacts)
+ * WEBDEV-216 Phase 3 added three more machine-written feeds (same envelope, same
+ * fail-loud contract):
+ *   - social.instagram_audience        (-> getInstagramAudience)
+ *   - social.pinterest_top_pins        (-> getPinterestTopPins)
+ *   - social.pinterest_trends_keywords (-> getPinterestTrendsKeywords)
+ * plus the paid simulator's marketing read (marketing schema, same pool):
+ *   - marketing.daily_aggregates (VIEW) (-> getMarketingDailyAggregatesFromSupabase,
+ *     consumed by marketingIntelligence.getMarketingBaselineData)
  * Every other getter (getPosts, getContentLibrary) stays on Airtable: POSTS and
  * CONTENT_LIBRARY are human-edited and are NOT migrated. See ./airtable.ts.
  *
@@ -55,6 +63,10 @@ import {
   mapWeeklyRow,
   mapAlertRow,
   mapAccountDailyFactsRow,
+  mapInstagramAudienceRow,
+  mapTopPinRow,
+  mapTrendingKeywordRow,
+  mapMarketingDailyAggRow,
 } from "./supabaseMappers";
 import { assertFractionScale } from "./rateSentinel";
 
@@ -124,21 +136,26 @@ function getPool(): pg.Pool {
       // Full TLS verification against the pinned Supabase root (the pooler's
       // self-signed root is not in the system trust store). See ./supabase-ca.
       ssl: { ca: SUPABASE_ROOT_CA_2021, rejectUnauthorized: true },
-      // WEBDEV-228: after the account_daily_facts repoint, getAllDashboardData
-      // fires FOUR concurrent Supabase reads (daily_account_metrics,
-      // weekly_summaries, social_alerts, account_daily_facts) on one
-      // serverless invocation. With max:2 the two queued readers could hit
-      // connectionTimeoutMillis (2500ms) and throw -> a FALSE read error
-      // (surfaced to the caller) while Supabase is healthy. max:4 sizes the pool to a SINGLE
-      // getAllDashboardData call so it does not self-starve. The pool is a
-      // module-level singleton shared across whatever the warm lambda serves;
-      // allowExitOnIdle lets the process exit when idle (no cross-invocation
-      // leak), but two overlapping requests on one warm instance (e.g. /api/chat
-      // firing alongside /api/airtable) can still contend — a queued caller then
-      // times out at connectionTimeoutMillis and the withTimeout(4000ms) wrapper
-      // guarantees a fast rejection to the caller (WEBDEV-216: no Airtable
-      // fallback) rather than a hang.
-      max: 4,
+      // WEBDEV-228 + WEBDEV-216 Phase 3: on a COLD cache getAllDashboardData
+      // fires up to SEVEN concurrent Supabase reads on one serverless invocation
+      // (daily_account_metrics, weekly_summaries, social_alerts,
+      // account_daily_facts, instagram_audience, pinterest_top_pins,
+      // pinterest_trends_keywords). The last three are 30-min TTL-cached in
+      // airtable.ts, so STEADY-STATE demand is just the four small uncached reads
+      // — the seven-wide burst only happens when that cache is empty. If the pool
+      // is smaller than the burst, queued readers can hit connectionTimeoutMillis
+      // (2500ms) and throw -> a FALSE read error (surfaced to the caller) while
+      // Supabase is healthy. max:8 sizes the pool to a SINGLE cold
+      // getAllDashboardData call (7 reads + 1 headroom) so it does not
+      // self-starve. The pool is a module-level singleton shared across whatever
+      // the warm lambda serves; allowExitOnIdle lets the process exit when idle
+      // (no cross-invocation leak), but two overlapping cold requests on one warm
+      // instance (e.g. /api/chat firing alongside /api/airtable, or /api/paid's
+      // marketing read) can still contend — a queued caller then times out at
+      // connectionTimeoutMillis and the withTimeout(4000ms) wrapper guarantees a
+      // fast rejection to the caller (WEBDEV-216: no Airtable fallback) rather
+      // than a hang.
+      max: 8,
       // Time-bound a slow/hung pooler so a stall rejects fast (no Airtable fallback).
       // NOTE: the connect (2500) and query (3500) budgets are SEQUENTIAL, so
       // they do NOT individually sit under the 4000ms ceiling. The actual
@@ -317,6 +334,108 @@ export async function getAccountDailyFactsFromSupabase(): Promise<
         idCols: ["platform", "date"],
       });
       return rows.map(mapAccountDailyFactsRow);
+    })(),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// social.instagram_audience -> getInstagramAudience (WEBDEV-216 Phase 3)
+// ---------------------------------------------------------------------------
+//
+// Sort mirrors the retired Airtable getter (Snapshot Date desc, then Value desc)
+// so any consumer that relied on that order is unaffected. No fraction column
+// here, so no unit sentinel. snapshot_key is selected for the envelope id.
+export async function getInstagramAudienceFromSupabase(): Promise<
+  AirtableRecord[]
+> {
+  return withTimeout(
+    "instagram_audience",
+    (async () => {
+      const { rows } = await getPool().query(
+        `select snapshot_key, snapshot_date, audience_type, breakdown, bucket,
+                value, updated_at
+           from social.instagram_audience
+          order by snapshot_date desc, value desc`,
+      );
+      return rows.map(mapInstagramAudienceRow);
+    })(),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// social.pinterest_top_pins -> getPinterestTopPins (WEBDEV-216 Phase 3)
+// ---------------------------------------------------------------------------
+//
+// Sort mirrors the retired Airtable getter (Snapshot Date desc, Rank asc).
+export async function getPinterestTopPinsFromSupabase(): Promise<
+  AirtableRecord[]
+> {
+  return withTimeout(
+    "pinterest_top_pins",
+    (async () => {
+      const { rows } = await getPool().query(
+        `select snapshot_key, snapshot_date, sort_by, rank, pin_id, post_id,
+                window_days, impressions, saves, pin_click, outbound_click,
+                engagement, video_mrc_view, video_avg_watch_time,
+                near_complete_views, thumbnail_url, updated_at
+           from social.pinterest_top_pins
+          order by snapshot_date desc, rank asc`,
+      );
+      return rows.map(mapTopPinRow);
+    })(),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// social.pinterest_trends_keywords -> getPinterestTrendsKeywords (Phase 3)
+// ---------------------------------------------------------------------------
+//
+// Sort mirrors the retired Airtable getter (Snapshot Date desc, Rank asc).
+// time_series is jsonb; SELECT it as ::text so the driver returns the serialized
+// JSON STRING (not a parsed object) — toTrendingKeyword stores it via str() and
+// consumers JSON.parse it, exactly as with the Airtable string field. See
+// mapTrendingKeywordRow.
+export async function getPinterestTrendsKeywordsFromSupabase(): Promise<
+  AirtableRecord[]
+> {
+  return withTimeout(
+    "pinterest_trends_keywords",
+    (async () => {
+      const { rows } = await getPool().query(
+        `select snapshot_key, snapshot_date, region, trend_type, keyword, rank,
+                pct_growth_wow, pct_growth_mom, pct_growth_yoy, has_prediction,
+                time_series::text as time_series, updated_at
+           from social.pinterest_trends_keywords
+          order by snapshot_date desc, rank asc`,
+      );
+      return rows.map(mapTrendingKeywordRow);
+    })(),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// marketing.daily_aggregates (VIEW) -> getMarketingDailyAggregatesFromSupabase
+// (WEBDEV-216 Phase 3)
+// ---------------------------------------------------------------------------
+//
+// Feeds the paid simulator (marketingIntelligence.getMarketingBaselineData).
+// Returns the SAME envelope toDailyAdRow expects, so only that read is repointed
+// off the Marketing Intelligence Airtable base; Shopify Daily Sales + Ad
+// Snapshots stay on Airtable (they have other readers — WEBDEV-371/373/377).
+// Sort mirrors the retired Airtable fetch (Date desc). See MARKETING_DAILY_AGG_MAP
+// for the field/parity notes.
+export async function getMarketingDailyAggregatesFromSupabase(): Promise<
+  AirtableRecord[]
+> {
+  return withTimeout(
+    "marketing.daily_aggregates",
+    (async () => {
+      const { rows } = await getPool().query(
+        `select date, total_spend, impressions, clicks, total_purchases
+           from marketing.daily_aggregates
+          order by date desc`,
+      );
+      return rows.map(mapMarketingDailyAggRow);
     })(),
   );
 }

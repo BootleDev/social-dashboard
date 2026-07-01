@@ -16,8 +16,17 @@ import {
   mapWeeklyRow,
   mapAlertRow,
   mapAccountDailyFactsRow,
+  mapInstagramAudienceRow,
+  mapTopPinRow,
+  mapTrendingKeywordRow,
+  mapMarketingDailyAggRow,
 } from "../supabaseMappers";
 import { num, hasRealReach, hasRealImpressions } from "../utils";
+import {
+  toAudienceDemographic,
+  toTopPin,
+  toTrendingKeyword,
+} from "../types";
 import { assertFractionScale } from "../rateSentinel";
 
 // A full daily row as it arrives from pg AFTER the type parsers in supabase.ts
@@ -593,4 +602,196 @@ describe("mapAccountDailyFactsRow — OFFLINE PARITY vs live Airtable (the silen
       }
     });
   }
+});
+
+// ===========================================================================
+// WEBDEV-216 Phase 3 mappers. Each test round-trips a pg-shaped row through the
+// mapper AND the real types.ts consumer (toAudienceDemographic / toTopPin /
+// toTrendingKeyword) — a display-name typo in a map would surface as a wrong
+// typed field here, which no fail-closed guard could catch.
+// ===========================================================================
+
+describe("mapInstagramAudienceRow", () => {
+  function iaRow(overrides: Record<string, unknown> = {}) {
+    return {
+      snapshot_key: "2026-07-01|follower|country|GB",
+      snapshot_date: "2026-07-01",
+      audience_type: "follower",
+      breakdown: "country",
+      bucket: "GB",
+      value: 312,
+      updated_at: "2026-07-01T03:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("emits the EXACT display-name key set and id = snapshot_key", () => {
+    const rec = mapInstagramAudienceRow(iaRow());
+    expect(Object.keys(rec.fields).sort()).toEqual(
+      ["Snapshot Date", "Audience Type", "Breakdown", "Bucket", "Value"].sort(),
+    );
+    expect(rec.id).toBe("2026-07-01|follower|country|GB");
+    expect(rec.createdTime).toBe("2026-07-01T03:00:00.000Z");
+  });
+
+  it("ROUND-TRIP: toAudienceDemographic reads every field correctly", () => {
+    const d = toAudienceDemographic(mapInstagramAudienceRow(iaRow()));
+    expect(d).toEqual({
+      id: "2026-07-01|follower|country|GB",
+      snapshotDate: "2026-07-01",
+      audienceType: "follower",
+      breakdown: "country",
+      bucket: "GB",
+      value: 312,
+    });
+  });
+
+  it("SPARSE SHAPE: a real 0 value is kept (not dropped)", () => {
+    const rec = mapInstagramAudienceRow(iaRow({ value: 0 }));
+    expect(rec.fields["Value"]).toBe(0);
+  });
+});
+
+describe("mapTopPinRow", () => {
+  function pinRow(overrides: Record<string, unknown> = {}) {
+    return {
+      snapshot_key: "2026-07-01|IMPRESSION|1",
+      snapshot_date: "2026-07-01",
+      sort_by: "IMPRESSION",
+      rank: 1,
+      pin_id: "pin_123",
+      post_id: "pinterest_123",
+      window_days: 30,
+      impressions: 5000,
+      saves: 12,
+      pin_click: 8,
+      outbound_click: 3,
+      engagement: 20,
+      video_mrc_view: 100,
+      video_avg_watch_time: "12.5", // pg numeric -> string
+      near_complete_views: 40,
+      thumbnail_url: "https://cdn.example/pin.jpg",
+      updated_at: "2026-07-01T03:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("emits the EXACT 15-key display-name set and id = snapshot_key", () => {
+    const rec = mapTopPinRow(pinRow());
+    expect(Object.keys(rec.fields).sort()).toEqual(
+      [
+        "Snapshot Date",
+        "Sort By",
+        "Rank",
+        "Pin ID",
+        "Post ID",
+        "Window Days",
+        "Impressions",
+        "Saves",
+        "Pin Click",
+        "Outbound Click",
+        "Engagement",
+        "Video MRC View",
+        "Video Avg Watch Time",
+        "Near Complete Views",
+        "Thumbnail URL",
+      ].sort(),
+    );
+    expect(rec.id).toBe("2026-07-01|IMPRESSION|1");
+  });
+
+  it("ROUND-TRIP: toTopPin parses the numeric-string watch time via num()", () => {
+    const p = toTopPin(mapTopPinRow(pinRow()));
+    expect(p.videoAvgWatchTimeSec).toBe(12.5); // "12.5" -> 12.5
+    expect(p.impressions).toBe(5000);
+    expect(p.sortBy).toBe("IMPRESSION");
+    expect(p.pinId).toBe("pin_123");
+    expect(p.postId).toBe("pinterest_123");
+    expect(p.thumbnailUrl).toBe("https://cdn.example/pin.jpg");
+  });
+});
+
+describe("mapTrendingKeywordRow", () => {
+  function tkRow(overrides: Record<string, unknown> = {}) {
+    return {
+      snapshot_key: "2026-07-01|GB+IE|growing|1",
+      snapshot_date: "2026-07-01",
+      region: "GB+IE",
+      trend_type: "growing",
+      keyword: "water bottle",
+      rank: 1,
+      pct_growth_wow: 150,
+      pct_growth_mom: 80,
+      pct_growth_yoy: 200,
+      has_prediction: false,
+      // time_series is jsonb in pg but the getter selects ::text, so the mapper
+      // receives the serialized JSON STRING (this is the correctness guard).
+      time_series: "[10,20,30]",
+      updated_at: "2026-07-01T03:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("emits the EXACT 10-key display-name set and id = snapshot_key", () => {
+    const rec = mapTrendingKeywordRow(tkRow());
+    expect(Object.keys(rec.fields).sort()).toEqual(
+      [
+        "Snapshot Date",
+        "Region",
+        "Trend Type",
+        "Keyword",
+        "Rank",
+        "Pct Growth WoW",
+        "Pct Growth MoM",
+        "Pct Growth YoY",
+        "Has Prediction",
+        "Time Series",
+      ].sort(),
+    );
+    expect(rec.id).toBe("2026-07-01|GB+IE|growing|1");
+  });
+
+  it("TIME SERIES: stays a JSON STRING that JSON.parse round-trips (jsonb::text guard)", () => {
+    const k = toTrendingKeyword(mapTrendingKeywordRow(tkRow()));
+    expect(typeof k.timeSeriesJson).toBe("string");
+    expect(JSON.parse(k.timeSeriesJson)).toEqual([10, 20, 30]);
+    // has_prediction false is emitted (non-null) and reads back as false.
+    expect(k.hasPrediction).toBe(false);
+    expect(k.pctGrowthWoW).toBe(150);
+    expect(k.trendType).toBe("growing");
+  });
+});
+
+describe("mapMarketingDailyAggRow", () => {
+  function aggRow(overrides: Record<string, unknown> = {}) {
+    // As delivered by the view: date is a "YYYY-MM-DD" string, total_spend is a
+    // numeric STRING, impressions/clicks/total_purchases are bigint -> numbers.
+    // The view has NO updated_at column.
+    return {
+      date: "2026-01-22",
+      total_spend: "32.92",
+      impressions: 2066,
+      clicks: 81,
+      total_purchases: 0,
+      ...overrides,
+    };
+  }
+
+  it("emits the EXACT 5-key display-name set, id = date, epoch createdTime (no updated_at)", () => {
+    const rec = mapMarketingDailyAggRow(aggRow());
+    expect(Object.keys(rec.fields).sort()).toEqual(
+      ["Date", "Total Spend", "Impressions", "Clicks", "Total Purchases"].sort(),
+    );
+    expect(rec.id).toBe("2026-01-22");
+    expect(rec.createdTime).toBe(new Date(0).toISOString());
+  });
+
+  it("passes the fields toDailyAdRow consumes (num/count/numNonNeg parse them)", () => {
+    const f = mapMarketingDailyAggRow(aggRow()).fields;
+    expect(f["Date"]).toBe("2026-01-22");
+    expect(num(f["Total Spend"])).toBeCloseTo(32.92, 10); // "32.92" -> 32.92
+    expect(f["Impressions"]).toBe(2066);
+    expect(f["Clicks"]).toBe(81);
+    expect(f["Total Purchases"]).toBe(0); // real 0 kept
+  });
 });

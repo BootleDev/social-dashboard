@@ -1,16 +1,23 @@
 import "server-only";
 import type { DailyAdRow, ShopifySalesRow, AdSnapshotRow } from "./adBaseline";
 import { num, str, count, numNonNeg } from "./utils";
+import { getMarketingDailyAggregatesFromSupabase } from "./supabase";
 
 /**
- * Reader for the Airtable "Marketing Intelligence" base — the measured paid-ad
- * + Shopify sales history that feeds the paid simulator's baseline. This is a
- * SEPARATE base from the social-intelligence base used by airtable.ts, so it
- * has its own base id (a base id is not a secret — it appears in Airtable URLs;
- * overridable via env for portability) and reuses the same API key.
+ * Reader for the paid simulator's baseline history — the measured paid-ad +
+ * Shopify sales rows that feed adBaseline.
  *
- * Maps Airtable rows to the minimal DailyAdRow / ShopifySalesRow shapes the
- * pure lib expects. Rates in this base are stored as DECIMAL fractions despite
+ * WEBDEV-216 Phase 3: the daily ad aggregates now come from the Supabase VIEW
+ * marketing.daily_aggregates (see ./supabase.getMarketingDailyAggregatesFromSupabase),
+ * NOT the Airtable "Daily Aggregates" table. The remaining two reads — Shopify
+ * Daily Sales and Ad Snapshots — still come from the Airtable "Marketing
+ * Intelligence" base (a SEPARATE base from the social-intelligence base used by
+ * airtable.ts, so its own base id, overridable via env; reuses the same API
+ * key), because those tables have other readers not yet migrated
+ * (WEBDEV-371/373/377).
+ *
+ * Maps rows to the minimal DailyAdRow / ShopifySalesRow shapes the pure lib
+ * expects. Rates in the Airtable base are stored as DECIMAL fractions despite
  * Airtable's "percent" field type (verified against live data: 0.039 = 3.9%),
  * so no scaling is applied here.
  */
@@ -22,7 +29,9 @@ export const MARKETING_BASE_ID =
   process.env.MARKETING_AIRTABLE_BASE_ID ?? "appIyePhrYZBUxCP9";
 
 export const MARKETING_TABLES = {
-  DAILY_AGGREGATES: "tblSYohFmAY3GM22n",
+  // DAILY_AGGREGATES retired here (WEBDEV-216 Phase 3) — daily ad aggregates now
+  // read from the marketing.daily_aggregates Supabase view. These two remain on
+  // Airtable (other readers pending migration, WEBDEV-371/373/377).
   AD_SNAPSHOTS: "tblzn5odeQKZUWNGb",
   SHOPIFY_DAILY_SALES: "tblhMQwAZkF4A293c",
 } as const;
@@ -122,8 +131,11 @@ export interface MarketingBaselineData {
 
 /** Fetch the rows needed to estimate a paid baseline. */
 export async function getMarketingBaselineData(): Promise<MarketingBaselineData> {
+  // daily -> Supabase (marketing.daily_aggregates view); shopify + adSnapshots
+  // stay on Airtable. The Supabase getter returns the same { id, fields:{…} }
+  // envelope, so toDailyAdRow is unchanged.
   const [dailyRaw, shopifyRaw, adRaw] = await Promise.all([
-    fetchTable(MARKETING_TABLES.DAILY_AGGREGATES, "Date"),
+    getMarketingDailyAggregatesFromSupabase(),
     fetchTable(MARKETING_TABLES.SHOPIFY_DAILY_SALES, "Date"),
     fetchTable(MARKETING_TABLES.AD_SNAPSHOTS, "Snapshot Date"),
   ]);
