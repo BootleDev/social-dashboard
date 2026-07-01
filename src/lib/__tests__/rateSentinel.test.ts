@@ -1,8 +1,9 @@
 /**
  * Locks the runtime unit-scale sentinel (WEBDEV-210): percent-scale drift on
- * engagement_rate must THROW (so the getter fails over to Airtable), warnOn
- * columns must only console.warn, and count columns are never subject to
- * either — they are simply not listed.
+ * engagement_rate must THROW (so the getter's rejection propagates to the
+ * caller — WEBDEV-216 retired the Airtable fallback), warnOn columns must only
+ * console.warn, and count columns are never subject to either — they are simply
+ * not listed.
  *
  * The fixtures use pg-shaped rows: numeric columns arrive as STRINGS from
  * node-pg (e.g. "0.0870"), so the sentinel must parse, not typeof-gate.

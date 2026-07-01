@@ -1,12 +1,10 @@
 import {
-  hasSupabaseDbUrl,
   getDailyAccountMetricsFromSupabase,
   getWeeklySummariesFromSupabase,
   getSocialAlertsFromSupabase,
   getAccountDailyFactsFromSupabase,
 } from "./supabase";
 import {
-  forcedToAirtable,
   hasAllExpectedPlatforms,
   EXPECTED_ACCOUNT_PLATFORMS,
 } from "./sourceSwitch";
@@ -30,10 +28,10 @@ const tableCache = createTtlCache({ ttlMs: TABLE_CACHE_TTL_MS });
  * changing where the dashboard sources account-level KPIs.
  *
  *  - ACCOUNT-grain KPIs (Followers, Reach, Impressions, ER) come ONLY from
- *    `Account Daily Facts` (ACCOUNT_DAILY_FACTS). The legacy `Daily Account
- *    Metrics` table (DAILY_ACCOUNT_METRICS) is retired for account KPIs — it is
- *    no longer read by the Overview/Pulse aggregation. It remains in TABLES only
- *    for any non-KPI legacy reader.
+ *    `Account Daily Facts`. The legacy `Daily Account Metrics` table is retired
+ *    for account KPIs — it is no longer read by the Overview/Pulse aggregation.
+ *    It is still exposed via getDailyAccountMetrics (now sourced from Supabase,
+ *    WEBDEV-216) for any non-KPI legacy reader.
  *  - POST/PIN-grain metrics come from the Posts table (and, once populated,
  *    `Post Daily Facts`). For IG/FB these are NEVER summed into an account
  *    headline — a post-sum over-counts deduplicated account reach.
@@ -56,9 +54,6 @@ const tableCache = createTtlCache({ ttlMs: TABLE_CACHE_TTL_MS });
 
 export const TABLES = {
   POSTS: "tbljDi7YY46pQkQGH",
-  DAILY_ACCOUNT_METRICS: "tblGnvjSCdr1zttJe",
-  WEEKLY_SUMMARIES: "tblUinLyGAkmneFFZ",
-  SOCIAL_ALERTS: "tbliPoyQSWCMmF5FH",
   CONTENT_LIBRARY: "tbl5IMvmWyqGfuwSv",
   // Per-channel data feeds. One table per (channel, data-type) pair.
   // Naming convention: {CHANNEL}_{DATA_TYPE}. Add new feeds here as we wire them.
@@ -66,10 +61,6 @@ export const TABLES = {
   PINTEREST_TRENDS_KEYWORDS: "tblZ4f4TXc92jakq8",
   PINTEREST_TOP_PINS: "tblEuz0kmposwh81J",
   SEASONAL_OPPORTUNITIES: "tbl5z2eAZakyz3ZZh",
-  // WEBDEV-146: append-only daily-facts model (one row per platform|date, with
-  // per-metric Source provenance). Source of truth that DAILY_ACCOUNT_METRICS
-  // becomes a derived rollup of. Populated by the Social Data Refresher.
-  ACCOUNT_DAILY_FACTS: "tblgKAMI1pF3FjQGo",
   POST_DAILY_FACTS: "tblz1pSPb5ByXZMHe",
 } as const;
 
@@ -191,157 +182,53 @@ export async function getPosts(opts: { noCache?: boolean } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// WEBDEV-207 (dashboard cutover): three getters are repointed to Supabase, each
-// behind a per-table kill switch and each FAIL-CLOSED to the original Airtable
-// read on ANY error, timeout, or empty result. The Supabase reads return the
-// SAME { id, fields:{<Airtable display names>}, createdTime } envelope, so the
-// /api routes and components are untouched. POSTS and CONTENT_LIBRARY are NOT
-// migrated (human-edited) and stay on Airtable below.
-//
-// Per-table kill switches (force Airtable even when SUPABASE_DB_URL is present):
-//   DAILY_METRICS_SOURCE=airtable
-//   WEEKLY_SUMMARIES_SOURCE=airtable
-//   SOCIAL_ALERTS_SOURCE=airtable
-//   ACCOUNT_DAILY_FACTS_SOURCE=airtable   (WEBDEV-228; expires when WEBDEV-216
-//                                          retires the Airtable dual-write)
+// WEBDEV-216 (dashboard, Supabase-only): the four machine-written tables below
+// are served straight from Supabase — the Airtable dual-write and the fail-
+// closed Airtable fallback (WEBDEV-207/228) are retired. The Supabase reads
+// return the SAME { id, fields:{<Airtable display names>}, createdTime }
+// envelope, so the /api routes and components are untouched. A Supabase read
+// error now propagates to the caller (route 500 / error state) instead of
+// falling back. POSTS and CONTENT_LIBRARY are NOT migrated (human-edited) and
+// stay on Airtable below.
 // ---------------------------------------------------------------------------
 
-// forcedToAirtable lives in ./sourceSwitch (pure, unit-tested): whitespace-
-// and case-insensitive "airtable" match, warns on any other non-empty value
-// (WEBDEV-210 port of the ad-dashboard hardening — a Vercel-pasted
-// "airtable\n" must still roll back).
-
-async function getDailyAccountMetricsFromAirtable(opts: { noCache?: boolean }) {
-  return fetchAllRecords(TABLES.DAILY_ACCOUNT_METRICS, {
-    sort: [{ field: "Date", direction: "desc" }],
-    noCache: opts.noCache,
-  });
+// WEBDEV-216: served from Supabase (social.daily_account_metrics). `opts` is
+// retained for the call signature; the Supabase reader is per-request-fresh so
+// noCache no longer applies.
+export async function getDailyAccountMetrics(
+  _opts: { noCache?: boolean } = {},
+) {
+  return getDailyAccountMetricsFromSupabase();
 }
 
-export async function getDailyAccountMetrics(opts: { noCache?: boolean } = {}) {
-  if (
-    !forcedToAirtable(process.env.DAILY_METRICS_SOURCE, "DAILY_METRICS_SOURCE") &&
-    hasSupabaseDbUrl()
-  ) {
-    try {
-      const rows = await getDailyAccountMetricsFromSupabase();
-      if (rows.length > 0) return rows;
-      console.warn(
-        "[daily-metrics] Supabase returned no rows; falling back to Airtable",
-      );
-    } catch (err) {
-      console.error(
-        "[daily-metrics] Supabase read failed; falling back to Airtable:",
-        err instanceof Error ? err.message : err,
-      );
-    }
+// WEBDEV-216: served from Supabase (social.weekly_summaries). `opts` retained
+// for the call signature; the Supabase reader is per-request-fresh.
+export async function getWeeklySummaries(_opts: { noCache?: boolean } = {}) {
+  return getWeeklySummariesFromSupabase();
+}
+
+// WEBDEV-216: served from Supabase (social.social_alerts). `opts` retained for
+// the call signature; the Supabase reader is per-request-fresh.
+export async function getSocialAlerts(_opts: { noCache?: boolean } = {}) {
+  return getSocialAlertsFromSupabase();
+}
+
+export async function getAccountDailyFacts(_opts: { noCache?: boolean } = {}) {
+  // account_daily_facts is written by two independent refreshers (Social:
+  // instagram+facebook, Pinterest: pinterest). A partial Supabase write would
+  // silently drop a platform's KPIs, so require every expected platform before
+  // serving. WEBDEV-216 retired the Airtable fallback: an incomplete read now
+  // THROWS (fail-loud -> route 500 / error state) instead of falling back,
+  // rather than serving partial KPIs.
+  const rows = await getAccountDailyFactsFromSupabase();
+  if (!hasAllExpectedPlatforms(rows)) {
+    throw new Error(
+      `account_daily_facts incomplete: expected platforms ` +
+        `${EXPECTED_ACCOUNT_PLATFORMS.join(", ")} but the Supabase read is ` +
+        `missing at least one (${rows.length} row(s)). Refusing to serve partial KPIs.`,
+    );
   }
-  return getDailyAccountMetricsFromAirtable(opts);
-}
-
-async function getWeeklySummariesFromAirtable(opts: { noCache?: boolean }) {
-  return fetchAllRecords(TABLES.WEEKLY_SUMMARIES, {
-    sort: [{ field: "Week Start", direction: "desc" }],
-    noCache: opts.noCache,
-  });
-}
-
-export async function getWeeklySummaries(opts: { noCache?: boolean } = {}) {
-  if (
-    !forcedToAirtable(
-      process.env.WEEKLY_SUMMARIES_SOURCE,
-      "WEEKLY_SUMMARIES_SOURCE",
-    ) &&
-    hasSupabaseDbUrl()
-  ) {
-    try {
-      const rows = await getWeeklySummariesFromSupabase();
-      if (rows.length > 0) return rows;
-      console.warn(
-        "[weekly-summaries] Supabase returned no rows; falling back to Airtable",
-      );
-    } catch (err) {
-      console.error(
-        "[weekly-summaries] Supabase read failed; falling back to Airtable:",
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-  return getWeeklySummariesFromAirtable(opts);
-}
-
-async function getSocialAlertsFromAirtable(opts: { noCache?: boolean }) {
-  return fetchAllRecords(TABLES.SOCIAL_ALERTS, {
-    sort: [{ field: "Alert Date", direction: "desc" }],
-    noCache: opts.noCache,
-  });
-}
-
-export async function getSocialAlerts(opts: { noCache?: boolean } = {}) {
-  if (
-    !forcedToAirtable(process.env.SOCIAL_ALERTS_SOURCE, "SOCIAL_ALERTS_SOURCE") &&
-    hasSupabaseDbUrl()
-  ) {
-    try {
-      const rows = await getSocialAlertsFromSupabase();
-      if (rows.length > 0) return rows;
-      console.warn(
-        "[social-alerts] Supabase returned no rows; falling back to Airtable",
-      );
-    } catch (err) {
-      console.error(
-        "[social-alerts] Supabase read failed; falling back to Airtable:",
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-  return getSocialAlertsFromAirtable(opts);
-}
-
-/**
- * WEBDEV-146: account-level daily facts (one row per platform|date) with
- * per-metric Source provenance columns. Sorted newest-first, like the legacy
- * Daily Account Metrics. This is the SOLE source for account-grain KPIs (see the
- * per-grain source model comment at the top of this file). Populated for IG/FB
- * by the Meta Social Data Refresher; Pinterest rows arrive with MARKETING-35.
- */
-async function getAccountDailyFactsFromAirtable(opts: { noCache?: boolean }) {
-  return fetchAllRecords(TABLES.ACCOUNT_DAILY_FACTS, {
-    sort: [{ field: "Date", direction: "desc" }],
-    noCache: opts.noCache,
-  });
-}
-
-export async function getAccountDailyFacts(opts: { noCache?: boolean } = {}) {
-  // NOTE: this kill switch expires when WEBDEV-216 removes the Airtable
-  // dual-write — after that the Airtable fallback below serves nothing.
-  if (
-    !forcedToAirtable(
-      process.env.ACCOUNT_DAILY_FACTS_SOURCE,
-      "ACCOUNT_DAILY_FACTS_SOURCE",
-    ) &&
-    hasSupabaseDbUrl()
-  ) {
-    try {
-      const rows = await getAccountDailyFactsFromSupabase();
-      // Two independent writers (Social + Pinterest refreshers) populate this
-      // table, so `rows.length > 0` alone would accept a Supabase-side write gap
-      // for one platform and silently drop its KPIs. Require EVERY expected
-      // platform present; otherwise fall back to Airtable. (When BOTH stores are
-      // stale the reconciler + OpsPanel freshness own it — fallback can't help.)
-      if (hasAllExpectedPlatforms(rows)) return rows;
-      console.warn(
-        "[account-daily-facts] Supabase empty or missing platform(s); " +
-          `falling back to Airtable (expected ${EXPECTED_ACCOUNT_PLATFORMS.join(", ")})`,
-      );
-    } catch (err) {
-      console.error(
-        "[account-daily-facts] Supabase read failed; falling back to Airtable:",
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-  return getAccountDailyFactsFromAirtable(opts);
+  return rows;
 }
 
 export async function getContentLibrary(opts: { noCache?: boolean } = {}) {

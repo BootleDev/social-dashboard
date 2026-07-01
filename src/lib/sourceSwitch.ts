@@ -1,36 +1,16 @@
 /**
- * Per-table kill-switch parsing for the WEBDEV-207 cutover, extracted from
- * airtable.ts so it is unit-testable without importing the `server-only` / pg
- * chain that airtable.ts pulls in (same rationale as ./supabaseMappers).
- * Ported verbatim from ad-dashboard's hardened version (WEBDEV-210) — the
- * original inline check here did a bare `toLowerCase() === "airtable"` with
- * no trim and no typo warning.
+ * account_daily_facts platform-completeness guard, extracted from airtable.ts so
+ * it is unit-testable without importing the `server-only` / pg chain that
+ * airtable.ts pulls in (same rationale as ./supabaseMappers).
  *
- * A switch env var (DAILY_METRICS_SOURCE / WEEKLY_SUMMARIES_SOURCE /
- * SOCIAL_ALERTS_SOURCE) forces the legacy Airtable path when set to
- * "airtable". This is the ONLY manual rollback mechanism, so the match is
- * whitespace- and case-insensitive — a value pasted into Vercel with a
- * trailing newline ("airtable\n") or stray spaces ("  Airtable ") must
- * still roll back. Any other non-empty value logs a console.warn on EVERY
- * call (no memo, stays pure) so a typo ("airtabel") shows up in the Vercel
- * logs instead of silently no-oping the rollback.
+ * account_daily_facts is written by TWO independent n8n refreshers (Social:
+ * instagram + facebook; Pinterest: pinterest), so a Supabase-side write gap on
+ * ONE writer would leave the table partially populated. getAccountDailyFacts
+ * requires every expected platform to be present before serving. WEBDEV-216
+ * retired the Airtable fallback, so an incomplete read now THROWS (fail-loud)
+ * instead of falling back, rather than silently serving a platform's dropped
+ * KPIs.
  */
-export function forcedToAirtable(
-  envVar: string | undefined,
-  varName: string,
-): boolean {
-  if (envVar === undefined) return false;
-  const normalized = envVar.trim().toLowerCase();
-  if (normalized === "airtable") return true;
-  if (normalized !== "") {
-    console.warn(
-      `[kill-switch] ${varName}=${JSON.stringify(envVar)} is not the ` +
-        `recognized value "airtable" — switch IGNORED, Supabase-first path ` +
-        `stays active. Fix the env var in Vercel and redeploy to roll back.`,
-    );
-  }
-  return false;
-}
 
 /**
  * Platforms that MUST be present in a healthy account_daily_facts read
@@ -42,8 +22,9 @@ export function forcedToAirtable(
  *
  * MAINTENANCE: keep this in sync with the platforms the ADF refreshers write.
  * If a new platform is added to the Social/Pinterest Data Refresher write path,
- * add it here — otherwise its absence would never trigger the Airtable fallback.
- * Values are lowercase to match the n8n writers (and hasAllExpectedPlatforms
+ * add it here — otherwise its absence would never trigger the completeness guard
+ * (the read would serve without it). Values are lowercase to match the n8n
+ * writers (and hasAllExpectedPlatforms
  * case-folds the read side defensively).
  */
 export const EXPECTED_ACCOUNT_PLATFORMS = [
@@ -54,14 +35,15 @@ export const EXPECTED_ACCOUNT_PLATFORMS = [
 
 /**
  * True when the mapped account-facts rows carry EVERY expected platform, i.e.
- * the Supabase read is complete enough to trust over Airtable. Empty in -> false
- * (fall back). Pure (operates on the mapped envelope's `fields['Platform']`), so
- * it is unit-testable without the server-only / pg layer that airtable.ts pulls
- * in (same rationale as forcedToAirtable / buildFields / assertFractionScale).
+ * the Supabase read is complete enough to serve. Empty in -> false (caller
+ * throws / refuses the partial read). Pure (operates on the mapped envelope's
+ * `fields['Platform']`), so it is unit-testable without the server-only / pg
+ * layer that airtable.ts pulls in (same rationale as buildFields /
+ * assertFractionScale).
  *
- * NOTE: this guard recovers a SUPABASE-SPECIFIC platform drop only. When BOTH
- * stores are stale/partial the WEBDEV-202 reconciler and the OpsPanel freshness
- * panel own it — the Airtable fallback cannot help there.
+ * NOTE: this guard catches a SUPABASE-SPECIFIC platform drop only. When the
+ * store is stale/partial the WEBDEV-202 reconciler and the OpsPanel freshness
+ * panel own it — refusing the partial read cannot help there.
  */
 export function hasAllExpectedPlatforms(
   rows: Array<{ fields: Record<string, unknown> }>,
@@ -69,9 +51,10 @@ export function hasAllExpectedPlatforms(
 ): boolean {
   if (rows.length === 0) return false;
   // Case-fold + trim defensively: EXPECTED is lowercase, and a writer that ever
-  // emitted "Instagram"/" pinterest " would otherwise pin the dashboard to
-  // Airtable forever despite Supabase having all platforms. Guards source
-  // selection only — the emitted "Platform" field value is untouched (parity).
+  // emitted "Instagram"/" pinterest " would otherwise make the guard reject a
+  // complete read forever despite Supabase having all platforms. Guards the
+  // completeness check only — the emitted "Platform" field value is untouched
+  // (parity).
   const present = new Set(
     rows.map((r) => String(r.fields["Platform"]).trim().toLowerCase()),
   );
