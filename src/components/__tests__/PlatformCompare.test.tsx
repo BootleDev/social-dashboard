@@ -30,6 +30,10 @@ const fixtures = [
     Reach: 120,
     "Reach Source": "daily_real",
     "Impressions Source": "null",
+    // IG account Views: Meta's 30-day rolling replacement for the retired account
+    // impressions, written to the newest row only (WEBDEV-367).
+    Views: 8600,
+    "Views Source": "period_aggregate",
     Followers: 600,
   }),
   makeRecord({
@@ -90,5 +94,21 @@ describe("PlatformCard metric rows (structural nulls, WEBDEV-182/189)", () => {
     expect(rowValue(pin, "Total Reach")).not.toBe("0");
     const ig = platformCard("Instagram");
     expect(rowValue(ig, "Impressions")).not.toBe("0");
+  });
+});
+
+describe("Views (30d) surfacing (WEBDEV-367)", () => {
+  it("shows IG Views (30d) from the newest-row 30-day aggregate, — elsewhere", () => {
+    render(<PlatformCompare posts={[]} dailyMetrics={fixtures} />);
+
+    // IG reports account Views as a 30d aggregate (8600 → 8.6K).
+    const ig = platformCard("Instagram");
+    expect(rowValue(ig, "Views (30d)")).toBe("8.6K");
+
+    // FB and Pinterest do not report account Views → em-dash, never a 0.
+    const fb = platformCard("Facebook");
+    expect(rowValue(fb, "Views (30d)")).toBe("—");
+    const pin = platformCard("Pinterest");
+    expect(rowValue(pin, "Views (30d)")).toBe("—");
   });
 });

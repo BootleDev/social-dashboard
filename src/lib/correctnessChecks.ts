@@ -33,7 +33,13 @@ export const ALLOWLIST: AllowEntry[] = [
   // ENFORCED by checkEngagementRateReproducible / checkNullSymmetry / checkIsPostDayConsistency.
   { table: "account_daily_facts", platform: "pinterest", metric: "engagement_rate<2026-05-04", reason: "unrecoverable aged tail (WEBDEV-297 cancelled)" },
   { table: "account_daily_facts", platform: "instagram", metric: "impressions", reason: "Meta deprecated IG account impressions (reach-only)" },
-  { table: "account_daily_facts", platform: "instagram", metric: "views", reason: "not collected for IG account" },
+  // WEBDEV-367: IG account Views IS now collected (replacement for the retired IG
+  // account impressions), but ONLY as a 30-day rolling aggregate written to the
+  // NEWEST IG row (views_source='period_aggregate') — never a per-day series. So no
+  // check asserts per-day / summable views on every IG row; it is surfaced as a
+  // latest-row 30d figure. Kept here to document the seam and forbid a future
+  // per-day views invariant.
+  { table: "account_daily_facts", platform: "instagram", metric: "views", reason: "IG Views is a newest-row-only 30-day aggregate (period_aggregate), not per-day — intentionally not asserted per-day/summable" },
   { table: "account_daily_facts", metric: "profile_views_30d|accounts_engaged_30d|interactions_30d|profile_links_taps_30d", reason: "unimplemented IG 30-day rollup scaffolding" },
   { table: "account_daily_facts", platform: "pinterest", metric: "follower_delta", reason: "Pinterest writer never computes it; delta=0" },
 ];

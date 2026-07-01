@@ -18,6 +18,7 @@ import {
   hasRealReach,
   hasRealImpressions,
   latestFollowers,
+  latestViews,
   groupByPlatform,
   getPlatformKeys,
   postEngagement,
@@ -176,6 +177,9 @@ export default function Overview({
         reach: realReach.length > 0 ? sumReach(realReach) : null,
         impressions:
           realImpr.length > 0 ? sumField(realImpr, "Impressions") : null,
+        // IG Views is a 30-day rolling aggregate on the NEWEST row only — taken
+        // as a latest value, never summed across day-rows (WEBDEV-367).
+        views: latestViews(m),
       };
     });
 
@@ -351,7 +355,7 @@ export default function Overview({
                   >
                     {cfg.label}
                   </span>
-                  <div className="grid grid-cols-3 gap-2 mt-2.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2.5">
                     <ScoreCell
                       label="Reach"
                       value={sc.reach !== null ? formatNumber(sc.reach) : "—"}
@@ -363,6 +367,13 @@ export default function Overview({
                           ? formatNumber(sc.impressions)
                           : "—"
                       }
+                    />
+                    <ScoreCell
+                      label="Views (30d)"
+                      value={
+                        sc.views != null ? formatNumber(sc.views) : "—"
+                      }
+                      tooltip="Instagram reports Views only as a rolling 30-day account total (Meta retired per-day account impressions). This is a 30-day figure, not a daily count, and is not summed across the selected date range. A blank (—) means the platform does not report account Views."
                     />
                     <ScoreCell
                       label="Followers"
@@ -400,12 +411,26 @@ export default function Overview({
   );
 }
 
-/** One reach/impressions/followers cell in a platform scorecard. */
-function ScoreCell({ label, value }: { label: string; value: string }) {
+/** One reach/impressions/views/followers cell in a platform scorecard. */
+function ScoreCell({
+  label,
+  value,
+  tooltip,
+}: {
+  label: string;
+  value: string;
+  tooltip?: string;
+}) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+      <span
+        className="text-[11px] flex items-center gap-1"
+        style={{ color: "var(--text-secondary)" }}
+      >
         {label}
+        {tooltip ? (
+          <InfoTooltip text={tooltip} label={`What is ${label}?`} />
+        ) : null}
       </span>
       <span className="text-base font-bold tabular-nums">{value}</span>
     </div>

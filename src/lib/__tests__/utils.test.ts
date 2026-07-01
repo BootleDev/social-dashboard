@@ -6,6 +6,7 @@ import {
   hasRealAccountVolume,
   hasRealReach,
   hasRealImpressions,
+  hasRealViews,
   str,
   formatNumber,
   formatPercent,
@@ -39,6 +40,7 @@ import {
   sumReach,
   weightedEngagementRate,
   latestFollowers,
+  latestViews,
   weightedERByDimension,
   MIN_RANK_SAMPLE,
   postEngagement,
@@ -286,6 +288,35 @@ describe("hasRealReach / hasRealImpressions", () => {
         makeRecord({ "Reach Source": "null", "Impressions Source": "null" }),
       ),
     ).toBe(false);
+  });
+});
+
+// --- hasRealViews (WEBDEV-367: IG 30-day account Views) ---
+describe("hasRealViews", () => {
+  it("treats a period_aggregate Views Source as real (IG 30-day rollup)", () => {
+    expect(
+      hasRealViews(makeRecord({ "Views Source": "period_aggregate" })),
+    ).toBe(true);
+  });
+
+  it("is false for a null / empty / absent Views Source (renders em-dash)", () => {
+    expect(hasRealViews(makeRecord({ "Views Source": "null" }))).toBe(false);
+    expect(hasRealViews(makeRecord({ "Views Source": "" }))).toBe(false);
+    expect(hasRealViews(makeRecord({}))).toBe(false);
+  });
+
+  it("does NOT let Views' period_aggregate leak into per-day summable volume", () => {
+    // Guards the separate-set decision: period_aggregate is real for Views but
+    // must stay OUT of the per-day sum gate used by reach/impressions, so a Views
+    // aggregate can never be summed across day-rows.
+    const row = makeRecord({
+      "Views Source": "period_aggregate",
+      "Impressions Source": "period_aggregate",
+      "Reach Source": "period_aggregate",
+    });
+    expect(hasRealViews(row)).toBe(true);
+    expect(hasRealImpressions(row)).toBe(false);
+    expect(hasRealReach(row)).toBe(false);
   });
 });
 
@@ -1309,6 +1340,58 @@ describe("latestFollowers", () => {
 
   it("returns null for empty input", () => {
     expect(latestFollowers([])).toBeNull();
+  });
+});
+
+// --- latestViews (WEBDEV-367: newest-row 30-day aggregate, never summed) ---
+describe("latestViews", () => {
+  // Records arrive Date desc, so index 0 is newest — same shape as latestFollowers.
+  it("returns the newest real Views value (30d aggregate on the newest row)", () => {
+    const rows = [
+      makeRecord({
+        Date: "2026-06-03",
+        Views: 4200,
+        "Views Source": "period_aggregate",
+      }),
+      makeRecord({ Date: "2026-06-02", Views: "", "Views Source": "null" }),
+    ];
+    expect(latestViews(rows)).toBe(4200);
+  });
+
+  it("skips rows whose Views Source is not real (null placeholder)", () => {
+    const rows = [
+      makeRecord({ Date: "2026-06-03", Views: 999, "Views Source": "null" }),
+      makeRecord({
+        Date: "2026-06-02",
+        Views: 4200,
+        "Views Source": "period_aggregate",
+      }),
+    ];
+    expect(latestViews(rows)).toBe(4200);
+  });
+
+  it("takes the newest value only — never sums across rows", () => {
+    const rows = [
+      makeRecord({
+        Date: "2026-06-03",
+        Views: 4200,
+        "Views Source": "period_aggregate",
+      }),
+      makeRecord({
+        Date: "2026-06-02",
+        Views: 4000,
+        "Views Source": "period_aggregate",
+      }),
+    ];
+    // A sum would be 8200; the correct 30d aggregate is the newest row's 4200.
+    expect(latestViews(rows)).toBe(4200);
+  });
+
+  it("returns null when no row carries a real Views value", () => {
+    expect(
+      latestViews([makeRecord({ Date: "2026-06-03", "Views Source": "null" })]),
+    ).toBeNull();
+    expect(latestViews([])).toBeNull();
   });
 });
 
