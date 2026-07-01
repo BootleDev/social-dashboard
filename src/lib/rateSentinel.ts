@@ -17,11 +17,10 @@
  *
  * Mechanism: scan the raw pg rows inside the Supabase getter, BEFORE the
  * mapped envelope is returned. A violation on a throwOn column throws, which
- * lands in the caller's existing catch in airtable.ts and FAILS OVER to the
- * Airtable read — a loud, correct degradation instead of silently-wrong
- * charts. (After dual-write retirement that failover serves stale-but-
- * correctly-scaled data, with the error in the Vercel logs — still the right
- * trade.)
+ * propagates to the caller in airtable.ts. WEBDEV-216 retired the Airtable
+ * fallback, so the throw now surfaces as a loud error state (route 500 / error
+ * UI, with the error in the Vercel logs) instead of silently-wrong charts — a
+ * correct, loud failure rather than a 100x-scaled ER line.
  *
  * Column policy: engagement_rate is throwOn — an ACCOUNT-level daily ER
  * (engagements relative to followers/reach per er_type) above 100% is not a
