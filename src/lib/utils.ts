@@ -173,6 +173,27 @@ export function hasRealImpressions(record: AirtableRecord): boolean {
 }
 
 /**
+ * True when a row carries a REAL Views value (WEBDEV-367). Instagram's account
+ * Views is Meta's replacement for the retired account-level impressions metric,
+ * but Meta exposes it ONLY as a rolling 30-day aggregate written to the newest IG
+ * row (`views_source = 'period_aggregate'`), never a per-day series.
+ *
+ * This is deliberately a SEPARATE check from hasRealReach / hasRealImpressions:
+ * those gate per-day *summable* volume via REAL_PER_DAY_VOLUME_SOURCES, and Views
+ * must never be summed across day-rows. `period_aggregate` is intentionally NOT
+ * in REAL_PER_DAY_VOLUME_SOURCES for exactly this reason. A Views value is "real"
+ * (surfaceable, taken from the newest row) when its Source is present and is not
+ * the honest-absence placeholder — `period_aggregate` is the current real source.
+ * An absent / `"null"` / empty Source renders as an em-dash, never a zero.
+ */
+export function hasRealViews(record: AirtableRecord): boolean {
+  const source = str(record.fields["Views Source"]).trim();
+  if (source.length === 0) return false;
+  if (source === "null") return false;
+  return true;
+}
+
+/**
  * True when an account row carries real per-day volume for AT LEAST ONE of
  * Reach/Impressions. Kept for callers that only need a coarse row-level check;
  * per-metric pills and headline sums use {@link hasRealReach} /
@@ -866,6 +887,24 @@ export function weightedERByDimension(
 export function latestFollowers(records: AirtableRecord[]): number | null {
   for (const r of records) {
     const v = r.fields["Followers"];
+    if (v !== undefined && v !== null && v !== "") return num(v);
+  }
+  return null;
+}
+
+/**
+ * Latest real IG account Views value (WEBDEV-367). Mirrors latestFollowers'
+ * newest-row selection (records arrive Date desc, so the first real row is the
+ * most recent) — it is NEVER summed across day-rows, because Meta exposes
+ * Instagram Views only as a rolling 30-day account total on the newest row
+ * (views_source='period_aggregate'), not a per-day series. Only rows with a real
+ * Views source count; returns null when none do (renders as an em-dash — expected
+ * while `views` is NULL upstream until the n8n change lands).
+ */
+export function latestViews(records: AirtableRecord[]): number | null {
+  for (const r of records) {
+    if (!hasRealViews(r)) continue;
+    const v = r.fields["Views"];
     if (v !== undefined && v !== null && v !== "") return num(v);
   }
   return null;

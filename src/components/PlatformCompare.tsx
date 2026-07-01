@@ -19,6 +19,7 @@ import {
   recordReach,
   hasRealReach,
   hasRealImpressions,
+  latestViews,
   groupByPlatform,
   getPlatformKeys,
   buildUnifiedDates,
@@ -42,6 +43,10 @@ interface PlatformKPIs {
   // structural blank: from 2026-06-20 it is a daily_proxy value.)
   totalReach: number | null;
   totalImpressions: number | null;
+  // IG account Views (Meta's replacement for the retired IG account impressions),
+  // exposed only as a rolling 30-day aggregate on the newest row — a latest value,
+  // NEVER a sum. null = platform does not report account Views → em-dash.
+  totalViews: number | null;
   posts: number;
   avgSaves: number;
   avgShares: number;
@@ -104,6 +109,7 @@ function PlatformCard({
     { label: "Avg ER", value: formatPercent(kpis.avgER) },
     { label: "Total Reach", value: fmtOrDash(kpis.totalReach) },
     { label: "Impressions", value: fmtOrDash(kpis.totalImpressions) },
+    { label: "Views (30d)", value: fmtOrDash(kpis.totalViews) },
     { label: "Reach / Post", value: formatNumber(kpis.reachPerPost) },
     { label: "Eng / Post", value: formatNumber(kpis.engagementPerPost) },
     { label: "Profile Views", value: fmtOrDash(kpis.profileViews) },
@@ -231,6 +237,8 @@ export default function PlatformCompare({
         totalImpressions: sumOrNull(realImprRows, "Impressions", (rows) =>
           sumField(rows, "Impressions"),
         ),
+        // Newest-row 30-day aggregate (IG), NOT a sum — see PlatformKPIs.totalViews.
+        totalViews: latestViews(metrics),
         posts: n,
         avgSaves: n > 0 ? sumField(platformPosts, "Saves") / n : 0,
         avgShares: n > 0 ? sumField(platformPosts, "Shares") / n : 0,

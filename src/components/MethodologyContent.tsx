@@ -147,6 +147,34 @@ const METRIC_LINEAGE: MetricLineage[] = [
     ],
   },
   {
+    metric: "Views (30d)",
+    column: "Views",
+    grain: "Account · rolling 30-day total",
+    aggregation: "period_snapshot",
+    summary:
+      "Instagram's replacement for the retired account impressions metric. Meta exposes it only as a rolling 30-day account total (never a per-day series), so it is written to the newest row and shown as a 30-day figure — never summed across the date window.",
+    origins: [
+      {
+        platform: "instagram",
+        apiField: "views (metric_type=total_value, 30-day), Graph API v22.0",
+        source: "period_aggregate",
+        note: "Replaces the retired IG account-level impressions. v22.0 exposes Views only as a rolling 30-day total, written to the newest row and tagged period_aggregate; taken as a latest value, never summed across days.",
+      },
+      {
+        platform: "facebook",
+        apiField: null,
+        source: "null",
+        note: "Not applicable — Facebook still reports account impressions directly (see Impressions). Views is an Instagram-only replacement metric.",
+      },
+      {
+        platform: "pinterest",
+        apiField: null,
+        source: "null",
+        note: "Not applicable — Pinterest reports impressions directly (pin-sum).",
+      },
+    ],
+  },
+  {
     metric: "Followers",
     column: "Followers",
     grain: "Account · snapshot",
