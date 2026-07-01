@@ -490,6 +490,7 @@ export default function DashboardPage() {
               {tab === "planning" && (
                 <PlanningPanel
                   posts={filteredPosts}
+                  selectedPlatforms={selectedPlatforms}
                   pinterestTrends={data?.pinterestTrends ?? []}
                   seasonalOpportunities={data?.seasonalOpportunities ?? []}
                   competitorRecords={competitorRecords}

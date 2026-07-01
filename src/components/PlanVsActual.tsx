@@ -19,6 +19,7 @@ import {
   parseContentPlan,
   comparePlanToActual,
   buildCalendar,
+  filterPlanPlatforms,
   type PlanComparison,
   type CalendarWeek,
   type CalendarPost,
@@ -30,6 +31,12 @@ interface PlanVsActualProps {
   /** Selected range. Nulls (All Time) fall back to the posts' own span. */
   range: { start: string | null; end: string | null };
   timezone: string;
+  /**
+   * The dashboard's global platform filter (lowercase keys; empty = all).
+   * The plan is scoped to the same platforms as the posts, otherwise every
+   * filtered-out platform's slots would read as false misses.
+   */
+  selectedPlatforms?: Set<string>;
 }
 
 type View = "calendar" | "summary";
@@ -44,7 +51,12 @@ type View = "calendar" | "summary";
  * The matching + calendar engines (lib/contentPlan.ts) are pure + unit-tested;
  * this component only renders their output and offers drilldowns.
  */
-export default function PlanVsActual({ posts, range, timezone }: PlanVsActualProps) {
+export default function PlanVsActual({
+  posts,
+  range,
+  timezone,
+  selectedPlatforms,
+}: PlanVsActualProps) {
   const [view, setView] = useState<View>("calendar");
   const [drill, setDrill] = useState<{
     posts: AirtableRecord[];
@@ -61,6 +73,13 @@ export default function PlanVsActual({ posts, range, timezone }: PlanVsActualPro
     }
   }, []);
 
+  // Scope the plan to the same platforms as the (already filtered) posts, so
+  // a single-channel view scores only that channel's slots.
+  const plan = useMemo(() => {
+    if (!parsed.plan) return null;
+    return filterPlanPlatforms(parsed.plan, selectedPlatforms ?? new Set());
+  }, [parsed.plan, selectedPlatforms]);
+
   // Resolve concrete bounds. When the date filter is "All Time" (null), derive
   // the span from the posts themselves so the plan expands over real data.
   const bounds = useMemo(() => {
@@ -76,9 +95,9 @@ export default function PlanVsActual({ posts, range, timezone }: PlanVsActualPro
   }, [range.start, range.end, posts, timezone]);
 
   const result: PlanComparison | null = useMemo(() => {
-    if (!parsed.plan || !bounds.start || !bounds.end) return null;
-    return comparePlanToActual(parsed.plan, posts, bounds, timezone);
-  }, [parsed.plan, posts, bounds, timezone]);
+    if (!plan || !bounds.start || !bounds.end) return null;
+    return comparePlanToActual(plan, posts, bounds, timezone);
+  }, [plan, posts, bounds, timezone]);
 
   // The calendar extends forward past the data so the upcoming plan is visible:
   // its end is pushed to the Sunday after next (covering the rest of this week
@@ -90,11 +109,11 @@ export default function PlanVsActual({ posts, range, timezone }: PlanVsActualPro
   }, [bounds]);
 
   const calendar: CalendarWeek[] = useMemo(() => {
-    if (!parsed.plan || !calendarBounds.start || !calendarBounds.end) return [];
+    if (!plan || !calendarBounds.start || !calendarBounds.end) return [];
     // Pass today so unshipped future slots render as "upcoming" (to-do) rather
     // than "miss" (failure), and drop out of forward weeks' adherence counts.
-    return buildCalendar(parsed.plan, posts, calendarBounds, timezone, todayYmd());
-  }, [parsed.plan, posts, calendarBounds, timezone]);
+    return buildCalendar(plan, posts, calendarBounds, timezone, todayYmd());
+  }, [plan, posts, calendarBounds, timezone]);
 
   if (parsed.error) {
     return (
@@ -148,7 +167,7 @@ export default function PlanVsActual({ posts, range, timezone }: PlanVsActualPro
           }
         />
       ) : (
-        <SummaryView result={result} onDrill={(p, l) => setDrill({ posts: p, label: l })} />
+        <SummaryView result={result} onDrill={(p, l) => setDrill({ posts: p, label: l })} selectedPlatforms={selectedPlatforms} />
       )}
 
       {drill && (
@@ -651,13 +670,85 @@ function LegendItem({ chip, desc }: { chip: React.ReactNode; desc: string }) {
 function SummaryView({
   result,
   onDrill,
+  selectedPlatforms,
 }: {
   result: PlanComparison;
   onDrill: (p: AirtableRecord[], label: string) => void;
+  selectedPlatforms?: Set<string>;
 }) {
-  const { perWeek, perSlot, pillarMix, matched, totals } = result;
+  const { perWeek, perSlot, pillarMix, matched, totals, perPlatform } = result;
   return (
     <div className="space-y-4">
+      <ChartCard
+        title="By channel"
+        tooltip="Plan adherence split per platform: hit rate over the window, planned/hit/missed slot counts, posts shipped outside the plan, and the week-by-week trend. Informational slots (Stories) are excluded, as everywhere."
+      >
+        <div className="space-y-3">
+          {perPlatform.map((p) => {
+            const config = getPlatformConfig(p.platform);
+            return (
+              <div key={p.platform} className="text-xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="flex items-center gap-1.5 font-medium" style={{ color: "var(--text-primary)" }}>
+                    <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: config.color }} />
+                    {config.label}
+                  </span>
+                  <span className="tabular-nums" style={{ color: "var(--text-secondary)" }}>
+                    {p.planned > 0 ? (
+                      <>
+                        <span style={{ color: barColor(p.hitRate) }}>{pct(p.hitRate)}</span>
+                        {" · "}{p.hit}/{p.planned} slots
+                      </>
+                    ) : (
+                      "no planned slots"
+                    )}
+                    {p.unplanned > 0 && <> · {p.unplanned} unplanned</>}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-4 rounded overflow-hidden" style={{ background: "var(--bg-secondary)" }}>
+                    {p.planned > 0 && (
+                      <div className="h-full" style={{ width: `${Math.round(p.hitRate * 100)}%`, background: config.color }} />
+                    )}
+                  </div>
+                  {/* perWeek is a plan-adherence series, so it only covers
+                      weeks the platform had a scored slot in. Platforms that
+                      only shipped unplanned posts have no series and show no
+                      sparkbars (length <= 1) — adherence is undefined with
+                      nothing planned, so a trend there would be misleading. */}
+                  {p.perWeek.length > 1 && (
+                    <div className="flex items-end gap-0.5 h-4 shrink-0" title="Weekly hit rate, oldest → newest">
+                      {p.perWeek.map((w) => (
+                        <div
+                          key={w.weekKey}
+                          className="w-1.5 rounded-sm"
+                          style={{
+                            // 15% floor keeps a 0%-week bar visible; perWeek
+                            // entries always have planned >= 1 (built from
+                            // scored slots), so hitRate is never NaN here.
+                            height: `${Math.max(15, Math.round(w.hitRate * 100))}%`,
+                            background: barColor(w.hitRate),
+                            opacity: w.planned > 0 ? 1 : 0.3,
+                          }}
+                          title={`${w.weekKey}: ${w.hit}/${w.planned} (${pct(w.hitRate)})`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {perPlatform.length === 0 && (
+            <p style={{ color: "var(--text-secondary)" }}>
+              {selectedPlatforms && selectedPlatforms.size > 0
+                ? "No planned slots or posts for the selected platform(s) in this window."
+                : "No planned slots or posts in this window."}
+            </p>
+          )}
+        </div>
+      </ChartCard>
+
       <ChartCard
         title="Weekly adherence"
         tooltip="Share of planned slots filled each ISO week. A slot is filled when a post of the same platform + post type ships that week (any day). Pillar is not required for a hit."
