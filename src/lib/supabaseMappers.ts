@@ -1,5 +1,7 @@
 /**
- * Pure row -> envelope mappers for the four Supabase-migrated tables.
+ * Pure row -> envelope mappers for the Supabase-migrated tables (WEBDEV-207 for
+ * the first four; WEBDEV-216 Phase 3 added instagram_audience, pinterest_top_pins,
+ * pinterest_trends_keywords, and the marketing.daily_aggregates view).
  *
  * Extracted from supabase.ts (WEBDEV-207) so the shape-critical mapping logic is
  * unit-testable WITHOUT a live DB and without importing the `server-only` /
@@ -227,6 +229,157 @@ export function mapAccountDailyFactsRow(
   return {
     id: `${row.platform}|${row.date}`,
     fields: buildFields(row, ACCOUNT_DAILY_FACTS_MAP),
+    createdTime: toCreatedTime(row.updated_at),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// social.instagram_audience -> getInstagramAudience (WEBDEV-216 Phase 3)
+// ---------------------------------------------------------------------------
+//
+// Column -> Airtable "Instagram Audience" display-name map. The display names
+// are the EXACT keys toAudienceDemographic (types.ts) reads. There is no
+// engagement-rate/fraction column here, so no unit sentinel applies. `value`
+// is a plain integer count (pg returns int as a JS number).
+export const INSTAGRAM_AUDIENCE_MAP: Array<[string, string]> = [
+  ["snapshot_date", "Snapshot Date"],
+  ["audience_type", "Audience Type"],
+  ["breakdown", "Breakdown"],
+  ["bucket", "Bucket"],
+  ["value", "Value"],
+];
+
+/**
+ * Map an instagram_audience row to the Airtable envelope.
+ * id = snapshot_key (the row's natural upsert key: date|type|breakdown|bucket,
+ * verified UNIQUE per row). The Airtable getter returned the Airtable rec id
+ * here; AudienceDemographics only uses id as a React key, so the stable
+ * snapshot_key is an equivalent substitution.
+ */
+export function mapInstagramAudienceRow(
+  row: Record<string, unknown>,
+): AirtableRecord {
+  return {
+    id: String(row.snapshot_key),
+    fields: buildFields(row, INSTAGRAM_AUDIENCE_MAP),
+    createdTime: toCreatedTime(row.updated_at),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// social.pinterest_top_pins -> getPinterestTopPins (WEBDEV-216 Phase 3)
+// ---------------------------------------------------------------------------
+//
+// Column -> Airtable "Pinterest Top Pins" display-name map (the 15 keys toTopPin
+// reads). integer columns arrive as JS numbers; video_avg_watch_time is numeric
+// and arrives as a STRING (no OID-1700 typeparser), which toTopPin parses via
+// num() — identical to how it parsed the Airtable number.
+export const PINTEREST_TOP_PINS_MAP: Array<[string, string]> = [
+  ["snapshot_date", "Snapshot Date"],
+  ["sort_by", "Sort By"],
+  ["rank", "Rank"],
+  ["pin_id", "Pin ID"],
+  ["post_id", "Post ID"],
+  ["window_days", "Window Days"],
+  ["impressions", "Impressions"],
+  ["saves", "Saves"],
+  ["pin_click", "Pin Click"],
+  ["outbound_click", "Outbound Click"],
+  ["engagement", "Engagement"],
+  ["video_mrc_view", "Video MRC View"],
+  ["video_avg_watch_time", "Video Avg Watch Time"],
+  ["near_complete_views", "Near Complete Views"],
+  ["thumbnail_url", "Thumbnail URL"],
+];
+
+/**
+ * Map a pinterest_top_pins row to the Airtable envelope.
+ * id = snapshot_key (natural upsert key, verified UNIQUE per row); the pin card
+ * grid uses id only as a React key.
+ */
+export function mapTopPinRow(row: Record<string, unknown>): AirtableRecord {
+  return {
+    id: String(row.snapshot_key),
+    fields: buildFields(row, PINTEREST_TOP_PINS_MAP),
+    createdTime: toCreatedTime(row.updated_at),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// social.pinterest_trends_keywords -> getPinterestTrendsKeywords (Phase 3)
+// ---------------------------------------------------------------------------
+//
+// Column -> Airtable "Pinterest Trends Keywords" display-name map (the 10 keys
+// toTrendingKeyword reads).
+//
+// TIME SERIES (the correctness risk): the Airtable "Time Series" field is a JSON
+// STRING and toTrendingKeyword stores it verbatim (timeSeriesJson: str(...)). In
+// Postgres time_series is `jsonb`, which the pg driver would parse into a JS
+// object — str(object) would yield "[object Object]" and break any consumer that
+// JSON.parses it. The getter therefore selects `time_series::text`, so the value
+// arrives as the serialized JSON string exactly as Airtable delivered it, and
+// str() passes it through unchanged.
+export const PINTEREST_TRENDS_KEYWORDS_MAP: Array<[string, string]> = [
+  ["snapshot_date", "Snapshot Date"],
+  ["region", "Region"],
+  ["trend_type", "Trend Type"],
+  ["keyword", "Keyword"],
+  ["rank", "Rank"],
+  ["pct_growth_wow", "Pct Growth WoW"],
+  ["pct_growth_mom", "Pct Growth MoM"],
+  ["pct_growth_yoy", "Pct Growth YoY"],
+  ["has_prediction", "Has Prediction"],
+  ["time_series", "Time Series"],
+];
+
+/**
+ * Map a pinterest_trends_keywords row to the Airtable envelope.
+ * id = snapshot_key (natural upsert key, verified UNIQUE per row).
+ */
+export function mapTrendingKeywordRow(
+  row: Record<string, unknown>,
+): AirtableRecord {
+  return {
+    id: String(row.snapshot_key),
+    fields: buildFields(row, PINTEREST_TRENDS_KEYWORDS_MAP),
+    createdTime: toCreatedTime(row.updated_at),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// marketing.daily_aggregates (VIEW) -> getMarketingDailyAggregatesFromSupabase
+// (WEBDEV-216 Phase 3)
+// ---------------------------------------------------------------------------
+//
+// Feeds the paid simulator's baseline (marketingIntelligence.getMarketingBaselineData
+// -> toDailyAdRow). This is a marketing-schema read, not a social table, but it
+// reuses the same hardened pool. Only the FIVE fields toDailyAdRow consumes are
+// mapped (Date, Total Spend, Impressions, Clicks, Total Purchases); the view's
+// derived rate columns (cpc/cpm/roas/…) and Reach are not read by the simulator.
+// Parity with the retired Airtable "Daily Aggregates" table was verified on live
+// data (2026-07-01): the five consumed fields match exactly. total_purchases is a
+// bigint here vs a fractional Airtable field, but it only feeds a FALLBACK CVR
+// path (the /api/paid route always supplies Ad Snapshots, so daily.purchases is
+// unused there) and the live values are integers, so this is behaviour-neutral.
+// The view has no updated_at; createdTime falls back to epoch (unread here).
+export const MARKETING_DAILY_AGG_MAP: Array<[string, string]> = [
+  ["date", "Date"],
+  ["total_spend", "Total Spend"],
+  ["impressions", "Impressions"],
+  ["clicks", "Clicks"],
+  ["total_purchases", "Total Purchases"],
+];
+
+/**
+ * Map a marketing.daily_aggregates row to the Airtable envelope toDailyAdRow
+ * expects. id = date (one row per snapshot_date in the view).
+ */
+export function mapMarketingDailyAggRow(
+  row: Record<string, unknown>,
+): AirtableRecord {
+  return {
+    id: String(row.date),
+    fields: buildFields(row, MARKETING_DAILY_AGG_MAP),
     createdTime: toCreatedTime(row.updated_at),
   };
 }
