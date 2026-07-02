@@ -21,6 +21,14 @@ describe("isPostSettled", () => {
   it("non-FB/IG (pinterest) is never gated", () => {
     expect(isPostSettled(post("pinterest", 1), today)).toBe(true);
   });
+  it("FB settle boundary is exact: 3 days is unsettled, 4 days is settled", () => {
+    expect(isPostSettled(post("facebook", 3), today)).toBe(false);
+    expect(isPostSettled(post("facebook", 4), today)).toBe(true);
+  });
+  it("IG settle boundary is exact: 21 days is unsettled, 22 days is settled", () => {
+    expect(isPostSettled(post("instagram", 21), today)).toBe(false);
+    expect(isPostSettled(post("instagram", 22), today)).toBe(true);
+  });
   it("missing publish date is treated as settled (do not hide)", () => {
     expect(isPostSettled({ id: "x", fields: { Platform: "instagram" }, createdTime: "" }, today)).toBe(true);
   });

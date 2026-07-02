@@ -14,7 +14,7 @@ export const IG_SETTLE_DAYS = 21;
  * missing field).
  */
 export function isPostSettled(post: AirtableRecord, today: string): boolean {
-  const platform = str(post.fields["Platform"]).toLowerCase();
+  const platform = str(post.fields["Platform"]).toLowerCase().trim();
   if (platform !== "instagram" && platform !== "facebook") return true;
   const published = str(post.fields["Published At"]) || str(post.fields["Snapshot Date"]);
   const day = published.split("T")[0];
