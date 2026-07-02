@@ -13,7 +13,6 @@ import {
   str,
   formatNumber,
   formatPercent,
-  weightedEngagementRate,
   sumField,
   sumReach,
   recordReach,
@@ -28,6 +27,7 @@ import {
   postEngagement,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
+import { erSeriesForPlatform, avgERSettled } from "./platformCompareLogic";
 
 interface PlatformCompareProps {
   posts: AirtableRecord[];
@@ -183,6 +183,10 @@ export default function PlatformCompare({
 }: PlatformCompareProps) {
   const { defaultOptions, lineChartOptions } = useChartTheme();
 
+  // Today's date (UTC, YYYY-MM-DD) — passed into settlement gating so the
+  // helpers stay pure/testable (no Date.now() inside them).
+  const today = new Date().toISOString().split("T")[0];
+
   const metricsMap = useMemo(
     () => groupByPlatform(dailyMetrics),
     [dailyMetrics],
@@ -232,7 +236,7 @@ export default function PlatformCompare({
 
       result[key] = {
         followers: latest ? num(latest.fields["Followers"]) : 0,
-        avgER: weightedEngagementRate(platformPosts) * 100,
+        avgER: avgERSettled(platformPosts, today) * 100,
         totalReach,
         totalImpressions: sumOrNull(realImprRows, "Impressions", (rows) =>
           sumField(rows, "Impressions"),
@@ -278,7 +282,7 @@ export default function PlatformCompare({
         return [
           {
             label: `${config.label} ER`,
-            data: alignToDateArrayNullable(metrics, allDates, "Engagement Rate").map(toPct),
+            data: erSeriesForPlatform(key, metrics, allDates, "Engagement Rate").map(toPct),
             borderColor: config.color,
             tension: 0.3,
             pointRadius: 0,
@@ -286,7 +290,7 @@ export default function PlatformCompare({
           },
           {
             label: `${config.label} ER/follower`,
-            data: alignToDateArrayNullable(metrics, allDates, "Engagement Rate Followers").map(toPct),
+            data: erSeriesForPlatform(key, metrics, allDates, "Engagement Rate Followers").map(toPct),
             borderColor: config.color,
             borderDash: [5, 4],
             tension: 0.3,
