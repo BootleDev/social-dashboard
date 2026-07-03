@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import PlatformCompare from "../PlatformCompare";
+import { erSeriesForPlatform, avgERSettled } from "@/components/platformCompareLogic";
 import type { AirtableRecord } from "@/lib/utils";
 
 // Charts need a real canvas; the KPI-row behavior under test doesn't.
@@ -110,5 +111,39 @@ describe("Views (30d) surfacing (WEBDEV-367)", () => {
     expect(rowValue(fb, "Views (30d)")).toBe("—");
     const pin = platformCard("Pinterest");
     expect(rowValue(pin, "Views (30d)")).toBe("—");
+  });
+});
+
+describe("platformCompareLogic (WEBDEV-352, settlement-gated ER comparison)", () => {
+  it("blanks unsettled IG account rows in the ER series", () => {
+    const dates = ["2026-06-01", "2026-06-29"];
+    const rows = [
+      makeRecord({ Date: "2026-06-01", "Engagement Rate": 0.1, data_status: "settled" }),
+      makeRecord({ Date: "2026-06-29", "Engagement Rate": 0.2, data_status: "pending" }),
+    ];
+    expect(erSeriesForPlatform("instagram", rows, dates, "Engagement Rate")).toEqual([0.1, null]);
+  });
+
+  it("does not gate Pinterest — a pending Pinterest row still contributes its value", () => {
+    const dates = ["2026-06-01", "2026-06-29"];
+    const rows = [
+      makeRecord({ Date: "2026-06-01", "Engagement Rate": 0.15, data_status: "settled" }),
+      makeRecord({ Date: "2026-06-29", "Engagement Rate": 0.25, data_status: "pending" }),
+    ];
+    expect(erSeriesForPlatform("pinterest", rows, dates, "Engagement Rate")).toEqual([0.15, 0.25]);
+  });
+
+  it("excludes unsettled posts from avg ER", () => {
+    const today = "2026-06-30";
+    const settledPost = makeRecord({ Platform: "instagram", "Published At": "2026-06-01", Reach: 100, Engagement: 10 });
+    const freshPost = makeRecord({ Platform: "instagram", "Published At": "2026-06-29", Reach: 100, Engagement: 1 });
+    expect(avgERSettled([settledPost, freshPost], today)).toBeCloseTo(0.1, 5);
+  });
+
+  it("returns null (not 0) when no settled FB/IG post contributes positive reach", () => {
+    const today = "2026-06-30";
+    // Unsettled — should be excluded entirely, leaving zero contributing posts.
+    const freshPost = makeRecord({ Platform: "instagram", "Published At": "2026-06-29", Reach: 100, Engagement: 10 });
+    expect(avgERSettled([freshPost], today)).toBeNull();
   });
 });

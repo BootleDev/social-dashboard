@@ -87,7 +87,7 @@ const SOURCE_VOCAB: { tag: string; meaning: string }[] = [
   {
     tag: "pending → settled",
     meaning:
-      "data_status. Recent days arrive pending and settle over ~1-2 days as platforms finalize counts. Each run re-fetches the trailing window so pending days self-correct.",
+      "data_status. Recent days arrive pending and settle over a per-platform window - about 3 days for Facebook, about 21 days for Instagram (Reels keep accruing for weeks). Each run re-fetches the trailing window so pending days self-correct, and the Engagement-Rate comparison shows settled data only.",
   },
 ];
 
@@ -575,7 +575,7 @@ export default function MethodologyContent() {
             <strong style={{ color: "var(--text-primary)" }}>2 · Settle.</strong>{" "}
             Each run re-fetches the trailing window, so days that arrived{" "}
             <em>pending</em> self-correct to their{" "}
-            <em>settled</em> value over ~1-2 days. Settled values are stable.
+            <em>settled</em> value over a per-platform window - about 3 days for Facebook, about 21 days for Instagram (Reels keep accruing for weeks). Settled values are stable.
           </li>
           <li>
             <strong style={{ color: "var(--text-primary)" }}>3 · Aggregate.</strong>{" "}

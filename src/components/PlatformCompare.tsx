@@ -13,7 +13,6 @@ import {
   str,
   formatNumber,
   formatPercent,
-  weightedEngagementRate,
   sumField,
   sumReach,
   recordReach,
@@ -28,6 +27,7 @@ import {
   postEngagement,
 } from "@/lib/utils";
 import type { AirtableRecord } from "@/lib/utils";
+import { erSeriesForPlatform, avgERSettled } from "./platformCompareLogic";
 
 interface PlatformCompareProps {
   posts: AirtableRecord[];
@@ -36,7 +36,9 @@ interface PlatformCompareProps {
 
 interface PlatformKPIs {
   followers: number;
-  avgER: number;
+  // null = no settled FB/IG post contributes positive reach in range (or the
+  // platform has no posts at all) — rendered as an em-dash, never a false 0.
+  avgER: number | null;
   // null = the platform does not report this account metric (e.g. Instagram
   // retired account impressions). Rendered as an em-dash, never as a real 0 — a
   // structural blank is not a measured zero. (FB account reach is no longer a
@@ -106,7 +108,7 @@ function PlatformCard({
   const rows = [
     { label: "Followers", value: formatNumber(kpis.followers) },
     { label: "Posts", value: String(kpis.posts) },
-    { label: "Avg ER", value: formatPercent(kpis.avgER) },
+    { label: "Avg ER", value: kpis.avgER === null ? "—" : formatPercent(kpis.avgER) },
     { label: "Total Reach", value: fmtOrDash(kpis.totalReach) },
     { label: "Impressions", value: fmtOrDash(kpis.totalImpressions) },
     { label: "Views (30d)", value: fmtOrDash(kpis.totalViews) },
@@ -183,6 +185,10 @@ export default function PlatformCompare({
 }: PlatformCompareProps) {
   const { defaultOptions, lineChartOptions } = useChartTheme();
 
+  // Today's date (UTC, YYYY-MM-DD) — passed into settlement gating so the
+  // helpers stay pure/testable (no Date.now() inside them).
+  const today = new Date().toISOString().split("T")[0];
+
   const metricsMap = useMemo(
     () => groupByPlatform(dailyMetrics),
     [dailyMetrics],
@@ -230,9 +236,11 @@ export default function PlatformCompare({
         0,
       );
 
+      const erFrac = avgERSettled(platformPosts, today);
+
       result[key] = {
         followers: latest ? num(latest.fields["Followers"]) : 0,
-        avgER: weightedEngagementRate(platformPosts) * 100,
+        avgER: erFrac === null ? null : erFrac * 100,
         totalReach,
         totalImpressions: sumOrNull(realImprRows, "Impressions", (rows) =>
           sumField(rows, "Impressions"),
@@ -253,7 +261,7 @@ export default function PlatformCompare({
     }
 
     return result;
-  }, [platformKeys, metricsMap, postsMap]);
+  }, [platformKeys, metricsMap, postsMap, today]);
 
   // Unified date array
   const allDates = useMemo(
@@ -278,7 +286,7 @@ export default function PlatformCompare({
         return [
           {
             label: `${config.label} ER`,
-            data: alignToDateArrayNullable(metrics, allDates, "Engagement Rate").map(toPct),
+            data: erSeriesForPlatform(key, metrics, allDates, "Engagement Rate").map(toPct),
             borderColor: config.color,
             tension: 0.3,
             pointRadius: 0,
@@ -286,7 +294,7 @@ export default function PlatformCompare({
           },
           {
             label: `${config.label} ER/follower`,
-            data: alignToDateArrayNullable(metrics, allDates, "Engagement Rate Followers").map(toPct),
+            data: erSeriesForPlatform(key, metrics, allDates, "Engagement Rate Followers").map(toPct),
             borderColor: config.color,
             borderDash: [5, 4],
             tension: 0.3,
