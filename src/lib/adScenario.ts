@@ -474,22 +474,28 @@ export const AB_TEST_DEFAULTS = {
 export const DEFAULT_VAT_RATE = 0.2;
 
 /**
- * Default CONTRIBUTION margin (decimal) — net AOV kept after ALL variable
- * per-order costs, used as the UI default until Bootle's measured figure is
- * recorded in the pricing config.
+ * Default CONTRIBUTION margin (decimal) - net AOV kept after ALL variable
+ * per-order costs (COGS, payment fee, shipping/fulfilment, pick-pack, and a
+ * returns provision), used as the UI default. User-adjustable in PaidPanel.
  *
- * DERIVED ESTIMATE (replace with the real number when available):
- *   gross margin (after COGS)          ~0.65   (the figure quoted historically)
- *   − payment processing (~2.5% of rev) ~0.025
- *   − shipping / fulfillment / pick-pack ~0.10  (~€5-7 on a ~€55 net AOV via 3PL)
- *   − returns provision                 ~0.025  (~3-5% return rate, restock loss)
- *   = contribution margin              ≈0.50
- * This is intentionally below the gross figure so break-even reads honestly
- * (gross margin would overstate per-sale profit). 0.50 is an ASSUMPTION, not a
- * measurement — adjust the field, and ideally pin the real value in
- * bootle-vault/_meta/config/pricing/ and feed it here.
+ * ENGINE-MEASURED (WEBDEV-429 BOM margin engine, bootle-pricing-tools) -
+ * replaces the earlier ~0.50 hand-derived assumption.
+ * Basis: shipping-INCLUSIVE, free-ship-share-weighted (Bootle eats outbound
+ * carriage only on orders that clear the free-ship floor), order-mix weighted
+ * across markets, AFTER returns. Returns are folded in HERE - the simulator
+ * does not model them separately, so this must be the after-returns figure.
+ *
+ *   whole-business blended, pre-returns:     ~0.53
+ *   after-returns (per-market x order mix):  ~0.45  <- pinned
+ *     UK .51 / DE .34 / EU .48 / EEA .55 / US .40, weighted 35/25/25/5/10
+ *
+ * Two heuristic drivers still to firm up (bootle-pricing-tools RATIONALE.md):
+ * free-ship share (0.675 flat) and the order-mix weights. US (.40) and
+ * DE-after-returns (.34) are the thin lanes. Precise re-pin + wiring the value
+ * straight from the engine's ad-margin resolver is gated on the RHS/fulfilment
+ * reconciliation (OPERATIONS-78) - see WEBDEV-239.
  */
-export const DEFAULT_CONTRIBUTION_MARGIN = 0.5;
+export const DEFAULT_CONTRIBUTION_MARGIN = 0.45;
 
 /**
  * Provisional storefront conversion rate used as the default CVR until live GA4

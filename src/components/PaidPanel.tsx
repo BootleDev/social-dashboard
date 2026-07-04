@@ -626,7 +626,7 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
               step={1}
               min={0}
               max={100}
-              tip="Percent of NET (ex-VAT) revenue kept after ALL variable per-order costs — COGS, payment-processing fees (~2.5%), shipping / fulfillment, pick-pack, and a returns provision. This is NOT gross margin (COGS only): an extra ad-driven sale incurs those other costs too, so contribution margin is what actually decides whether the sale pays for its ad cost. Using gross margin would overstate profit and make break-even CPA look too easy. Defaults to a derived ~50% ESTIMATE (gross ~65% minus ~15% other variable costs) — replace it with Bootle's measured figure when you have it. Applied to net AOV, so VAT is never counted as profit."
+              tip="Percent of NET (ex-VAT) revenue kept after ALL variable per-order costs — COGS, payment-processing fees (~2.5%), shipping / fulfillment, pick-pack, and a returns provision. This is NOT gross margin (COGS only): an extra ad-driven sale incurs those other costs too, so contribution margin is what actually decides whether the sale pays for its ad cost. Using gross margin would overstate profit and make break-even CPA look too easy. Defaults to ~45%, the engine-measured whole-business blend (shipping-inclusive, free-ship-weighted, after returns) from the BOM margin engine. Applied to net AOV, so VAT is never counted as profit."
             />
             <NumField
               label="VAT rate (%)"
