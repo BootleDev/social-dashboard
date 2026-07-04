@@ -20,6 +20,8 @@ interface PlanningPanelProps {
   timezone: string;
   /** Selected date range (nullable bounds = All Time). Used by Plan vs actual. */
   range: { start: string | null; end: string | null };
+  /** Global platform filter (lowercase keys; empty = all). Scopes the plan. */
+  selectedPlatforms?: Set<string>;
   /** Active "Plan from this →" carry from Insights; drives the heatmap filter. */
   planSelection?: PlanSelection | null;
   /** Clear the active selection. */
@@ -58,6 +60,7 @@ export default function PlanningPanel({
   competitorError,
   timezone,
   range,
+  selectedPlatforms,
   planSelection = null,
   onClearPlanSelection,
 }: PlanningPanelProps) {
@@ -101,7 +104,7 @@ export default function PlanningPanel({
           title="Plan vs actual"
           subtitle="Shipped content measured against the rolling target plan (src/config/contentPlan.json). A slot is hit when a post of the same platform + post type ships in the same ISO week; pillar is a soft signal. Hit rate, weekly adherence, planned-vs-actual pillar mix, and the slots you miss most."
         >
-          <PlanVsActual posts={posts} range={range} timezone={timezone} />
+          <PlanVsActual posts={posts} range={range} timezone={timezone} selectedPlatforms={selectedPlatforms} />
         </Section>
       )}
 

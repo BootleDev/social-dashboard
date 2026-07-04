@@ -5,6 +5,7 @@ import {
   weekKeysInRange,
   expandTargets,
   comparePlanToActual,
+  filterPlanPlatforms,
   dateForWeekday,
   buildCalendar,
   type ContentPlan,
@@ -616,5 +617,153 @@ describe("buildCalendar", () => {
     const weeks = buildCalendar(BASE_PLAN, posts, range, "UTC");
     const allDates = weeks.flatMap((w) => w.days.map((d) => d.date));
     expect(allDates.every((d) => d >= range.start && d <= range.end)).toBe(true);
+  });
+});
+
+// ── filterPlanPlatforms ──────────────────────────────────────────────────────
+
+describe("filterPlanPlatforms", () => {
+  const MULTI_PLAN: ContentPlan = {
+    effectiveFrom: "2026-05-01",
+    weekly: [
+      { day: "Mon", platform: "instagram", postType: "reel" },
+      { day: "Tue", platform: "pinterest" },
+      { day: "Wed", platform: "facebook", postType: "video" },
+    ],
+    overrides: [
+      { date: "2026-06-05", day: "Fri", platform: "pinterest" },
+      { date: "2026-06-06", day: "Sat", platform: "instagram", postType: "static" },
+    ],
+  };
+
+  it("returns the plan unchanged for an empty selection (= all platforms)", () => {
+    const out = filterPlanPlatforms(MULTI_PLAN, new Set());
+    expect(out.weekly).toHaveLength(3);
+    expect(out.overrides).toHaveLength(2);
+  });
+
+  it("returns fresh, non-shared arrays even for an empty selection", () => {
+    // The all-platforms path must still hand back arrays the caller owns, so
+    // a downstream mutation can never reach back into the source plan.
+    const out = filterPlanPlatforms(MULTI_PLAN, new Set());
+    expect(out.weekly).not.toBe(MULTI_PLAN.weekly);
+    expect(out.overrides).not.toBe(MULTI_PLAN.overrides);
+  });
+
+  it("keeps only the selected platforms' weekly slots and overrides", () => {
+    const out = filterPlanPlatforms(MULTI_PLAN, new Set(["instagram"]));
+    expect(out.weekly.map((s) => s.platform)).toEqual(["instagram"]);
+    expect(out.overrides.map((s) => s.platform)).toEqual(["instagram"]);
+  });
+
+  it("supports multi-platform selections", () => {
+    const out = filterPlanPlatforms(
+      MULTI_PLAN,
+      new Set(["pinterest", "facebook"]),
+    );
+    expect(out.weekly.map((s) => s.platform).sort()).toEqual([
+      "facebook",
+      "pinterest",
+    ]);
+  });
+
+  it("does not mutate the input plan", () => {
+    filterPlanPlatforms(MULTI_PLAN, new Set(["instagram"]));
+    expect(MULTI_PLAN.weekly).toHaveLength(3);
+    expect(MULTI_PLAN.overrides).toHaveLength(2);
+  });
+});
+
+// ── comparePlanToActual: perPlatform rollup ─────────────────────────────────
+
+describe("comparePlanToActual — perPlatform", () => {
+  // 2026-06-01 is a Monday; week 2026-W23. Next week starts 2026-06-08 (W24).
+  const PLAN: ContentPlan = {
+    effectiveFrom: "2026-05-01",
+    weekly: [
+      { day: "Mon", platform: "instagram", postType: "reel" },
+      { day: "Wed", platform: "instagram", postType: "carousel" },
+      { day: "Tue", platform: "pinterest" },
+      // Informational slots must never count toward any platform's numbers.
+      { day: "Thu", platform: "instagram", postType: "story", informational: true },
+    ],
+    overrides: [],
+  };
+
+  it("rolls up planned/hit/missed and hitRate per platform", () => {
+    const posts = [
+      post({ platform: "instagram", postType: "reel", publishedAt: "2026-06-01T10:00:00.000Z" }),
+      post({ platform: "pinterest", postType: "static", publishedAt: "2026-06-02T10:00:00.000Z" }),
+    ];
+    const r = comparePlanToActual(PLAN, posts, {
+      start: "2026-06-01",
+      end: "2026-06-07",
+    });
+
+    const ig = r.perPlatform.find((p) => p.platform === "instagram")!;
+    expect(ig.planned).toBe(2); // reel + carousel; the story slot is informational
+    expect(ig.hit).toBe(1);
+    expect(ig.missed).toBe(1);
+    expect(ig.hitRate).toBeCloseTo(0.5, 6);
+
+    const pin = r.perPlatform.find((p) => p.platform === "pinterest")!;
+    expect(pin.planned).toBe(1);
+    expect(pin.hit).toBe(1);
+    expect(pin.hitRate).toBe(1);
+  });
+
+  it("counts unplanned posts per platform, including platforms with no slots", () => {
+    const posts = [
+      post({ platform: "instagram", postType: "reel", publishedAt: "2026-06-01T10:00:00.000Z" }),
+      post({ platform: "instagram", postType: "reel", publishedAt: "2026-06-02T10:00:00.000Z" }),
+      post({ platform: "facebook", postType: "video", publishedAt: "2026-06-03T10:00:00.000Z" }),
+    ];
+    const r = comparePlanToActual(PLAN, posts, {
+      start: "2026-06-01",
+      end: "2026-06-07",
+    });
+
+    const ig = r.perPlatform.find((p) => p.platform === "instagram")!;
+    expect(ig.unplanned).toBe(1); // second reel exceeds the single reel slot
+
+    // Facebook has no plan slots but shipped a post: it must still appear.
+    const fb = r.perPlatform.find((p) => p.platform === "facebook")!;
+    expect(fb.planned).toBe(0);
+    expect(fb.unplanned).toBe(1);
+    expect(fb.hitRate).toBe(0);
+  });
+
+  it("provides a per-week adherence series for each platform", () => {
+    const posts = [
+      // IG hits its Mon reel in W23 only; W24 is a full IG miss.
+      post({ platform: "instagram", postType: "reel", publishedAt: "2026-06-01T10:00:00.000Z" }),
+      // Pinterest hits both weeks.
+      post({ platform: "pinterest", postType: "static", publishedAt: "2026-06-02T10:00:00.000Z" }),
+      post({ platform: "pinterest", postType: "video", publishedAt: "2026-06-09T10:00:00.000Z" }),
+    ];
+    const r = comparePlanToActual(PLAN, posts, {
+      start: "2026-06-01",
+      end: "2026-06-14",
+    });
+
+    const ig = r.perPlatform.find((p) => p.platform === "instagram")!;
+    expect(ig.perWeek).toHaveLength(2);
+    expect(ig.perWeek[0].hit).toBe(1);
+    expect(ig.perWeek[0].planned).toBe(2);
+    expect(ig.perWeek[1].hit).toBe(0);
+
+    const pin = r.perPlatform.find((p) => p.platform === "pinterest")!;
+    expect(pin.perWeek.map((w) => w.hitRate)).toEqual([1, 1]);
+  });
+
+  it("orders platforms by planned volume descending, then name", () => {
+    const r = comparePlanToActual(PLAN, [], {
+      start: "2026-06-01",
+      end: "2026-06-07",
+    });
+    expect(r.perPlatform.map((p) => p.platform)).toEqual([
+      "instagram",
+      "pinterest",
+    ]);
   });
 });
