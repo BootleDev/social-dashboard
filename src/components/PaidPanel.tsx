@@ -299,7 +299,9 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
   const candidates = useMemo(() => {
     const parsed = posts.map(toPost);
     // Pass nowMs so recent creative outranks stale (recency decay). Captured at
-    // render; candidates re-rank if the post set or sort changes.
+    // render; candidates re-rank if the post set or sort changes. Date.now() here
+    // is an intentional recency snapshot, not a stability bug.
+    // eslint-disable-next-line react-hooks/purity
     return rankCandidates(parsed, { sortBy: candidateSort, nowMs: Date.now() }).slice(0, 12);
   }, [posts, candidateSort]);
 
@@ -335,7 +337,9 @@ export default function PaidPanel({ posts }: PaidPanelProps) {
   const latestSpendDate = baseline?.flags.latestSpendDate;
   const spendAgeDays =
     latestSpendDate !== undefined
-      ? Math.round((Date.now() - Date.parse(`${latestSpendDate}T00:00:00Z`)) / 86_400_000)
+      ? // Date.now() here is an intentional staleness snapshot, not a stability bug.
+        // eslint-disable-next-line react-hooks/purity
+        Math.round((Date.now() - Date.parse(`${latestSpendDate}T00:00:00Z`)) / 86_400_000)
       : undefined;
   const spendIsStale = spendAgeDays !== undefined && spendAgeDays > 30;
 

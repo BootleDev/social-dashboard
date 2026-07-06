@@ -20,6 +20,8 @@ export function useTimezone(): [string, (tz: string) => void] {
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
+      // Post-mount localStorage restore; browser-only API, cannot run during render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved !== null) setTimezoneState(saved);
     } catch {
       // localStorage unavailable (e.g. SSR, private browsing) — silently

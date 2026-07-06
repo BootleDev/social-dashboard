@@ -88,6 +88,8 @@ export function useSubNav<K extends string>(
     try {
       const raw = window.localStorage.getItem(STORAGE_PREFIX + storageKey);
       if (raw && (validKeys as readonly string[]).includes(raw)) {
+        // Post-mount localStorage restore; browser-only API, cannot run during render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setValueState(raw as K);
       }
     } catch {
