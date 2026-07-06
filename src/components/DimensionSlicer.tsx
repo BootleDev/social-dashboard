@@ -356,6 +356,8 @@ export default function DimensionSlicer({ posts }: DimensionSlicerProps) {
   useEffect(() => {
     if (!dimAvailable[dimIndex]) {
       const firstAvail = dimAvailable.findIndex(Boolean);
+      // Fallback-to-available-option sync; only fires when availability changes.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (firstAvail >= 0) setDimIndex(firstAvail);
     }
     if (!metricAvailable[metricIndex]) {

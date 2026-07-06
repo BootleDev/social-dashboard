@@ -136,6 +136,8 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    // Initial-mount data fetch; fetchData sets loading/error/data state internally.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, [fetchData]);
 
@@ -143,6 +145,8 @@ export default function DashboardPage() {
   // inside Planning now, under "Competitor signal").
   useEffect(() => {
     if (tab !== "planning" || competitorFetched) return;
+    // Lazy-fetch trigger; sets its own loading/error state as the fetch progresses.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCompetitorLoading(true);
     setCompetitorError("");
     fetch("/api/competitors")
@@ -276,6 +280,8 @@ export default function DashboardPage() {
   // Initialize selected platforms when data loads (all on by default)
   useEffect(() => {
     if (activePlatforms.length > 0 && selectedPlatforms.size === 0) {
+      // One-time default-selection sync when platform data first loads.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedPlatforms(new Set(activePlatforms));
     }
   }, [activePlatforms, selectedPlatforms.size]);

@@ -24,6 +24,8 @@ export function usePersistedState<T>(
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(PREFIX + key);
+      // Post-mount localStorage restore; browser-only API, cannot run during render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (raw !== null) setValueState(JSON.parse(raw) as T);
     } catch {
       // No storage / parse error — keep the initial value.

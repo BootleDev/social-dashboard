@@ -238,8 +238,8 @@ export default function AudienceDemographics({
           Snapshot: {latestDate} · {AUDIENCE_TYPE_LABEL.follower}
           {!hasEngaged && (
             <>
-              {" "}· Engaged-audience data unavailable (account below Meta's
-              100-engagement reporting threshold)
+              {" "}· Engaged-audience data unavailable (account below
+              Meta&apos;s 100-engagement reporting threshold)
             </>
           )}
         </span>

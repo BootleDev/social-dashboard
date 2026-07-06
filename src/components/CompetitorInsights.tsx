@@ -207,6 +207,14 @@ export default function CompetitorInsights({
     [records],
   );
 
+  // Views distribution across all scraped competitor content — powers the
+  // Stats panels on the four competitor charts. Hoisted above the early
+  // returns below so this hook always runs in the same order (Rules of Hooks).
+  const viewsStats = useMemo(
+    () => describe(records.map((r) => num(r.fields["Views"]))),
+    [records],
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -244,13 +252,6 @@ export default function CompetitorInsights({
       </div>
     );
   }
-
-  // Views distribution across all scraped competitor content — powers the
-  // Stats panels on the four competitor charts.
-  const viewsStats = useMemo(
-    () => describe(records.map((r) => num(r.fields["Views"]))),
-    [records],
-  );
 
   return (
     <div className="space-y-6">

@@ -444,6 +444,8 @@ export default function TaggingPage() {
   }, []);
 
   useEffect(() => {
+    // Initial-mount data fetch; fetchPosts sets loading/error/data state internally.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPosts();
   }, [fetchPosts]);
 

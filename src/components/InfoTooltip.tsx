@@ -70,6 +70,8 @@ export default function InfoTooltip({ text, label }: InfoTooltipProps) {
   // never touches document. This is the real SSR guard; "use client" alone does
   // not prevent this component from being rendered during SSR by a parent.
   useEffect(() => {
+    // Post-mount SSR guard flag; must flip exactly once after hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
 

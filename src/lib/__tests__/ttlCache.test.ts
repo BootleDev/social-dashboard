@@ -3,7 +3,7 @@ import { createTtlCache } from "../ttlCache";
 
 describe("createTtlCache", () => {
   it("calls the loader on a cold miss and returns its value", async () => {
-    let now = 1000;
+    const now = 1000;
     const cache = createTtlCache({ ttlMs: 100, clock: () => now });
     const loader = vi.fn().mockResolvedValue(["a"]);
 
@@ -64,7 +64,7 @@ describe("createTtlCache", () => {
   });
 
   it("keys entries independently", async () => {
-    let now = 1000;
+    const now = 1000;
     const cache = createTtlCache({ ttlMs: 100, clock: () => now });
     const a = await cache.get("a", () => Promise.resolve(["A"]));
     const b = await cache.get("b", () => Promise.resolve(["B"]));
@@ -73,7 +73,7 @@ describe("createTtlCache", () => {
   });
 
   it("does not cache a rejected loader (failure is not memoized)", async () => {
-    let now = 1000;
+    const now = 1000;
     const cache = createTtlCache({ ttlMs: 100, clock: () => now });
     const loader = vi
       .fn()
@@ -88,7 +88,7 @@ describe("createTtlCache", () => {
   });
 
   it("dedupes concurrent loads for the same key (single in-flight loader)", async () => {
-    let now = 1000;
+    const now = 1000;
     const cache = createTtlCache({ ttlMs: 100, clock: () => now });
     let resolve!: (v: string[]) => void;
     const loader = vi.fn().mockReturnValue(
