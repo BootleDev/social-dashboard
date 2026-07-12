@@ -14,8 +14,12 @@ import pg from "pg";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { runAllChecks } from "../src/lib/correctnessChecks.ts";
+import { runAllChecks, checkWindowFor } from "../src/lib/correctnessChecks.ts";
 import { fetchMetaReachWindow } from "./lib/metaReach.mjs";
+
+// Platform names come back from the DB and are interpolated into the window SQL below.
+// They are ours, not user input — but quote them properly anyway rather than trusting that.
+const lit = (v) => "'" + String(v).replace(/'/g, "''") + "'";
 
 const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL;
 if (!SUPABASE_DB_URL) {
@@ -61,8 +65,32 @@ try {
     table: r.tbl, ageHours: r.age_h === null ? null : Number(r.age_h),
   }));
 
-  // 2) Recent SETTLED account-grain rows (today-16 .. today-3) for the value/gap checks.
-  const factsRows = (await pool.query(
+  // 1b) WEBDEV-536: which platforms are LIVE in the table, and how stale is each one's
+  // writer? account_daily_facts has FOUR writers, so the table-level freshness above cannot
+  // see any single one of them die. "Live" = wrote at all in the last 60 days, so a platform
+  // we genuinely retire ages out instead of alarming forever.
+  const platformFreshness = (await pool.query(
+    `select platform, extract(epoch from (now()-max(updated_at)))/3600.0 as age_h
+       from social.account_daily_facts
+      where date >= (current_date - interval '60 days')
+      group by platform
+      order by platform`,
+  )).rows.map((r) => ({ platform: r.platform, ageHours: r.age_h === null ? null : Number(r.age_h) }));
+  const livePlatforms = platformFreshness.map((r) => r.platform);
+
+  // 2) Recent SETTLED account-grain rows for the value/gap checks — PER-PLATFORM window
+  // (WEBDEV-536). A row is only `settled` once it is older than its platform's settle window
+  // (FB=3d, IG=21d), so a single fixed band silently excluded Instagram entirely: it could
+  // never be both settled (>21d) and inside the old 3-16d band. The band is now derived from
+  // the same settle constants, offset past each platform's settle window.
+  const windowClauses = livePlatforms
+    .map((p) => {
+      const { minAgeDays, maxAgeDays } = checkWindowFor(p);
+      return `(platform = ${lit(p)} and date >= (current_date - interval '${maxAgeDays} days') and date <= (current_date - interval '${minAgeDays} days'))`;
+    })
+    .join("\n            or ");
+
+  const factsRows = livePlatforms.length === 0 ? [] : (await pool.query(
     `select platform, to_char(date,'YYYY-MM-DD') as date,
             reach::int as reach, impressions::int as impressions, followers::int as followers,
             engagement::int as engagement, engagement_rate::float8 as engagement_rate,
@@ -71,8 +99,7 @@ try {
             coalesce(is_post_day, false) as is_post_day
        from social.account_daily_facts
       where data_status='settled'
-        and date >= (current_date - interval '16 days')
-        and date <= (current_date - interval '3 days')
+        and (${windowClauses})
       order by platform, date`,
   )).rows.map((r) => ({ table: "account_daily_facts", ...r }));
 
@@ -107,6 +134,7 @@ try {
 
   const violations = runAllChecks({
     freshness: fresh, facts: factsRows, freshnessMaxAgeHours: FRESHNESS, platforms, apiReach,
+    platformFreshness, livePlatforms,
   });
   // A failed reconciliation fetch is itself a LOUD failure — a long-lived system-user token
   // should not fail; if it does, the source-truth check is silently dark (the very class
@@ -119,7 +147,16 @@ try {
     });
   }
 
-  console.log(`[correctness] checked ${fresh.length} tables for freshness + ${factsRows.length} settled rows across ${platforms.join(", ")}; reconciled ${apiReach.length} Meta reach point(s)`);
+  // Say EXACTLY what was covered, per platform. A bare row count hid WEBDEV-536 for 9 days:
+  // "PASS" looked identical whether Instagram was checked or silently absent.
+  const perPlatform = livePlatforms
+    .map((p) => {
+      const n = factsRows.filter((r) => r.platform === p).length;
+      const w = checkWindowFor(p);
+      return `${p}=${n} row(s) [age ${w.minAgeDays}-${w.maxAgeDays}d]`;
+    })
+    .join(", ");
+  console.log(`[correctness] checked ${fresh.length} tables for freshness + ${factsRows.length} settled rows — coverage: ${perPlatform}; reconciled ${apiReach.length} Meta reach point(s)`);
 
   const fails = violations.filter((v) => v.severity === "fail");
   if (fails.length === 0) {
