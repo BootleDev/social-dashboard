@@ -28,15 +28,27 @@
  * writers (and hasAllExpectedPlatforms
  * case-folds the read side defensively).
  */
+// WEBDEV-537 first added "tiktok" here; adversarial review then showed that was the WRONG
+// place to catch it, so it is deliberately NOT in this list. Reasoning, recorded so nobody
+// "fixes" it back:
+//
+//   This gate is FATAL. getAccountDailyFacts() throws when an expected platform is missing,
+//   and getAllDashboardData() awaits it inside a Promise.all — so one missing platform takes
+//   the WHOLE dashboard down, Instagram/Facebook/Pinterest KPIs included. That trade is
+//   right for the three core writers (their absence means a broken read, and serving partial
+//   KPIs would be worse). It is WRONG for TikTok: it is sourced from a third-party scraper
+//   (ScrapeCreators, not an official API — historically the most brittle of the four), and a
+//   TikTok hiccup must not black out every other platform's numbers.
+//
+//   TikTok's absence is NOT silent, which was the original worry: the correctness monitor
+//   now catches a dead TikTok writer LOUDLY via checkPlatformFreshness (per-platform, so a
+//   dead writer can't hide behind the other three keeping the table fresh) and
+//   checkPlatformCoverage (WEBDEV-536). The alarm belongs there — in the monitor — not in a
+//   gate that can 500 the dashboard.
 export const EXPECTED_ACCOUNT_PLATFORMS = [
   "instagram",
   "facebook",
   "pinterest",
-  // WEBDEV-537: TikTok became a fourth writer on 2026-07-03 (TikTok Data Refresher) and was
-  // never added here — so the completeness guard would have silently tolerated TikTok
-  // vanishing from a read, which is exactly the failure this list exists to prevent. The
-  // MAINTENANCE note above said to add it; nobody did. Adding it now.
-  "tiktok",
 ] as const;
 
 /**

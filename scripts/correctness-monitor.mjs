@@ -69,28 +69,39 @@ try {
   // writer? account_daily_facts has FOUR writers, so the table-level freshness above cannot
   // see any single one of them die. "Live" = wrote at all in the last 60 days, so a platform
   // we genuinely retire ages out instead of alarming forever.
-  const platformFreshness = (await pool.query(
-    `select platform, extract(epoch from (now()-max(updated_at)))/3600.0 as age_h
+  // `oldest_age_days` is what lets coverage tell "the monitor is blind to this platform"
+  // apart from "this platform is 3 days old and cannot have a settled row yet".
+  const platformRows = (await pool.query(
+    `select platform,
+            extract(epoch from (now()-max(updated_at)))/3600.0 as age_h,
+            (current_date - min(date))::int as oldest_age_days
        from social.account_daily_facts
       where date >= (current_date - interval '60 days')
       group by platform
       order by platform`,
-  )).rows.map((r) => ({ platform: r.platform, ageHours: r.age_h === null ? null : Number(r.age_h) }));
-  const livePlatforms = platformFreshness.map((r) => r.platform);
+  )).rows;
+  const platformFreshness = platformRows.map((r) => ({
+    platform: r.platform, ageHours: r.age_h === null ? null : Number(r.age_h),
+  }));
+  const livePlatforms = platformRows.map((r) => ({
+    platform: r.platform,
+    oldestRowAgeDays: r.oldest_age_days === null ? null : Number(r.oldest_age_days),
+  }));
+  const livePlatformNames = platformRows.map((r) => r.platform);
 
   // 2) Recent SETTLED account-grain rows for the value/gap checks — PER-PLATFORM window
   // (WEBDEV-536). A row is only `settled` once it is older than its platform's settle window
   // (FB=3d, IG=21d), so a single fixed band silently excluded Instagram entirely: it could
   // never be both settled (>21d) and inside the old 3-16d band. The band is now derived from
   // the same settle constants, offset past each platform's settle window.
-  const windowClauses = livePlatforms
+  const windowClauses = livePlatformNames
     .map((p) => {
       const { minAgeDays, maxAgeDays } = checkWindowFor(p);
       return `(platform = ${lit(p)} and date >= (current_date - interval '${maxAgeDays} days') and date <= (current_date - interval '${minAgeDays} days'))`;
     })
     .join("\n            or ");
 
-  const factsRows = livePlatforms.length === 0 ? [] : (await pool.query(
+  const factsRows = livePlatformNames.length === 0 ? [] : (await pool.query(
     `select platform, to_char(date,'YYYY-MM-DD') as date,
             reach::int as reach, impressions::int as impressions, followers::int as followers,
             engagement::int as engagement, engagement_rate::float8 as engagement_rate,
@@ -149,7 +160,7 @@ try {
 
   // Say EXACTLY what was covered, per platform. A bare row count hid WEBDEV-536 for 9 days:
   // "PASS" looked identical whether Instagram was checked or silently absent.
-  const perPlatform = livePlatforms
+  const perPlatform = livePlatformNames
     .map((p) => {
       const n = factsRows.filter((r) => r.platform === p).length;
       const w = checkWindowFor(p);

@@ -18,15 +18,16 @@ function platformRow(platform: string) {
 }
 
 describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard", () => {
-  it("EXPECTED_ACCOUNT_PLATFORMS is exactly the FOUR account writers' platforms (WEBDEV-537 added tiktok)", () => {
-    // TikTok became a fourth ADF writer on 2026-07-03 and was never added here, so the
-    // completeness guard would have silently tolerated TikTok vanishing from a read —
-    // exactly what this list exists to prevent.
+  it("EXPECTED_ACCOUNT_PLATFORMS is the THREE core writers — tiktok is deliberately EXCLUDED", () => {
+    // This gate is FATAL (a missing platform throws inside a Promise.all and takes the whole
+    // dashboard down). That is right for the three core writers and WRONG for TikTok, which
+    // is scraper-sourced and must not black out IG/FB/Pinterest. A dead TikTok writer is
+    // caught LOUDLY by the correctness monitor instead (checkPlatformFreshness + coverage,
+    // WEBDEV-536). Do not "fix" tiktok back into this list.
     expect([...EXPECTED_ACCOUNT_PLATFORMS].sort()).toEqual([
       "facebook",
       "instagram",
       "pinterest",
-      "tiktok",
     ]);
   });
 
@@ -36,7 +37,6 @@ describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard
       platformRow("instagram"),
       platformRow("facebook"),
       platformRow("pinterest"),
-      platformRow("tiktok"),
     ];
     expect(hasAllExpectedPlatforms(rows)).toBe(true);
   });
@@ -48,9 +48,11 @@ describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard
     expect(hasAllExpectedPlatforms(rows)).toBe(false);
   });
 
-  it("FALSE when the TikTok writer's platform is missing — WEBDEV-537 (this read was silently ACCEPTED before)", () => {
+  it("a missing TikTok does NOT fail the read — it must never black out the core platforms", () => {
+    // Deliberate: TikTok's absence is caught by the correctness monitor, not by 500ing the
+    // dashboard. See the comment on EXPECTED_ACCOUNT_PLATFORMS.
     const rows = [platformRow("instagram"), platformRow("facebook"), platformRow("pinterest")];
-    expect(hasAllExpectedPlatforms(rows)).toBe(false);
+    expect(hasAllExpectedPlatforms(rows)).toBe(true);
   });
 
   it("FALSE on an empty result (so an empty Supabase read is refused by the caller)", () => {
@@ -62,7 +64,6 @@ describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard
       platformRow("Instagram"),
       platformRow("FACEBOOK"),
       platformRow("  pinterest  "),
-      platformRow(" TikTok "),
     ];
     expect(hasAllExpectedPlatforms(rows)).toBe(true);
   });
