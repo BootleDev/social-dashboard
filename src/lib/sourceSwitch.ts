@@ -3,22 +3,23 @@
  * it is unit-testable without importing the `server-only` / pg chain that
  * airtable.ts pulls in (same rationale as ./supabaseMappers).
  *
- * account_daily_facts is written by TWO independent n8n refreshers (Social:
- * instagram + facebook; Pinterest: pinterest), so a Supabase-side write gap on
- * ONE writer would leave the table partially populated. getAccountDailyFacts
- * requires every expected platform to be present before serving. WEBDEV-216
- * retired the Airtable fallback, so an incomplete read now THROWS (fail-loud)
- * instead of falling back, rather than silently serving a platform's dropped
- * KPIs.
+ * account_daily_facts is written by THREE independent n8n refreshers (Social:
+ * instagram + facebook; Pinterest: pinterest; TikTok: tiktok), so a Supabase-side
+ * write gap on ONE writer would leave the table partially populated.
+ * getAccountDailyFacts requires every expected platform to be present before
+ * serving. WEBDEV-216 retired the Airtable fallback, so an incomplete read now
+ * THROWS (fail-loud) instead of falling back, rather than silently serving a
+ * platform's dropped KPIs.
  */
 
 /**
  * Platforms that MUST be present in a healthy account_daily_facts read
- * (WEBDEV-228). account_daily_facts is written by TWO independent n8n writers —
- * the Social Data Refresher (instagram + facebook) and the Pinterest Data
- * Refresher (pinterest) — so a Supabase-side write gap on ONE writer would leave
- * the table partially populated. A bare `rows.length > 0` would happily serve
- * that partial set and silently drop a platform's KPIs.
+ * (WEBDEV-228). account_daily_facts is written by THREE independent n8n writers —
+ * the Social Data Refresher (instagram + facebook), the Pinterest Data Refresher
+ * (pinterest), and the TikTok Data Refresher (tiktok) — so a Supabase-side write
+ * gap on ONE writer would leave the table partially populated. A bare
+ * `rows.length > 0` would happily serve that partial set and silently drop a
+ * platform's KPIs.
  *
  * MAINTENANCE: keep this in sync with the platforms the ADF refreshers write.
  * If a new platform is added to the Social/Pinterest Data Refresher write path,
@@ -31,6 +32,11 @@ export const EXPECTED_ACCOUNT_PLATFORMS = [
   "instagram",
   "facebook",
   "pinterest",
+  // WEBDEV-537: TikTok became a fourth writer on 2026-07-03 (TikTok Data Refresher) and was
+  // never added here — so the completeness guard would have silently tolerated TikTok
+  // vanishing from a read, which is exactly the failure this list exists to prevent. The
+  // MAINTENANCE note above said to add it; nobody did. Adding it now.
+  "tiktok",
 ] as const;
 
 /**

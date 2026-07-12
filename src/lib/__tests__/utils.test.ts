@@ -1497,3 +1497,48 @@ describe("postEngagement", () => {
     ).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// WEBDEV-537: an absent per-metric Source on an account_daily_facts row means
+// "no such metric here" (em-dash), NOT "real" (which summed count(null) -> 0).
+// The legacy ER-Type fallback must apply ONLY to legacy-shaped rows.
+// ---------------------------------------------------------------------------
+describe("WEBDEV-537: honest absence vs false zero", () => {
+  // A real TikTok account_daily_facts row: reach + reach_source are SQL NULL, so
+  // buildFields omits both keys. ADF rows always carry "Snapshot Key".
+  const tiktokAdfRow = {
+    id: "tiktok|2026-07-08",
+    createdTime: "2026-07-08T00:00:00.000Z",
+    fields: { "Snapshot Key": "tiktok|2026-07-08", Platform: "tiktok", Date: "2026-07-08", Followers: 11 },
+  } as unknown as AirtableRecord;
+
+  it("TikTok's NULL reach is NOT real -> renders as an em-dash, never summed as 0", () => {
+    expect(hasRealReach(tiktokAdfRow)).toBe(false);
+    // The bug: hasRealReach was true, so the row was summed and count(null) -> 0 -> "Reach: 0".
+    expect(sumReach([tiktokAdfRow])).toBe(0); // sum of an empty real-set is still 0...
+    expect([tiktokAdfRow].filter(hasRealReach)).toHaveLength(0); // ...but the row is EXCLUDED,
+    // so callers take their `realRows.length > 0 ? sum : null` branch -> null -> "—".
+  });
+
+  it("an ADF row WITH a real Reach Source is still real (no over-correction)", () => {
+    const ig = {
+      id: "instagram|2026-07-08",
+      createdTime: "2026-07-08T00:00:00.000Z",
+      fields: { "Snapshot Key": "instagram|2026-07-08", Platform: "instagram", Reach: 1150, "Reach Source": "daily_real" },
+    } as unknown as AirtableRecord;
+    expect(hasRealReach(ig)).toBe(true);
+    expect(sumReach([ig])).toBe(1150);
+  });
+
+  it("LEGACY daily_account_metrics rows keep the old ER-Type fallback (no regression)", () => {
+    // Legacy rows have NO Snapshot Key and NO Source columns; an untagged legacy row
+    // predates provenance tagging and must still count as real.
+    const legacy = {
+      id: "rec1",
+      createdTime: "2026-05-01T00:00:00.000Z",
+      fields: { Platform: "instagram", Date: "2026-05-01", Reach: 500 },
+    } as unknown as AirtableRecord;
+    expect(hasRealReach(legacy)).toBe(true);
+    expect(sumReach([legacy])).toBe(500);
+  });
+});
