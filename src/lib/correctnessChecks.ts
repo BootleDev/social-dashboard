@@ -60,6 +60,46 @@ const REACH_UNAVAILABLE: Set<string> = new Set(
   ),
 );
 
+// ---------------------------------------------------------------------------
+// WEBDEV-536 — per-platform settle windows.
+//
+// The Social Data Refresher marks a row `settled` only once it is OLDER than that
+// platform's settle window (WEBDEV-352): FB=3d, IG=21d (IG Reels engagement genuinely
+// accrues for weeks). The monitor previously selected settled rows with ONE fixed band
+// for all platforms (today-16 .. today-3) — which an IG row can NEVER satisfy: it is not
+// settled until it is >21d old, by which point it is already past the 16d ceiling. The two
+// windows do not intersect, so Instagram silently contributed ZERO rows and every IG
+// invariant passed vacuously while the monitor reported PASS.
+//
+// So the checked window is now derived PER PLATFORM from the same settle constants. These
+// mirror the writer's FB_SETTLE_DAYS / IG_SETTLE_DAYS; they are duplicated across repo
+// boundaries (the writer is an n8n Code node), which is exactly the drift that caused this
+// bug — so checkPlatformCoverage() below fails LOUD if any platform stops landing rows in
+// its window, whatever the reason. That guard, not this table, is the real protection.
+// ---------------------------------------------------------------------------
+export const SETTLE_DAYS_BY_PLATFORM: Record<string, number> = {
+  instagram: 21,
+  facebook: 3,
+  pinterest: 3,
+  tiktok: 3,
+};
+export const DEFAULT_SETTLE_DAYS = 3;
+/** How many days wide the checked band is, once offset past the platform's settle window. */
+export const CHECK_WINDOW_SPAN_DAYS = 14;
+
+export function settleDaysFor(platform: string): number {
+  return SETTLE_DAYS_BY_PLATFORM[platform] ?? DEFAULT_SETTLE_DAYS;
+}
+
+/**
+ * The inclusive [minAgeDays, maxAgeDays] band this platform's rows are checked in.
+ * A row is only `settled` at age > settle, so the band starts at settle+1.
+ */
+export function checkWindowFor(platform: string): { minAgeDays: number; maxAgeDays: number } {
+  const settle = settleDaysFor(platform);
+  return { minAgeDays: settle + 1, maxAgeDays: settle + CHECK_WINDOW_SPAN_DAYS };
+}
+
 export interface FreshnessRow {
   table: string;
   ageHours: number | null; // hours since max(updated_at); null = no rows
@@ -255,6 +295,65 @@ export function checkIsPostDayConsistency(rows: FactRow[]): Violation[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// WEBDEV-536 — the two guards that make the monitor honest about its own coverage.
+// A monitor that silently checks NOTHING and reports PASS is worse than no monitor:
+// it manufactures false confidence. These two checks make "I am not looking at X"
+// a LOUD failure instead of an invisible one.
+// ---------------------------------------------------------------------------
+
+/** Hours since this platform's most recent write to account_daily_facts. */
+export interface PlatformFreshnessRow {
+  platform: string;
+  ageHours: number | null; // null = platform has no rows at all
+}
+
+/**
+ * 11) PER-PLATFORM freshness / dead-writer.
+ *
+ * checkFreshness() takes ONE max(updated_at) over the whole table — and
+ * account_daily_facts has FOUR writers landing in it. So any one writer could die and the
+ * other three would keep the table's freshness green forever; the dead one is invisible.
+ * (Confirmed on the WEBDEV-535 review: a fully dead TikTok writer fired NO check at all.)
+ * Per-platform freshness is the check that actually catches a dead writer.
+ */
+export function checkPlatformFreshness(rows: PlatformFreshnessRow[], maxAgeHours = 48): Violation[] {
+  const out: Violation[] = [];
+  for (const r of rows) {
+    if (r.ageHours === null) {
+      out.push({ check: "platform-freshness", severity: "fail", detail: `account_daily_facts: platform ${r.platform} has no rows at all` });
+    } else if (r.ageHours > maxAgeHours) {
+      out.push({ check: "platform-freshness", severity: "fail", detail: `account_daily_facts: ${r.platform} stale ${r.ageHours.toFixed(1)}h (> ${maxAgeHours}h) — that platform's writer may be dead (the other writers keep the TABLE fresh, so table-level freshness cannot see this)` });
+    }
+  }
+  return out;
+}
+
+/**
+ * 12) COVERAGE: every platform that is live in the table must actually contribute rows to
+ *     the checked window. This is the guard that would have caught WEBDEV-536 on day one:
+ *     Instagram's 21d settle window vs the old fixed 3-16d check band meant IG could never
+ *     be checked, so every IG invariant passed vacuously and the monitor said PASS.
+ *
+ *     Fails LOUD whenever a platform silently drops out of coverage — whatever the cause
+ *     (a settle-window change, a band change, a writer that stopped, a renamed platform).
+ */
+export function checkPlatformCoverage(livePlatforms: string[], checkedRows: FactRow[]): Violation[] {
+  const out: Violation[] = [];
+  const checked = new Set(checkedRows.map((r) => r.platform));
+  for (const p of livePlatforms) {
+    if (!checked.has(p)) {
+      const w = checkWindowFor(p);
+      out.push({
+        check: "coverage",
+        severity: "fail",
+        detail: `account_daily_facts: ${p} has live rows but contributed ZERO rows to the checked window (settled, age ${w.minAgeDays}-${w.maxAgeDays}d) — the monitor is BLIND to this platform; its invariants are passing vacuously`,
+      });
+    }
+  }
+  return out;
+}
+
 export function enumerateDates(start: string, end: string): string[] {
   const out: string[] = [];
   let d = Date.parse(start + "T00:00:00Z");
@@ -310,9 +409,15 @@ export function runAllChecks(input: {
   freshnessMaxAgeHours: Record<string, number>;
   platforms: string[];
   apiReach?: ApiReachRow[];
+  // WEBDEV-536. Optional so existing callers/tests keep working; when the monitor supplies
+  // them, the coverage + per-platform-freshness guards run.
+  platformFreshness?: PlatformFreshnessRow[];
+  livePlatforms?: string[];
 }): Violation[] {
   return [
     ...checkFreshness(input.freshness, input.freshnessMaxAgeHours),
+    ...checkPlatformFreshness(input.platformFreshness ?? []),
+    ...checkPlatformCoverage(input.livePlatforms ?? [], input.facts),
     ...checkEngagementRateRange(input.facts),
     ...checkNonNegative(input.facts),
     ...checkNoInteriorGaps(input.facts, input.platforms),
