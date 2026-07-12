@@ -87,8 +87,13 @@ export const DEFAULT_SETTLE_DAYS = 3;
 /** How many days wide the checked band is, once offset past the platform's settle window. */
 export const CHECK_WINDOW_SPAN_DAYS = 14;
 
+/** Platform values are normalized before every lookup: a writer emitting 'Instagram' or
+ *  ' pinterest ' must not silently miss the settle map and fall back to the default window
+ *  (sourceSwitch.hasAllExpectedPlatforms learned this same lesson — keep them consistent). */
+export const normalizePlatform = (p: string): string => String(p ?? "").trim().toLowerCase();
+
 export function settleDaysFor(platform: string): number {
-  return SETTLE_DAYS_BY_PLATFORM[platform] ?? DEFAULT_SETTLE_DAYS;
+  return SETTLE_DAYS_BY_PLATFORM[normalizePlatform(platform)] ?? DEFAULT_SETTLE_DAYS;
 }
 
 /**
@@ -309,6 +314,17 @@ export interface PlatformFreshnessRow {
 }
 
 /**
+ * A platform that is live in account_daily_facts, plus how old its OLDEST row is — which is
+ * what tells us whether it has had time to produce a settled row inside its checked window
+ * yet. Without that, coverage cannot distinguish "blind to this platform" (a real bug) from
+ * "this platform is 3 days old" (arithmetic).
+ */
+export interface PlatformLiveness {
+  platform: string;
+  oldestRowAgeDays: number | null;
+}
+
+/**
  * 11) PER-PLATFORM freshness / dead-writer.
  *
  * checkFreshness() takes ONE max(updated_at) over the whole table — and
@@ -338,18 +354,27 @@ export function checkPlatformFreshness(rows: PlatformFreshnessRow[], maxAgeHours
  *     Fails LOUD whenever a platform silently drops out of coverage — whatever the cause
  *     (a settle-window change, a band change, a writer that stopped, a renamed platform).
  */
-export function checkPlatformCoverage(livePlatforms: string[], checkedRows: FactRow[]): Violation[] {
+export function checkPlatformCoverage(livePlatforms: PlatformLiveness[], checkedRows: FactRow[]): Violation[] {
   const out: Violation[] = [];
-  const checked = new Set(checkedRows.map((r) => r.platform));
-  for (const p of livePlatforms) {
-    if (!checked.has(p)) {
-      const w = checkWindowFor(p);
-      out.push({
-        check: "coverage",
-        severity: "fail",
-        detail: `account_daily_facts: ${p} has live rows but contributed ZERO rows to the checked window (settled, age ${w.minAgeDays}-${w.maxAgeDays}d) — the monitor is BLIND to this platform; its invariants are passing vacuously`,
-      });
-    }
+  const checked = new Set(checkedRows.map((r) => normalizePlatform(r.platform)));
+  for (const { platform, oldestRowAgeDays } of livePlatforms) {
+    const p = normalizePlatform(platform);
+    if (checked.has(p)) continue;
+
+    // RAMP-UP GRACE. A brand-new platform CANNOT have a settled row inside its window until
+    // its oldest row is at least `minAgeDays` old — that is arithmetic, not a coverage gap.
+    // Without this, onboarding a platform would red-CI the team every day for its whole
+    // settle window (22 days for an IG-cadence platform), which is precisely the
+    // alarm-fatigue this monitor exists to prevent. TikTok onboarded 9 days before this
+    // check shipped, so this is a certainty, not a hypothetical.
+    const w = checkWindowFor(p);
+    if (oldestRowAgeDays !== null && oldestRowAgeDays < w.minAgeDays) continue;
+
+    out.push({
+      check: "coverage",
+      severity: "fail",
+      detail: `account_daily_facts: ${p} has live rows old enough to be checked (oldest ${oldestRowAgeDays ?? "?"}d) but contributed ZERO rows to the checked window (settled, age ${w.minAgeDays}-${w.maxAgeDays}d) — the monitor is BLIND to this platform; its invariants are passing vacuously`,
+    });
   }
   return out;
 }
@@ -412,7 +437,7 @@ export function runAllChecks(input: {
   // WEBDEV-536. Optional so existing callers/tests keep working; when the monitor supplies
   // them, the coverage + per-platform-freshness guards run.
   platformFreshness?: PlatformFreshnessRow[];
-  livePlatforms?: string[];
+  livePlatforms?: PlatformLiveness[];
 }): Violation[] {
   return [
     ...checkFreshness(input.freshness, input.freshnessMaxAgeHours),

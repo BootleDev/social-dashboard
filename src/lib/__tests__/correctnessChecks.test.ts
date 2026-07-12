@@ -138,10 +138,14 @@ describe("WEBDEV-536: per-platform settle windows", () => {
 });
 
 describe("checkPlatformCoverage (WEBDEV-536 — the guard that catches a blind monitor)", () => {
-  it("REPRODUCES WEBDEV-536: a live platform contributing zero checked rows fails LOUD", () => {
+  // An established platform: its oldest row is far older than its window floor, so it has
+  // had every opportunity to contribute a settled row.
+  const live = (platform: string, oldestRowAgeDays = 60) => ({ platform, oldestRowAgeDays });
+
+  it("REPRODUCES WEBDEV-536: a live, established platform contributing zero checked rows fails LOUD", () => {
     // Exactly the production state: IG live in the table, but no IG row in the checked window.
     const v = checkPlatformCoverage(
-      ["facebook", "instagram", "pinterest", "tiktok"],
+      [live("facebook"), live("instagram"), live("pinterest"), live("tiktok")],
       [fact({ platform: "facebook" }), fact({ platform: "pinterest" }), fact({ platform: "tiktok" })],
     );
     expect(v).toHaveLength(1);
@@ -153,7 +157,7 @@ describe("checkPlatformCoverage (WEBDEV-536 — the guard that catches a blind m
 
   it("passes when every live platform contributes rows", () => {
     const v = checkPlatformCoverage(
-      ["facebook", "instagram"],
+      [live("facebook"), live("instagram")],
       [fact({ platform: "facebook" }), fact({ platform: "instagram" })],
     );
     expect(v).toEqual([]);
@@ -161,6 +165,27 @@ describe("checkPlatformCoverage (WEBDEV-536 — the guard that catches a blind m
 
   it("does not alarm on a platform that is no longer live in the table", () => {
     expect(checkPlatformCoverage([], [])).toEqual([]);
+  });
+
+  // RAMP-UP GRACE. Without this, onboarding a platform red-CIs the team every day for its
+  // whole settle window (22 days for an IG-cadence platform) — the very alarm-fatigue this
+  // monitor exists to prevent. TikTok onboarded 9 days before this check shipped.
+  it("does NOT alarm on a brand-new platform that is too young to have a settled row yet", () => {
+    // A 3-day-old TikTok: window floor is 4d, so zero checked rows is arithmetic, not blindness.
+    expect(checkPlatformCoverage([live("tiktok", 3)], [])).toEqual([]);
+    // A 10-day-old Instagram: floor is 22d — still legitimately too young.
+    expect(checkPlatformCoverage([live("instagram", 10)], [])).toEqual([]);
+  });
+
+  it("DOES alarm once a new platform is old enough to have contributed", () => {
+    // Same platform one day past its floor: silence would now be a real blind spot.
+    const v = checkPlatformCoverage([live("tiktok", 4)], []);
+    expect(v).toHaveLength(1);
+    expect(v[0].detail).toContain("tiktok");
+  });
+
+  it("normalizes platform casing/whitespace so a writer emitting 'Instagram' is still matched", () => {
+    expect(checkPlatformCoverage([live("Instagram")], [fact({ platform: " instagram " })])).toEqual([]);
   });
 });
 
