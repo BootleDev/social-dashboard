@@ -42,7 +42,23 @@ export const ALLOWLIST: AllowEntry[] = [
   { table: "account_daily_facts", platform: "instagram", metric: "views", reason: "IG Views is a newest-row-only 30-day aggregate (period_aggregate), not per-day — intentionally not asserted per-day/summable" },
   { table: "account_daily_facts", metric: "profile_views_30d|accounts_engaged_30d|interactions_30d|profile_links_taps_30d", reason: "unimplemented IG 30-day rollup scaffolding" },
   { table: "account_daily_facts", platform: "pinterest", metric: "follower_delta", reason: "Pinterest writer never computes it; delta=0" },
+  // WEBDEV-535: TikTok exposes NO account-level reach. The TikTok Data Refresher sources
+  // from ScrapeCreators, whose profile endpoint returns only stats.followerCount — there is
+  // no reach/impressions figure to fetch at any price (real TikTok account reach requires
+  // the TikTok Business API, which Bootle is not on). So the NULL is HONEST, not a dead
+  // writer, and checkCoreNonNull must not assert reach for it. followers IS asserted (below)
+  // — that's the column that would actually go NULL if the TikTok writer died.
+  { table: "account_daily_facts", platform: "tiktok", metric: "reach", reason: "TikTok exposes no account-level reach (ScrapeCreators profile = followers only; needs TikTok Business API)" },
 ];
+
+// Platforms whose account-level `reach` is structurally unavailable, derived from the
+// ALLOWLIST so the exemption has exactly one source of truth: to exempt a platform you must
+// add a reasoned ALLOWLIST entry, and deleting that entry re-arms the check automatically.
+const REACH_UNAVAILABLE: Set<string> = new Set(
+  ALLOWLIST.filter((a) => a.table === "account_daily_facts" && a.metric === "reach" && a.platform).map(
+    (a) => a.platform as string,
+  ),
+);
 
 export interface FreshnessRow {
   table: string;
@@ -148,10 +164,13 @@ export function checkNoInteriorGaps(rows: FactRow[], platforms: string[]): Viola
 // 5) Core account metrics that every platform genuinely has (reach, followers) must be
 //    non-null on present settled rows. (ER is intentionally excluded — see ALLOWLIST /
 //    WEBDEV-295/296.) This catches the clobber/dead-writer class on the universal metrics.
+//    `reach` is asserted for every platform EXCEPT those in REACH_UNAVAILABLE (WEBDEV-535),
+//    where no such metric exists at the source; `followers` is asserted for ALL platforms,
+//    including those, so a dead writer still fails loudly.
 export function checkCoreNonNull(rows: FactRow[]): Violation[] {
   const out: Violation[] = [];
   for (const r of rows) {
-    if (r.reach == null) out.push({ check: "core-null", severity: "fail", detail: `account_daily_facts: reach NULL at ${r.platform}|${r.date}` });
+    if (r.reach == null && !REACH_UNAVAILABLE.has(r.platform)) out.push({ check: "core-null", severity: "fail", detail: `account_daily_facts: reach NULL at ${r.platform}|${r.date}` });
     if (r.followers == null) out.push({ check: "core-null", severity: "fail", detail: `account_daily_facts: followers NULL at ${r.platform}|${r.date}` });
   }
   return out;
