@@ -18,11 +18,15 @@ function platformRow(platform: string) {
 }
 
 describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard", () => {
-  it("EXPECTED_ACCOUNT_PLATFORMS is exactly the three account writers' platforms", () => {
+  it("EXPECTED_ACCOUNT_PLATFORMS is exactly the FOUR account writers' platforms (WEBDEV-537 added tiktok)", () => {
+    // TikTok became a fourth ADF writer on 2026-07-03 and was never added here, so the
+    // completeness guard would have silently tolerated TikTok vanishing from a read —
+    // exactly what this list exists to prevent.
     expect([...EXPECTED_ACCOUNT_PLATFORMS].sort()).toEqual([
       "facebook",
       "instagram",
       "pinterest",
+      "tiktok",
     ]);
   });
 
@@ -32,6 +36,7 @@ describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard
       platformRow("instagram"),
       platformRow("facebook"),
       platformRow("pinterest"),
+      platformRow("tiktok"),
     ];
     expect(hasAllExpectedPlatforms(rows)).toBe(true);
   });
@@ -40,6 +45,11 @@ describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard
     // Simulates the Pinterest Data Refresher failing to write while the Social
     // refresher (IG/FB) succeeded: rows.length > 0 but Pinterest absent.
     const rows = [platformRow("instagram"), platformRow("facebook")];
+    expect(hasAllExpectedPlatforms(rows)).toBe(false);
+  });
+
+  it("FALSE when the TikTok writer's platform is missing — WEBDEV-537 (this read was silently ACCEPTED before)", () => {
+    const rows = [platformRow("instagram"), platformRow("facebook"), platformRow("pinterest")];
     expect(hasAllExpectedPlatforms(rows)).toBe(false);
   });
 
@@ -52,6 +62,7 @@ describe("hasAllExpectedPlatforms — account_daily_facts partial-platform guard
       platformRow("Instagram"),
       platformRow("FACEBOOK"),
       platformRow("  pinterest  "),
+      platformRow(" TikTok "),
     ];
     expect(hasAllExpectedPlatforms(rows)).toBe(true);
   });

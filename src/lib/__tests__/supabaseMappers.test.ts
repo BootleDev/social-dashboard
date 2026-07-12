@@ -396,13 +396,19 @@ describe("mapAccountDailyFactsRow — provenance / honesty model (hasRealReach/h
     expect("Follower Delta" in rec.fields).toBe(false); // null -> num(undefined)=0 downstream is intentional
   });
 
-  it("NULL-SOURCE EDGE: reach_source=null -> NO 'Reach Source' key (sparse) AND hasRealReach TRUE (ER-Type fallback is intentionally dead for ADF)", () => {
-    // Documents that the legacy ER-Type fallback in hasRealMetricSource never
-    // fires for ADF rows: with no Source key and no ER Type, it defaults to real.
-    // (No live ADF row has a null reach_source today — this is a defensive guard.)
+  it("NULL-SOURCE EDGE: reach_source=null -> NO 'Reach Source' key (sparse) AND hasRealReach FALSE (honest absence, never a false 0) — WEBDEV-537", () => {
+    // This test previously asserted hasRealReach TRUE, on the stated premise that
+    // "no live ADF row has a null reach_source today". THAT PREMISE EXPIRED on
+    // 2026-07-03: TikTok landed as a fourth writer and every one of its rows has a
+    // SQL NULL reach_source (TikTok exposes no account-level reach at source —
+    // WEBDEV-535). The old behaviour therefore summed count(null) = 0 and rendered
+    // "Reach: 0" for TikTok — a claim about reality where the truth is "no such
+    // metric". An absent Source on a provenance-carrying ADF row now means NOT real,
+    // so the row is excluded from the sum and the UI renders an em-dash, matching
+    // hasRealViews() and hasRealAccountVolume()'s own stated contract.
     const rec = mapAccountDailyFactsRow({ ...igRow, reach_source: null });
     expect("Reach Source" in rec.fields).toBe(false);
-    expect(hasRealReach(rec)).toBe(true);
+    expect(hasRealReach(rec)).toBe(false);
   });
 
   it("PERIOD_AGGREGATE: the IG rolling-30d row carries reach_source='daily_real' so it IS summed (matches Airtable) — Period Source only routes the 30d tiles", () => {

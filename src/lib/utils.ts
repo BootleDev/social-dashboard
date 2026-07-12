@@ -157,6 +157,25 @@ function hasRealMetricSource(
     return REAL_PER_DAY_VOLUME_SOURCES.has(source);
   }
 
+  // WEBDEV-537. Below here is the LEGACY fallback, and it must only ever apply to
+  // LEGACY-shaped rows. An account_daily_facts row carries explicit per-metric Source
+  // columns, so on THAT shape an absent Source means "no such metric here" — honest
+  // absence — and must render as an em-dash, never be summed as 0.
+  //
+  // The bug this fixes: account_daily_facts rows never carry an "ER Type" column at all
+  // (it isn't in ACCOUNT_DAILY_FACTS_MAP), so `if (!erType) return true` fired for every
+  // ADF row with an unset Source. TikTok is the only platform whose reach_source is SQL
+  // NULL (it has no account-level reach at source — WEBDEV-535), so its NULL reach was
+  // being counted as "real", summed, and rendered as **"Reach: 0"** — precisely what
+  // hasRealAccountVolume's docstring says this mechanism exists to prevent.
+  //
+  // Discriminator: "Snapshot Key" is present on EVERY account_daily_facts row (it is the
+  // upsert conflict key — verified 277/277 non-null in prod) and on NO legacy Daily
+  // Account Metrics row (not in DAILY_MAP). hasRealViews() already treats an absent
+  // source as not-real; this brings reach/impressions in line.
+  const isAccountDailyFactsRow = str(record.fields["Snapshot Key"]).trim().length > 0;
+  if (isAccountDailyFactsRow) return false;
+
   const erType = str(record.fields["ER Type"]).trim();
   if (!erType) return true;
   return !DERIVED_ACCOUNT_METRIC_ER_TYPES.has(erType);
