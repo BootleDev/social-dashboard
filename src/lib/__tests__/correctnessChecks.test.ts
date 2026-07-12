@@ -11,6 +11,7 @@ import {
   checkIsPostDayConsistency,
   enumerateDates,
   runAllChecks,
+  ALLOWLIST,
   type FactRow,
 } from "../correctnessChecks";
 
@@ -77,6 +78,37 @@ describe("checkCoreNonNull", () => {
   it("fails null reach or followers", () => {
     const v = checkCoreNonNull([fact({ reach: null }), fact({ followers: null }), fact({})]);
     expect(v).toHaveLength(2);
+  });
+
+  // WEBDEV-535: TikTok has no account-level reach at the source (ScrapeCreators profile =
+  // followers only), so a NULL there is honest, not a dead writer.
+  it("does NOT fail null reach on tiktok (structurally unavailable — allowlisted)", () => {
+    expect(checkCoreNonNull([fact({ platform: "tiktok", reach: null })])).toEqual([]);
+  });
+
+  // The exemption must be surgical: it buys silence on reach ONLY, and only for tiktok.
+  it("STILL fails null followers on tiktok (a dead TikTok writer must not go silent)", () => {
+    const v = checkCoreNonNull([fact({ platform: "tiktok", reach: null, followers: null })]);
+    expect(v).toHaveLength(1);
+    expect(v[0].detail).toContain("followers NULL at tiktok");
+  });
+
+  it("still fails null reach on every non-exempt platform", () => {
+    const v = checkCoreNonNull([
+      fact({ platform: "instagram", reach: null }),
+      fact({ platform: "facebook", reach: null }),
+      fact({ platform: "pinterest", reach: null }),
+    ]);
+    expect(v).toHaveLength(3);
+    expect(v.every((x) => x.check === "core-null" && x.severity === "fail")).toBe(true);
+  });
+
+  it("the tiktok reach exemption is backed by a reasoned ALLOWLIST entry", () => {
+    const entry = ALLOWLIST.find(
+      (a) => a.table === "account_daily_facts" && a.platform === "tiktok" && a.metric === "reach",
+    );
+    expect(entry).toBeDefined();
+    expect(entry!.reason).toBeTruthy();
   });
 });
 
