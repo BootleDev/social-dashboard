@@ -250,8 +250,10 @@ export function runProjection(scenario: Scenario): Projection {
  * conversions off the projection, and scales to week / month plus days-to-N.
  *
  * "How long to learn?" is the answer to the operator's A/B / data question: at
- * a small daily spend on a ~0.2% funnel, conversions trickle in, so reaching a
+ * a small daily spend on a ~1.5% funnel, conversions trickle in, so reaching a
  * readable sample can take weeks — better to know before committing budget. Pure.
+ * (Was "~0.2%" — corrected 2026-07-16, WEBDEV-601. That figure divided by
+ * Shopify's bot-inflated Sessions report and was wrong by 7–8×.)
  */
 export function forecastTraffic(
   scenario: Scenario,

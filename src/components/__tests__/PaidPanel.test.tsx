@@ -53,11 +53,18 @@ describe("PaidPanel wiring", () => {
     await renderPaid();
     // The verdict leads with a plain headline + a HOLD badge.
     expect(screen.getByText(/Don’t spend yet/)).toBeInTheDocument();
-    // Default (provisional 0.2% CVR) is below break-even → HOLD.
+    // HOLD is driven by the MEASURED rate — baseline.clickCvr (0.19%: 5 ad
+    // purchases / 2,793 clicks, January) — NOT by PROVISIONAL_SESSION_CVR.
+    // That constant is only a fallback when clickCvr is null. Before 2026-07-16
+    // both happened to be ~0.2% and this distinction was invisible; correcting
+    // the site CVR to 1.5% (WEBDEV-601) separated them. See WEBDEV-581.
     expect(screen.getByText("HOLD")).toBeInTheDocument();
-    // The canonical CPA comparison is anchored in the verdict.
-    expect(screen.getByText(/Funnel delivers/)).toBeInTheDocument();
-    expect(screen.getByText(/over the line/)).toBeInTheDocument();
+    // The canonical CPA comparison is anchored in the verdict: the modeled
+    // target (CPC ÷ site CVR) against what the measured ad funnel delivers
+    // (CPC ÷ clickCvr = 0.34/0.0019 ≈ €179).
+    expect(screen.getByText(/can only deliver/)).toBeInTheDocument();
+    // "break-even" appears in the verdict line and again in the inputs table.
+    expect(screen.getAllByText(/break-even/).length).toBeGreaterThan(0);
   });
 
   it("shows the data-freshness banner for the stale ad baseline", async () => {
@@ -82,7 +89,9 @@ describe("PaidPanel wiring", () => {
     // ("cost per sale" also appears in the verdict summary, so allow multiple).
     expect(screen.getAllByText(/cost per sale/).length).toBeGreaterThan(0);
     // Type a higher CVR; the derived cost-per-sale must recompute lower.
-    const cvrInput = screen.getByPlaceholderText("0.20") as HTMLInputElement;
+    // Placeholder tracks PROVISIONAL_SESSION_CVR — 1.50 since WEBDEV-601
+    // (was 0.20, a figure that divided by Shopify's bot-inflated sessions).
+    const cvrInput = screen.getByPlaceholderText("1.50") as HTMLInputElement;
     fireEvent.change(cvrInput, { target: { value: "2" } });
     await waitFor(() =>
       // At 2% CVR, achievable CPA = 0.34/0.02 = €17 — appears somewhere.
@@ -104,18 +113,22 @@ describe("PaidPanel wiring", () => {
     // The Projection table is collapsed by default (answer-first) — expand it so
     // the conversion figures are in the DOM.
     fireEvent.click(screen.getByText(/^Projection —/));
-    // At the default 0.2% CVR the achievable CPA is huge, so projected conversions
-    // are a fraction of one (e.g. "2.94"). Raise CVR 10× → achievable CPA drops
-    // 10× → projected conversions rise an order of magnitude (e.g. "29.41"). This
-    // is the bug under test: the projection output must reflect the CVR input in
-    // conversion-bid mode (previously a pinned CPA made it inert).
-    // Default: a sub-10 conversions figure ("N.NN") exists somewhere.
-    expect(screen.getAllByText(/^[0-9]\.[0-9]{2}$/).length).toBeGreaterThan(0);
-    const cvrInput = screen.getByPlaceholderText("0.20") as HTMLInputElement;
-    fireEvent.change(cvrInput, { target: { value: "2" } });
+    // The bug under test: the projection output must reflect the CVR input in
+    // conversion-bid mode (previously a pinned CPA made it inert). Assert it by
+    // moving CVR an order of magnitude and watching the conversions figure gain
+    // a digit.
+    //
+    // Anchored on the default (PROVISIONAL_SESSION_CVR = 1.50% since
+    // WEBDEV-601; was 0.20%). At 1.5%, achievable CPA = 0.34/0.015 ≈ €22.62, so
+    // €500 ÷ €22.62 ≈ 22 conversions — a two-digit "NN.NN".
+    expect(screen.getAllByText(/^[1-9][0-9]\.[0-9]{2}$/).length).toBeGreaterThan(0);
+    const cvrInput = screen.getByPlaceholderText("1.50") as HTMLInputElement;
+    // Raise CVR 10× → achievable CPA drops 10× → conversions gain a digit.
+    fireEvent.change(cvrInput, { target: { value: "15" } });
     await waitFor(() => {
-      // €500 ÷ €17 ≈ 29 conversions — a two-digit "NN.NN" figure now appears.
-      expect(screen.getAllByText(/^[1-9][0-9]\.[0-9]{2}$/).length).toBeGreaterThan(0);
+      // At 15%: CPA = 0.34/0.15 ≈ €2.27 → €500 ÷ €2.27 ≈ 220 — a three-digit
+      // "NNN.NN" figure now appears where none existed before.
+      expect(screen.getAllByText(/^[1-9][0-9]{2}\.[0-9]{2}$/).length).toBeGreaterThan(0);
     });
   });
 
