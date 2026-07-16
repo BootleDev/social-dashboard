@@ -493,32 +493,57 @@ export const DEFAULT_CONTRIBUTION_MARGIN = 0.5;
 
 /**
  * Provisional storefront conversion rate used as the default CVR until live GA4
- * purchase attribution is wired in (WEBDEV-103). Sourced from Shopify Analytics'
- * own funnel — sessions → completed checkout — over the trailing 90 days:
- *   5,826 human sessions → 12 completed checkouts = 0.2% (to 2026-06-17).
- * This is ALL-TRAFFIC storefront CVR (organic + direct + paid blended), NOT
- * ad-attributed; paid-only CVR may differ once ads run with live attribution.
- * It replaces the stale Jan-2026 ad-attributed CVR (a 5-conversion sample whose
- * spend ended 2026-01-22). Editable in the UI; update this constant or wire a
- * live Shopify-sessions feed to refresh.
+ * purchase attribution is wired in (WEBDEV-103).
  *
- * The funnel also shows the binding leak is sessions → add-to-cart (2.3%),
- * consistent with the PDP→ATC drop tracked in WEBDEV-149.
+ * MEASURED 2026-07-16 on the GA4 Data API (WEBDEV-601):
+ *   11 real orders / 717 GA4 sessions, trailing 30d = ~1.5%.
+ *   Band: 0.86%–2.73% (Wilson 95%, n=11). The point estimate below is a
+ *   DEFAULT, not a fact — the true value has real width at this sample size.
+ *
+ * ⚠️ NEVER refresh this from Shopify Analytics. The previous value (0.002) was
+ * read from Shopify's own funnel — "5,826 human sessions → 12 completed
+ * checkouts" — and was wrong by 7–8×. Shopify's Sessions report is bot-inflated
+ * ~2.9× vs GA4 (~2,100 vs 717 for the same window); it calls them "human"
+ * sessions but does not filter the crawlers GA4 does. Refresh from the GA4 Data
+ * API directly — and NOT from hq.ga4_daily, which undercounts sessions ~22% on
+ * settled dates (WEBDEV-602), i.e. would read CVR ~22% flattering.
+ *
+ * Numerator hygiene is mandatory: the raw Shopify count for this window was 24
+ * orders, of which 7 were cancelled zero-value staff comps, 4 zero-value drafts
+ * (Warranty / Photography Samples) and 1 from a staging domain. Only 11 real.
+ *
+ * ALL-TRAFFIC storefront CVR (organic + direct blended), NOT ad-attributed;
+ * paid-only CVR will differ once ads run with live attribution — and will run
+ * LOWER, as paid converts below organic everywhere.
  */
-export const PROVISIONAL_SESSION_CVR = 0.002;
-/** Date the PROVISIONAL_SESSION_CVR was read from Shopify Analytics. */
-export const PROVISIONAL_CVR_AS_OF = "2026-06-17";
+export const PROVISIONAL_SESSION_CVR = 0.015;
+/** Date PROVISIONAL_SESSION_CVR was measured on the GA4 Data API (NOT Shopify). */
+export const PROVISIONAL_CVR_AS_OF = "2026-07-16";
 
 /**
- * Provisional session → add-to-cart rate (~2.3%), from Shopify's storefront
- * funnel — the binding leak tracked in WEBDEV-149 (sessions → ATC is where the
- * funnel loses most people, well before checkout). Used ONLY to power the
- * "site / CRO test" feasibility read: an on-site change (e.g. a PDP tweak) is
- * judged on add-to-cart, a higher rate than purchase, so it needs far fewer
- * visitors to test than a purchase-rate change. Provisional until live GA4
- * funnel data lands; editable assumption, not a measured ad-attributed rate.
+ * Provisional session → add-to-cart rate.
+ *
+ * MEASURED 2026-07-16 on the GA4 Data API (WEBDEV-601):
+ *   58 of 708 sessions contained an add_to_cart, trailing 30d = ~8.2%.
+ *   Band: 6.39%–10.44% (Wilson 95%). Settled-only sub-window agrees: 53/567
+ *   = 9.35%. So: ~8–9%, band 6–12%.
+ *
+ * ⚠️ GRAIN: this is SESSION-scoped (sessions containing ≥1 add_to_cart), not
+ * the add_to_cart EVENT count. Events double-count sessions where a user adds
+ * more than one item — the raw event rate is 97/708 = 13.7%, ~1.7× higher and
+ * WRONG for funnel use. Never mix event-grain and session-grain rates.
+ *
+ * ⚠️ The previous value (0.023) came from Shopify's funnel and was ~3.5–4× too
+ * low. It carried the claim that sessions → ATC is "the binding leak"
+ * (WEBDEV-149). THAT DIAGNOSIS IS DEAD: at ~8–9%, add-to-cart is not the leak.
+ * The leak is downstream at cart → purchase (~14–19% completion; a range, not a
+ * point — GA4 and Shopify count different populations).
+ *
+ * Powers the "site / CRO test" feasibility read: an on-site change is judged on
+ * add-to-cart, a higher rate than purchase, so it needs far fewer visitors to
+ * test. Refresh from the GA4 Data API, never Shopify Analytics.
  */
-export const PROVISIONAL_ATC_RATE = 0.023;
+export const PROVISIONAL_ATC_RATE = 0.082;
 
 // ===========================================================================
 // Input sentinels — boundary guards (pattern ported from rateSentinel.ts)
